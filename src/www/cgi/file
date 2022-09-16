@@ -1,0 +1,92 @@
+#!/usr/bin/ruby
+require "pathname"
+
+req_path = ENV["req_param_name"]
+_file = `file -i #{req_path}`.split(":")
+file_name = _file[0]
+file_mime = _file[1]
+
+if file_mime.nil? or file_mime.include? "cannot open"
+  puts "HTTP/1.1 404 Not Found\r\n"
+  return
+end
+
+if file_mime.include? "inode/directory"
+  if ENV["req_param_opt"] == "upload"
+    if ENV["req_method"].downcase == "get"
+      puts "HTTP/1.1 200 OK\r\n"
+      puts "Content-Type: text/html; charset=utf-8\r\n"
+      puts "\r\n\r\n"
+      puts %Q|<html>
+        <title>hawk rust upload file page of [#{req_path}]</title>
+        <body>
+         <div id="files">
+          <form action="/file?name=#{req_path}&opt=upload" method="post" enctype="multipart/form-data">
+              <input type="file" name="upload_file"></input>
+              <input type="submit" value="Upload" />
+          </form>
+          </div>
+          <script>
+          </script>
+        </body>
+    </html>|
+      return
+    end
+
+    if ENV["req_method"].downcase == "post"
+      file_len = ENV["Content-Length"].to_i
+      write_len = 0
+      File::open("#{req_path}/_upload", "w") { |f|
+        begin
+          write_len += (f.write STDIN.read_nonblock 1024)
+          redo
+        rescue IO::EAGAINWaitReadable
+          f.flush
+          break if write_len == file_len
+          retry
+        rescue EOFError
+          break
+        end
+      }
+      if write_len == file_len
+        puts "HTTP/1.1 301 Move\r\n"
+        puts "Location: /file?name=#{req_path}\r\n"
+      end
+      puts "HTTP/1.1 200 OK\r\n"
+      puts "Content-Type: text/html; charset=utf-8\r\n"
+      puts "\r\n\r\n"
+      puts write_len
+      return
+    end
+  end
+  puts "HTTP/1.1 200 OK\r\n"
+  puts "Content-Type: text/html; charset=utf-8\r\n"
+  puts "\r\n\r\n"
+  puts %Q|<html>
+  <title>hawk rust file page of [#{req_path}]</title>
+  <body>
+    <div id="files">
+    <div><a href='/file?name=#{Pathname::new(req_path).parent.to_s}' >..</a></div>
+    #{`ls #{req_path}`.split("\n").map { |v| "<div><a href='/file?name=#{req_path}/#{v}' >#{v}</a></div>" }.join(" ")}
+    </div>
+    <script>
+    </script>
+  </body>
+  </html>|
+  return
+end
+
+if ENV["req_param_opt"] == "download"
+  _body = "#{`cat #{file_name}`}"
+  puts "HTTP/1.1 200 OK\r\n"
+  puts "Content-Type: application/download\r\n"
+  puts "Content-Disposition: attachment; filename=#{file_name}\r\n\r\n"
+  puts "Content-Length: #{_body.length}\r\n\r\n"
+  puts _body
+  return
+end
+
+
+puts "HTTP/1.1 200 OK\r\n"
+puts "Content-Type:#{file_mime}\r\n\r\n"
+puts "#{`cat #{file_name}`}"
