@@ -4,6 +4,8 @@ use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
+// use std::ptr::metadata;
+use std::fs::metadata;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
@@ -136,13 +138,13 @@ impl Req {
                 return String::from(req_path).replace("/", "\\");
             }
             //if cfg!(target_os = "macos" ) || cfg!(target_os = "linux") {
-            if req_path == "/" {
-                return String::from("/index");
-            }
+            // if req_path == "/" {
+            //     return String::from("/index");
+            // }
             return String::from(req_path);
         }
         return String::new();
-        }
+    }
 
         fn read_from(&self, buffer: &mut Vec<u8>) -> io::Result<usize> {
             if let Some(method) = self.headers.get("req_body_method") {
@@ -389,10 +391,18 @@ impl Req {
 
             //let script_spawn = script.spawn();
             if let Some(_) = req.headers.get("req_path") {
-                let script_path = format!(".{}", req.get_current_target()); //format!("{}{}", WDIR.read().unwrap(), req.get_current_target());
+                let mut script_path = req.get_current_target(); //format!("{}{}", WDIR.read().unwrap(), req.get_current_target());
                 info!("Req [{}]", script_path);
+
+                let script_file_path = format!("{}{}",WDIR.read().unwrap().as_str(),script_path);
+                debug!("test => {} -- {}",metadata(&script_file_path).is_ok(),&script_file_path);
+                if let Ok(file) = metadata(&script_file_path) {
+                    if file.is_dir() {
+                        script_path = format!("{}/index",script_path);
+                    }
+                }
                 debug!("EXEC [{}]", script_path);
-                let mut script = Command::new(&script_path);
+                let mut script = Command::new(format!(".{}", script_path));
                 script.current_dir(WDIR.read().unwrap().as_str());
                 script.env_clear();
                 script
@@ -400,6 +410,8 @@ impl Req {
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped());
                 //
+                
+                debug!("OS EXEC [{}][{}]",script.get_current_dir().unwrap().to_string_lossy(), script.get_program().to_string_lossy());
                 match script.spawn() {
                     Ok(mut child) => {
                         let mut _req_stdin = req.clone();
