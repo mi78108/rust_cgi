@@ -1,7 +1,7 @@
 let _storeHash = {};
 let tools = {}
 
-function log(msg) {
+function log(...msg) {
     console.log(msg)
 }
 
@@ -213,12 +213,33 @@ tools.req_urlencode = function(url, params={}) {
 }
 
 
-tools.req = function(url, params={}) {
+tools.req = function(url,method, body={}) {
     return fetch(url, {
-        method: (params['method'] || "POST"),
-        body: params['method'] == 'GET' ? undefined : JSON.stringify(Object.assign({
+        method: method,
+        body: method == 'GET' ? undefined : JSON.stringify(Object.assign({
             "_uuid_": new Date().getTime(),
-        }, params['body'])),
+        }, body)),
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+}
+
+tools.req_post = function(url, body={}) {
+    return fetch(url, {
+        method: "POST",
+        body: JSON.stringify(Object.assign({
+            "_uuid_": new Date().getTime(),
+        }, body)),
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+}
+
+tools.req_get = function(url) {
+    return fetch(url, {
+        method: "GET",
         headers: {
             'Content-Type': 'application/json'
         }

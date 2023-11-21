@@ -1,5 +1,5 @@
 //检查jquery
-window.jQuery || document.write("<script src='https://apps.bdimg.com/libs/jquery/2.1.4/jquery.min.js'></script>")
+//window.jQuery || document.write("<script src='https://apps.bdimg.com/libs/jquery/2.1.4/jquery.min.js'></script>")
 
 //
 class Xterm {
@@ -12,7 +12,8 @@ class Xterm {
         this.x = 0;
         this.y = 0;
         this.cb = cb;
-        this.tdm = tdm.get(0);
+        //this.tdm = tdm.get(0);
+        this.tdm = tdm;
         this.prompt = '> ';
 
         this.row_h = 40;
@@ -31,6 +32,7 @@ class Xterm {
         this.tb.style.color = "white";
         this.tb.style.tableLayout = "fixed";
         // this.tb.style.height = "100%";
+        this.tdm.style.overflowY = "scroll"
         this.tdm.append(this.tb);
         let self = this;
         this.firstLine = this.insertLine(null, 0, function (v) {
@@ -104,7 +106,8 @@ class Xterm {
         });
         //still bottom
         let _sh = this.tdm.scrollHeight || 1;
-        let _dh = $(this.tdm).height();
+        //let _dh = $(this.tdm).height();
+        let _dh = this.tdm.height;
         let _fh = this.tdm.scrollTop;
         if (_fh + _dh + 100 > _sh) {
             this.tdm.scrollTop = _sh;
@@ -124,15 +127,15 @@ class Row {
 
 }
 
-$.fn.extend({
-    Xterm: function (cf, cb) {
-        log(">>>>Table Init");
-        let xtm = new Xterm(this);
-        xtm.prompt = cf.prompt;
-        xtm.cb = cb;
-        return xtm;
-    },
-    log: function (m) {
-        console.log(m)
-    }
-});
+// $.fn.extend({
+//     Xterm: function (cf, cb) {
+//         log(">>>>Table Init");
+//         let xtm = new Xterm(this);
+//         xtm.prompt = cf.prompt;
+//         xtm.cb = cb;
+//         return xtm;
+//     },
+//     log: function (m) {
+//         console.log(m)
+//     }
+// });
