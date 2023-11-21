@@ -1,0 +1,16 @@
+#!/usr/bin/ruby
+require "pathname"
+
+if ENV["req_method"].downcase == "get"
+  file_path = Pathname.new(".#{ENV["req_path"]}/home_page.html")
+  print "HTTP/1.1 200 OK\r\n"
+  print "Content-Type: text/html; charset=utf-8\r\n"
+  print "Content-Length: #{file_path.size}\r\n"
+  print "\r\n"
+  File::open(file_path, "r") { |f| print f.read }
+  return
+end
+
+print "HTTP/1.1 200 OK\r\n"
+print "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+print "CGI Exit Nothing Happend"
