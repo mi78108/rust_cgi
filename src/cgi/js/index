@@ -11,7 +11,7 @@ if ENV["req_method"].downcase == "get"
   end
   file_path = Pathname.new(".#{ENV["req_path"]}/#{file_name}")
   file_size = 14
-  if file_path.exist?
+  if file_path.exist? and file_path.file?
     file_size = file_path.size
   end
 

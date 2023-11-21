@@ -1,5 +1,6 @@
 #!/usr/bin/ruby
 require "pathname"
+require "json"
 
 if ENV["req_method"].downcase == "get"
   file_path = Pathname.new(".#{ENV["req_path"]}/home_page.html")
@@ -8,6 +9,16 @@ if ENV["req_method"].downcase == "get"
   print "Content-Length: #{file_path.size}\r\n"
   print "\r\n"
   File::open(file_path, "r") { |f| print f.read }
+  return
+end
+
+if ENV["req_method"].downcase == "post"
+  body = `ls -lh ./`.split("\n").map { |v| v.split }.map.with_index { |v, i| { "index": i, "name": v[8], "size": v[4], "mime": `file -I #{v[8]} | cut -d':' -f2`.chop } }.to_json()
+  print "HTTP/1.1 200 OK\r\n"
+  print "Content-Type: application/json; charset=utf-8\r\n"
+  print "Content-Length: #{body.size}\r\n"
+  print "\r\n"
+  print body
   return
 end
 
