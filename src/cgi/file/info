@@ -1,0 +1,36 @@
+#!/usr/bin/ruby
+require "pathname"
+require "json"
+
+if ENV["req_method"].downcase == "get"
+  file_name = ENV["req_param_name"]
+  if file_name.nil? or file_name.empty?
+    file_name = ENV["req_param_f"]
+  end
+  file_path = Pathname.new("./file/#{file_name}")
+  file_size = 14
+  if file_path.exist?
+    file_size = file_path.size
+  end
+
+  print "HTTP/1.1 200 OK\r\n"
+  print "Content-Type: application/javascript; charset=utf-8\r\n"
+  print "Content-Length: #{file_size}\r\n"
+  #print "Debug: #{`pwd`}\r\n"
+  print "\r\n"
+  if file_path.exist?
+    if file_path.file?
+      print file_path
+    end
+  else
+    print "File Not Found"
+  end
+  return
+end
+
+print "HTTP/1.1 200 OK\r\n"
+print ENV.each do |v|
+  print "#{v}: #{ENV[v]}\r\n"
+end
+print "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+print "CGI Exit Nothing Happend"
