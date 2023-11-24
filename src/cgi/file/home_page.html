@@ -21,15 +21,21 @@
             btn.innerText = "info"
             btn.className = "btn_info"
             btn.name = "info_" + f.index
-            btn.setAttribute("fname",f.name)
+            btn.setAttribute("fname", f.name)
             li.appendChild(btn);
             return li.outerHTML
         }).join(""))
 
-        document.querySelectorAll(".btn_info").forEach(v => v.addEventListener("click", ev => {
-            let name = ev.target.getAttribute("fname")
-            log(name)
-        }))
+        document.querySelectorAll(".btn_info").forEach(v => {
+            v.addEventListener("click", ev => {
+                let name = ev.target.getAttribute("fname")
+                log("oc",name)
+            })
+            v.addEventListener("dblclick",ev =>{
+                let name = ev.target.getAttribute("fname")
+                log("db",name)
+            })
+        })
     })
 
 
