@@ -5,37 +5,39 @@ function log(...msg) {
     console.log(msg)
 }
 
-tools.dialog = function(cb,menu){
+/**
+ *
+ * @param title_name
+ * @param cb
+ * (content,dig,close,title,...menus)=>{
+ *  }
+ * @param menu
+ * ([{
+ *      title: '关闭',
+ *      hotKey: 'X', //ctrl + x
+ *      onclick : (ev,span,content) =>{
+ *          ...
+ *      }
+ *  }]
+ */
+tools.dialog = function(title_name,cb,menu){
     let menus = []
     let width = 60
     let dig = document.createElement("div");
+    //fix 25/03/27
+    dig.tabIndex = 0
+
     dig.style.width = width + "%"
     dig.style.height = "60%"
     dig.style.border="2px solid black" 
     dig.style.position = "fixed"
     dig.style.left = (100-width) / 2 + "%" 
     dig.style.top = "17%" 
-    // hotkey
-    dig.addEventListener("keydown", function(ev) {
-        //console.log(' >> dialog key up',ev)
-        if(ev.ctrlKey){
-            if(menu.some((k,i)=>{
-                if(k['hotKey'] == ev.key){
-                    //if(ev.ctrlKey){
-                    menus[i].onclick(ev)
-                    return true
-                    //}
-                }
-                return false
-            })){
-                ev.preventDefault()
-            }
-        }
-    });
 
-    let title = document.createElement("div");
+
+    let head = document.createElement("div");
     let close = document.createElement("span");
-    let name = document.createElement("span");
+    let title = document.createElement("span");
     close.innerHTML = "[X]"
     close.style.color="white"
     close.style.position = "absolute"
@@ -45,18 +47,18 @@ tools.dialog = function(cb,menu){
         console.log(' >>dialog close btn click')
         dig.remove()
     }
-    name.innerHTML = "Dialog"
-    name.style.color="white"
+    title.innerHTML = title_name? title_name : "Dialog"
+    title.style.color="white"
     //name.style.position = "absolute"
-    name.style.left = "3px"
-    title.style.width = "100%"
-    title.style.height = "30px"
-    title.style.border="1px solid black" 
-    title.style.backgroundColor = "black"
-    title.style.cursor = "move"
-    title.appendChild(name)
+    title.style.left = "3px"
+    head.style.width = "100%"
+    head.style.height = "30px"
+    head.style.border="1px solid black"
+    head.style.backgroundColor = "black"
+    head.style.cursor = "move"
+    head.appendChild(title)
     // move
-    title.onmousedown = (ev)=>{
+    head.onmousedown = (ev)=>{
         if (ev.button == 0){
             let x = ev.clientX;
             let y = ev.clientY;
@@ -92,10 +94,27 @@ tools.dialog = function(cb,menu){
                 v['onclick'] && v['onclick'](ev,_m,content)
             }
             menus.push(_m)
-            title.appendChild(_m)
+            head.appendChild(_m)
         })
     }
-    title.appendChild(close)
+    head.appendChild(close)
+    // hotkey
+    dig.addEventListener("keydown", function(ev) {
+        console.log(' >> dialog key up',ev)
+        if(ev.ctrlKey){
+            if(menu.some((k,i)=>{
+                if(k['hotKey'] == ev.key){
+                    //if(ev.ctrlKey){
+                    menus[i].onclick(ev)
+                    return true
+                    //}
+                }
+                return false
+            })){
+                ev.preventDefault()
+            }
+        }
+    });
 
     content.style.width = "calc(100% - 5px)"
     content.style.height = "calc(100% - 35px)"
@@ -138,10 +157,12 @@ tools.dialog = function(cb,menu){
         }
     }
 
-    dig.appendChild(title)
+    dig.appendChild(head)
     dig.appendChild(content)
     window.document.body.appendChild(dig)
-    cb && cb(content,name,close,dig,...menus)
+    //fix 25/03/27
+    dig.focus()
+    cb && cb(content,dig,close,title,...menus)
 }
 
 tools.dialog_input = function(cb,cfg={}){
@@ -226,6 +247,7 @@ tools.req = function(url,method, body={}) {
 }
 
 tools.req_post = function(url, body={}) {
+    console.log(body)
     return fetch(url, {
         method: "POST",
         body: JSON.stringify(Object.assign({
@@ -244,6 +266,30 @@ tools.req_get = function(url) {
             'Content-Type': 'application/json'
         }
     })
+}
+
+tools.upload_file_post = function (file,url){
+    return fetch(url,{
+        method: 'POST',
+        body: file,
+        headers: {
+            'Upload-File-Name': file.name
+        }
+    })
+}
+
+tools.upload_file_formData = function (file, url){
+    //formData
+    let formData = new FormData();
+    formData.append('file',file)
+    return fetch(url,{
+        method: 'POST',
+        body: formData
+    })
+}
+
+tools.upload_file_websocket = function (){
+
 }
 
 
