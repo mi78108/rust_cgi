@@ -462,7 +462,7 @@ fn handle(stream: TcpStream) {
                         }
                     });
                     //
-                    if let Some(mut stdin) = script_stdin {
+                     if let Some(mut stdin) = script_stdin {
                         let mut recv_len = 0;
                         let mut buffer = Vec::new();
                         //let _read = _req_stdin.read_from(&mut buffer);
@@ -490,12 +490,13 @@ fn handle(stream: TcpStream) {
                                 {
                                     if let Ok(length) = content_length.parse::<usize>() {
                                         if length == recv_len {
+                                            debug!("script stdin write done {:?}; break", length);
                                             break;
                                         }
                                     }
                                 }
                             } else {
-                                debug!("tcpstream read data len 0; break");
+                                debug!("tcpStream read data len 0; break");
                                 break;
                             }
                         }
