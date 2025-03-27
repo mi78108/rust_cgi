@@ -6,6 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 // use std::ptr::metadata;
 use std::fs::metadata;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
@@ -106,7 +107,7 @@ impl Req {
                         let sha1_key = hasher.finalize();
                         let sec_websocket_accept = encode(sha1_key);
                         // switch resp
-                        let resp = format!("HTTP/1.1 101 SWITCH\r\nServer: Hawk web\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {}\r\n\r\n",sec_websocket_accept);
+                        let resp = format!("HTTP/1.1 101 SWITCH\r\nServer: Hawk web\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {}\r\n\r\n", sec_websocket_accept);
                         if let Ok(_) = writer.write(resp.as_bytes()) {
                             if let Ok(_) = writer.flush() {
                                 //websocket
@@ -161,7 +162,7 @@ impl Req {
                         }
                     }
                     //return Ok(0);
-                    return Err(io::Error::new(io::ErrorKind::Other, "No Content-Lengt"));
+                    return Err(io::Error::new(io::ErrorKind::Other, "No Content-Length"));
                 }
                 _ => {
                     return Err(io::Error::new(
@@ -185,7 +186,7 @@ impl Req {
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Unknow req_body_method {}", method),
+                        format!("Unknown req_body_method {}", method),
                     ))
                 }
             }
@@ -414,7 +415,6 @@ fn handle(stream: TcpStream) {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped());
             //
-
             debug!(
                 "OS EXEC [{}][{}]",
                 script.get_current_dir().unwrap().to_string_lossy(),
@@ -428,26 +428,26 @@ fn handle(stream: TcpStream) {
                     let script_stdin = child.stdin.take();
                     let script_stdout = child.stdout.take(); //= child.stdout;                  //
 
+                    //TRANS
+                    //读取脚本返回，传送给前端
+                    //未使用流, 方便细节控制
                     let _stdout_thread = std::thread::spawn(move || {
                         if let Some(mut stdout) = script_stdout {
-                            let mut buffer = [0; 1024];
+                            let mut buffer = [0; 10240];
                             while let Ok(len) = stdout.read(&mut buffer) {
-                                debug!(
-                                    "script stdout read len [{}] [{:?}]",
-                                    len,
-                                    String::from_utf8_lossy(&buffer[..len])
-                                );
+                                debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                                 //debug!("script stdout read len [{}]", len);
                                 if len > 0 {
-                                    if let Err(e) = _req_stdout.send_to(&buffer[..len]) {
-                                        error!("script stdout send_to {:?}; break", e);
+                                    if let Err(e) = _req_stdout.send(&buffer[..len]) {
+                                        error!("script stdout send_to tcpStream  erro {:?}; break", e);
                                         break;
                                     }
                                     if let Err(e) = _req_stdout.flush() {
-                                        error!("script stdout read {:?}; break", e);
+                                        error!("script stdout send_to tcpStream flush erro {:?}; break", e);
                                         break;
                                     }
                                 } else {
+                                    // 正常退出， 脚本退出后读取不到
                                     debug!("script stdout read data len 0; break");
                                     // todo
                                     break;
@@ -455,47 +455,47 @@ fn handle(stream: TcpStream) {
                             }
                         }
                         debug!("script stdout read thread end");
-                        debug!("close the tcpStream");
                         //std::thread::sleep(std::time::Duration::new(2,0));
                         if let Err(e) = _req_stdout.close() {
-                            error!("script stdout close the tcpStream {:?}; break", e);
+                            error!("script stdout read close the tcpStream erro {:?}; break", e);
                         }
+                        debug!("tcpStream closed");
                     });
-                    //
-                     if let Some(mut stdin) = script_stdin {
+                    //TRANS
+                    // 读取请求，并传递给脚本程序
+                    if let Some(mut stdin) = script_stdin {
                         let mut recv_len = 0;
-                        let mut buffer = Vec::new();
-                        //let _read = _req_stdin.read_from(&mut buffer);
-                        while let Ok(len) = _req_stdin.read_from(&mut buffer) {
-                            //debug!("tcpStream read len [{}]", len);
+                        let mut content_length: usize = 0;
+                        let mut buffer = [0; 10240];
+                        // Content-Length 必须是必须字段
+                        if let Some(content_length_string) = _req_stdin.headers.get("Content-Length") {
+                            if let Ok(length) = content_length_string.parse::<usize>() {
+                                content_length = length;
+                            }
+                        }
+                        // 按缓存读取内容，避免内存溢出
+                        // 不适合使用流; 无法判断数据结束
+                        // 根据Content-Length判断数据结束
+                        while let Ok(len) = _req_stdin.recv(&mut buffer) {
                             recv_len += len;
                             if len > 0 {
-                                debug!(
-                                    "script stdin write [{}] [{}]",
-                                    len,
-                                    String::from_utf8_lossy(&buffer[..len])
-                                );
-                                //debug!("script stdin write [{}]",len);
-
+                                debug!("tcpStream read len [{}]",len);
                                 if let Err(e) = stdin.write(&buffer[..len]) {
                                     error!("script stdin write {:?} break", e);
                                     break;
                                 }
+                                debug!("script stdin write [{}]",len);
                                 if let Err(e) = stdin.flush() {
-                                    error!("script stdin flush {:?}; break", e);
+                                    error!("script stdin flush erro {:?}; break", e);
                                     break;
                                 }
-                                if let Some(content_length) =
-                                    _req_stdin.headers.get("Content-Length")
-                                {
-                                    if let Ok(length) = content_length.parse::<usize>() {
-                                        if length == recv_len {
-                                            debug!("script stdin write done {:?}; break", length);
-                                            break;
-                                        }
-                                    }
+                                if content_length == recv_len {
+                                    // 正常退出
+                                    debug!("script stdin write done; content_length {:?}; break", content_length);
+                                    break;
                                 }
                             } else {
+                                // todo 意外情况
                                 debug!("tcpStream read data len 0; break");
                                 break;
                             }
