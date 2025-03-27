@@ -433,7 +433,7 @@ fn handle(stream: TcpStream) {
                     //未使用流, 方便细节控制
                     let _stdout_thread = std::thread::spawn(move || {
                         if let Some(mut stdout) = script_stdout {
-                            let mut buffer = [0; 10240];
+                            let mut buffer = [0; 102400];
                             while let Ok(len) = stdout.read(&mut buffer) {
                                 debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                                 //debug!("script stdout read len [{}]", len);
@@ -466,13 +466,14 @@ fn handle(stream: TcpStream) {
                     if let Some(mut stdin) = script_stdin {
                         let mut recv_len = 0;
                         let mut content_length: usize = 0;
-                        let mut buffer = [0; 10240];
+                        let mut buffer = [0; 102400];
                         // Content-Length 必须是必须字段
                         if let Some(content_length_string) = _req_stdin.headers.get("Content-Length") {
                             if let Ok(length) = content_length_string.parse::<usize>() {
                                 content_length = length;
                             }
                         }
+                        // todo chunked
                         // 按缓存读取内容，避免内存溢出
                         // 不适合使用流; 无法判断数据结束
                         // 根据Content-Length判断数据结束

@@ -5,12 +5,39 @@ function log(...msg) {
     console.log(msg)
 }
 
+tools.anime_blink = function (target, frame, time, cb_begin, cb_end) {
+    cb_end && cb_end()
+    let count = 0;
+    let int = setInterval(() => {
+        if (document.body.contains(target)) {
+            count += 1;
+            if (count % 2 === 0) {
+                cb_begin && cb_begin()
+            } else {
+                cb_end && cb_end()
+            }
+        }else {
+            clearInterval(int)
+        }
+    }, frame)
+
+    if (time > 0) {
+        setTimeout(() => {
+            clearInterval(int)
+        }, time)
+    }
+    return () => {
+        clearInterval(int)
+    }
+}
+
+
 /**
  *
- * @param title_name
  * @param cb
  * (content,dig,close,title,...menus)=>{
  *  }
+ * @param title_name
  * @param menu
  * ([{
  *      title: '关闭',
@@ -20,7 +47,7 @@ function log(...msg) {
  *      }
  *  }]
  */
-tools.dialog = function(title_name,cb,menu){
+tools.dialog = function (cb, title_name, menu) {
     let menus = []
     let width = 60
     let dig = document.createElement("div");
@@ -29,48 +56,48 @@ tools.dialog = function(title_name,cb,menu){
 
     dig.style.width = width + "%"
     dig.style.height = "60%"
-    dig.style.border="2px solid black" 
+    dig.style.border = "2px solid black"
     dig.style.position = "fixed"
-    dig.style.left = (100-width) / 2 + "%" 
-    dig.style.top = "17%" 
+    dig.style.left = (100 - width) / 2 + "%"
+    dig.style.top = "17%"
 
 
     let head = document.createElement("div");
     let close = document.createElement("span");
     let title = document.createElement("span");
     close.innerHTML = "[X]"
-    close.style.color="white"
+    close.style.color = "white"
     close.style.position = "absolute"
     close.style.right = "3px"
     close.style.cursor = "pointer"
-    close.onclick = function(ev){
+    close.onclick = function (ev) {
         console.log(' >>dialog close btn click')
         dig.remove()
     }
-    title.innerHTML = title_name? title_name : "Dialog"
-    title.style.color="white"
+    title.innerHTML = title_name ? title_name : "Dialog"
+    title.style.color = "white"
     //name.style.position = "absolute"
     title.style.left = "3px"
     head.style.width = "100%"
     head.style.height = "30px"
-    head.style.border="1px solid black"
+    head.style.border = "1px solid black"
     head.style.backgroundColor = "black"
     head.style.cursor = "move"
     head.appendChild(title)
     // move
-    head.onmousedown = (ev)=>{
-        if (ev.button == 0){
+    head.onmousedown = (ev) => {
+        if (ev.button === 0) {
             let x = ev.clientX;
             let y = ev.clientY;
             let oL = dig.offsetLeft;
             let oT = dig.offsetTop;
-            document.onmousemove = function(e){
+            document.onmousemove = function (e) {
                 let xx = e.clientX;
                 let yy = e.clientY;
-                dig.style.left = xx-x+oL+"px"
-                dig.style.top = yy-y+oT+"px"
+                dig.style.left = xx - x + oL + "px"
+                dig.style.top = yy - y + oT + "px"
             }
-            document.onmouseup = function(){
+            document.onmouseup = function () {
                 document.onmousemove = null;
                 document.onmouseup = null;
             }
@@ -78,20 +105,21 @@ tools.dialog = function(title_name,cb,menu){
     }
     //menu
     let content = document.createElement("div");
-    if(menu){
-        menu.forEach((v,i)=>{
+    if (menu) {
+        menu.forEach((v, i) => {
             let _m = document.createElement("span");
             _m.className = "cursor_point"
             _m.style.cursor = "pointer"
-            _m.innerHTML = "["+v['title']+"]"
+            _m.innerHTML = "[" + v['title'] + "]"
+            v['tips'] && (_m.title = v['tips'])
             _m.style.color = "white"
             //	_m.style.position = "absolute"
             _m.style.marginLeft = "5px"
-            if( i == 0){
+            if (i == 0) {
                 _m.style.marginLeft = "25px"
             }
             _m.onclick = (ev) => {
-                v['onclick'] && v['onclick'](ev,_m,content)
+                v['onclick'] && v['onclick'](ev, _m, content)
             }
             menus.push(_m)
             head.appendChild(_m)
@@ -99,33 +127,34 @@ tools.dialog = function(title_name,cb,menu){
     }
     head.appendChild(close)
     // hotkey
-    dig.addEventListener("keydown", function(ev) {
-        console.log(' >> dialog key up',ev)
-        if(ev.ctrlKey){
-            if(menu.some((k,i)=>{
-                if(k['hotKey'] == ev.key){
+    dig.addEventListener("keydown", function (ev) {
+        console.log(' >> dialog key up', ev)
+        if (ev.ctrlKey) {
+            if (menu.some((k, i) => {
+                if (k['hotKey'] === ev.key) {
                     //if(ev.ctrlKey){
                     menus[i].onclick(ev)
                     return true
                     //}
                 }
                 return false
-            })){
+            })) {
                 ev.preventDefault()
             }
         }
     });
 
-    content.style.width = "calc(100% - 5px)"
-    content.style.height = "calc(100% - 35px)"
-    content.style.overflowY = "auto"
-    content.style.paddingLeft = "5px"
+    content.style.width = "calc(100% - 0px)"
+    content.style.height = "calc(100% - 32px)"
+    //content.style.overflowY = "auto"
+    content.style.overflowY = "hidden"
+    //content.style.paddingLeft = "5px"
     //content.style.paddingBottom = "5px"
     content.style.backgroundColor = "white"
     // size
-    content.onmousedown = (ev)=>{
+    content.onmousedown = (ev) => {
         // Todo 无法判断右键单击或者右键拖拽; 目前保留拖拽功能右键单击失效
-        if(ev.button == 2){
+        if (ev.button === 2) {
             let x = ev.clientX;
             let y = ev.clientY;
             //let oW = dig.offsetWidth;
@@ -134,21 +163,21 @@ tools.dialog = function(title_name,cb,menu){
             let oT = dig.offsetTop;
             let flags = true
             content.style.cursor = "se-resize"
-            document.oncontextmenu = ()=>false
-            document.onmousemove = function(e){
+            document.oncontextmenu = () => false
+            document.onmousemove = function (e) {
                 flags = false
                 let xx = e.clientX;
                 let yy = e.clientY;
-                dig.style.width = xx-oL+30+"px"
-                dig.style.height = yy-oT+30+"px"
+                dig.style.width = xx - oL + 30 + "px"
+                dig.style.height = yy - oT + 30 + "px"
             }
-            document.onmouseup = function(e){
-                if(flags){
-                   document.oncontextmenu = ()=>true
-                }else{
-                    setTimeout(function(){
-                        document.oncontextmenu = ()=>true
-                    },1000)
+            document.onmouseup = function (e) {
+                if (flags) {
+                    document.oncontextmenu = () => true
+                } else {
+                    setTimeout(function () {
+                        document.oncontextmenu = () => true
+                    }, 1000)
                 }
                 content.style.cursor = "text"
                 document.onmousemove = null;
@@ -159,19 +188,19 @@ tools.dialog = function(title_name,cb,menu){
 
     dig.appendChild(head)
     dig.appendChild(content)
+    cb && cb(content, dig, close, title, ...menus)
     window.document.body.appendChild(dig)
     //fix 25/03/27
     dig.focus()
-    cb && cb(content,dig,close,title,...menus)
 }
 
-tools.dialog_input = function(cb,cfg={}){
-    tools.dialog((c,n,e,d)=>{
+tools.dialog_input = function (cfg = {}, cb, dialog_cb) {
+    tools.dialog((c, d, x, t, ...m) => {
         let ip = document.createElement('input')
-        cfg['title'] && (n.innerHTML = cfg['title'])
+        cfg['title'] && (t.innerHTML = cfg['title'])
         ip.style.width = "100%"
         ip.style.height = "30px"
-        ip.addEventListener("keyup", function(event) {
+        ip.addEventListener("keyup", function (event) {
             event.preventDefault();
             if (event.keyCode === 13) {
                 d.remove()
@@ -181,52 +210,143 @@ tools.dialog_input = function(cb,cfg={}){
         });
         c.appendChild(ip)
         ip.focus()
-        c.style.height="32px"
+        c.style.height = "32px"
         c.style.padding = "3px"
-        d.style.width="40%"
-        d.style.height="70px"
-        d.style.top="47%"
-        d.style.left="30%"
+        d.style.width = "40%"
+        d.style.height = "70px"
+        d.style.top = "47%"
+        d.style.left = "30%"
+
+        dialog_cb && dialog_cb(c, d, x, t, ...m)
     })
 }
 
-tools.dialog_tips = function(cfg={}){
-    cfg = Object.assign({timeout:2000},cfg)
-    tools.dialog((c,n,e,d)=>{
+/**
+ * @param cfg
+ * ({
+ *     title: '',
+ *     content: '',
+ *     timeout: 0
+ * })
+ * @param cb 是否定时关闭tips true关闭 默认定时关闭
+ * @param dialog_cb
+ */
+tools.dialog_tips = function (cfg, cb, dialog_cb) {
+    cfg = Object.assign({timeout: 2000}, cfg)
+    tools.dialog((c, d, x, t, ...m) => {
         let ip = document.createElement('textarea')
         ip.style.width = "100%"
         ip.style.height = "100%"
         ip.style.resize = "none"
         ip.style.overflow = "hidden"
-        ip.readOnly =true
-        cfg['title'] && (n.innerHTML = cfg['title'])
+        ip.readOnly = true
+        cfg['title'] && (t.innerHTML = cfg['title'])
         cfg['content'] && (ip.value = cfg['content'])
 
         c.appendChild(ip)
-        c.style.height="69px"
-        c.style.width="100%"
+        c.style.height = "69px"
+        c.style.width = "100%"
         c.style.padding = "0px"
-        d.style.width="30%"
-        d.style.height="100px"
-        d.style.top="40%"
-        d.style.left="35%"
+        d.style.width = "30%"
+        d.style.height = "100px"
+        d.style.top = "40%"
+        d.style.left = "35%"
 
-        setTimeout(()=>{
-            d.remove()
-        },cfg['timeout'])
+        dialog_cb && dialog_cb(c, d, x, t, ...m)
+
+        setTimeout(() => {
+            if (cb === undefined || cb(d) === true) {
+                d.remove()
+            }
+        }, cfg['timeout'])
     })
 }
 
+/**
+ * @param cfg
+ * ({
+ *     title: '',
+ *     content: '',
+ *     timeout: 0
+ * })
+ */
+tools.dialog_progress = function (cfg) {
+    let progress = {}
+    tools.dialog((c, d, x, t, ...m) => {
+        //样式
+        x.style.visibility = 'hidden '
+        t.style.removeProperty('left')
+        t.style.display = 'inline-block'
+        t.style.overflow = 'hidden'
+        t.style.textOverflow = 'ellipsis'
+        t.style.whiteSpace = 'nowrap'
+        t.style.width = '80%'
+        t.style.height = '80%'
+        d.style.textAlign = 'center'
+        d.style.width = '320px'
+        d.style.height = '240px'
+        // 样式一 >>>>>
 
-tools.req_urlencode = function(url, params={}) {
+        let div = document.createElement('div')
+        // div.style.display = 'flex'
+        // div.style.flexDirection = 'column'
+        // div.style.justifyContent = 'center'
+        div.style.display = 'grid'
+        div.style.placeItems = 'center'
+        div.style.backgroundColor = 'green'
+        div.style.height = '100%';
+        div.style.width = '0%'
+        div.innerText = '0%'
+
+        progress.update = function (n) {
+            div.style.width = n + '%'
+            div.innerText = n + '%'
+        }
+
+        progress.close = function () {
+            d.remove()
+        }
+
+        progress.done = function () {
+            setTimeout(() => {
+                d.remove()
+            }, 3000)
+        }
+        progress.error = function (msg) {
+            t.innerText = t.innerText.replace('进度','失败')
+            div.append(' ['+msg+']')
+            div.style.backgroundColor = 'red'
+            x.style.removeProperty('visibility')
+            tools.anime_blink(div, 500, 0, () => {
+                div.style.backgroundColor = 'red'
+            }, () => {
+                div.style.backgroundColor = 'white'
+            })
+        }
+
+        progress.dom = div;
+        // 样式二 环形
+        // let cvs = document.createElement('canvas');
+        // let ctx = cvs.getContext('2d')
+        // cvs.style.height = '100%'
+        // cvs.style.width = '100%'
+        // cvs.style.backgroundColor = 'red'
+
+        c.appendChild(div)
+    }, cfg['title'] ? cfg['title'] : '进度条')
+    return progress;
+}
+
+
+tools.req_url_encode = function (url, params = {}) {
     return fetch(url, {
         method: (params['method'] || "POST"),
-        body: params['method'] == 'GET' ? undefined : Object.entries(Object.assign({
+        body: params['method'] === 'GET' ? undefined : Object.entries(Object.assign({
             "_uuid_": new Date().getTime(),
         }, params['body'])).reduce((a, c) => {
             a.push(encodeURIComponent(c[0]) + '=' + encodeURIComponent(c[1]))
             return a
-        }, new Array()).join('&'),
+        }, []).join('&'),
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
         }
@@ -234,21 +354,20 @@ tools.req_urlencode = function(url, params={}) {
 }
 
 
-tools.req = function(url,method, body={}) {
-    return fetch(url, {
-        method: method,
-        body: method == 'GET' ? undefined : JSON.stringify(Object.assign({
-            "_uuid_": new Date().getTime(),
-        }, body)),
-        headers: {
-            'Content-Type': 'application/json'
-        }
+tools.req = function (url, ext) {
+    return fetch(url, Object.assign({
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }, ext)
+    ).then(resp => {
+        return resp.text()
     })
 }
 
-tools.req_post = function(url, body={}) {
-    console.log(body)
-    return fetch(url, {
+tools.req_post = function (url, body = {}) {
+    return tools.req(url, {
         method: "POST",
         body: JSON.stringify(Object.assign({
             "_uuid_": new Date().getTime(),
@@ -259,8 +378,8 @@ tools.req_post = function(url, body={}) {
     })
 }
 
-tools.req_get = function(url) {
-    return fetch(url, {
+tools.req_get = function (url) {
+    return tools.req(url, {
         method: "GET",
         headers: {
             'Content-Type': 'application/json'
@@ -268,27 +387,73 @@ tools.req_get = function(url) {
     })
 }
 
-tools.upload_file_post = function (file,url){
-    return fetch(url,{
+tools.upload_file_post = function (file, url) {
+    return tools.req(url, {
         method: 'POST',
         body: file,
         headers: {
             'Upload-File-Name': file.name
+        },
+        onprogress: (event) => {
+            const progressPercentage = Math.round((event.loaded / event.total) * 100);
+            console.log(`上传进度: ${progressPercentage}%`);
         }
     })
 }
+tools.upload_file_post_progress = function (file, url, cb) {
+    return new Promise((resolve, reject) => {
+        if (cb === undefined) {
+            // 默认行为
+            cb = tools.dialog_progress({
+                title: '上传进度 (' + file.name + ')'
+            })
+        }
+        let xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        // 设置请求的头部
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('Upload-File-Name', file.name);
+        // 监听上传进度事件
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                let progressPercentage = Math.round((event.loaded / event.total) * 100);
+                if (cb['update']) {
+                    cb.update(progressPercentage.toFixed(2))
+                } else {
+                    cb(progressPercentage.toFixed(2))
+                }
+                //console.log(`Upload progress: ${progressPercentage.toFixed(2)}%`);
+            }
+        };
 
-tools.upload_file_formData = function (file, url){
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                (cb && cb['done'] && cb.done())
+                resolve(xhr.response);
+            } else {
+                (cb && cb['error'] && cb.error('服务器响应失败'))
+                reject(new Error('Failed to upload file'));
+            }
+        };
+        xhr.onerror = () => {
+            (cb && cb['error'] && cb.error('服务器网路链接失败'))
+            reject(new Error('Network error'))
+        };
+        xhr.send(file);
+    })
+}
+
+tools.upload_file_formData = function (file, url) {
     //formData
     let formData = new FormData();
-    formData.append('file',file)
-    return fetch(url,{
+    formData.append('file', file)
+    return tools.req(url, {
         method: 'POST',
         body: formData
     })
 }
 
-tools.upload_file_websocket = function (){
+tools.upload_file_websocket = function () {
 
 }
 
@@ -334,9 +499,9 @@ function get_local_video(id) {
     video.style.right = '10px';
     video.style.top = '10px';
     video.style.zIndex = '999';
-    video.style.border='thick solid #0000FF';
-    video.take_photo = function(){
-    }	
+    video.style.border = 'thick solid #0000FF';
+    video.take_photo = function () {
+    }
     video.onmousedown = function (ev_d) {
         video.onmousemove = function (ev_m) {
             video.style.left = (ev_m.clientX - ev_d.layerX) + 'px';
@@ -434,7 +599,7 @@ function copyToclip(txt) {
 }
 
 
-function preventAll(ev){
+function preventAll(ev) {
     ev.preventDefault()
     ev.stopPropagation()
 }
