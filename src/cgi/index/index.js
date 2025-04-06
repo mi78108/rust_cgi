@@ -1,34 +1,40 @@
 #!/usr/bin/node
 let fs = require('fs')
-let { exec } = require('child_process')
+let {exec} = require('child_process')
 
-if(process.env['req_body_method'] == 'WEBSOCKET'){
+if (process.env['req_body_method'] == 'WEBSOCKET') {
     let uid = process.pid
-    process.stdin.on('readable',()=>{
+    process.stdin.on('readable', () => {
         let data = process.stdin.read()
-        if(data){
-            console.error(`>>> [${uid}] req_body`,data.toString())
-            process.stdout.write('Resp: '+data.toString())
+        if (data) {
+            console.error(`>>> [${uid}] req_body`, data.toString())
+            process.stdout.write('Resp: ' + data.toString())
         }
+    })
+    process.stdin.on('end',()=>{
+        console.error(`>>> [${uid}] ended`)
+        process.exit()
     })
 
 
-    Array.from(["uncaughtException","SIGTERM"]).forEach(sig =>{
-        process.on(sig, (code)=>{
-            console.error('>>> ',uid,'disconnected');
+    Array.from(["uncaughtException", "SIGTERM"]).forEach(sig => {
+        process.on(sig, (code) => {
+            console.error('>>> ', uid, 'disconnected');
             // 断开
             process.exit()
         });
     })
 
-}else{
-    if (process.env['req_method'] == 'POST'){
+}
+if(process.env['req_body_method'] == 'HTTP') {
+    if (process.env['req_method'] == 'POST') {
         let len = parseInt(process.env['Content-Length']);
-                console.error(">>>>>>>>>>>>>>>>>>>>post len"+len)
-        process.stdin.on('readable',()=>{
+        console.error(">>>>>>>>>>>>>>>>>>>>post len" + len)
+        //process.stdin.on('readable', () => {
+            process.stdin.on('data', () => {
             let data = process.stdin.read()
-            if(data){
-                console.error(">>>>>>>>>>>>>>>>>>>>post "+data)
+            if (data) {
+                console.error(">>>>>>>>>>>>>>>>>>>>post " + data)
                 process.exit(0)
             }
         })

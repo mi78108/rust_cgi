@@ -4,22 +4,20 @@ require_relative '../_base'
 
 
 
-
-
 if ENV['req_body_method'] == 'WEBSOCKET'
-  loop do
-     data = STDIN.gets
-    STDERR.puts data
-    print data
-  end
+    recv do |data|
+        STDERR.puts data
+    end
 end
 
-if ENV['req_method'] == 'POST'
-    STDERR.puts ">>>>>>" + STDIN.gets
-
-  resp 200, 'html', "OK"
-end
+# if ENV['req_method'] == 'POST'
+#     recv do |data|
+#         STDERR.puts  ">>>>>>>>>>>"+data
+#     end
+#   resp_ok :html, "OK"
+# end
 
 if ENV['req_method'] == 'GET'
-  resp 200, 'html', File::read('./index/page.html')
+    Q.test()
+  resp_ok :html, File::read('./index/page.html')
 end
