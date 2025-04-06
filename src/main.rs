@@ -41,17 +41,17 @@ fn main() {
         .author("mi78108@live.com>")
         .arg(
             Arg::with_name("workdir")
-            .short("w")
-            .long("workdir")
-            .help("www work dir")
-            .takes_value(true),
+                .short("w")
+                .long("workdir")
+                .help("www work dir")
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("addr")
-            .short("l")
-            .long("localaddr")
-            .help("bind address")
-            .takes_value(true),
+                .short("l")
+                .long("localaddr")
+                .help("bind address")
+                .takes_value(true),
         )
         .get_matches();
 
@@ -96,7 +96,7 @@ fn main() {
     struct Http {
         req_path: String,
         req_method: String,
-        req_version: String, 
+        req_version: String,
         req_stream: TcpStream,
         req_reader: RwLock<BufReader<TcpStream>>,
         req_writer: RwLock<BufWriter<TcpStream>>,
@@ -115,12 +115,17 @@ fn main() {
 
     impl Req for Http {
         fn read(&self, data: &mut Vec<u8>) -> Result<usize, std::io::Error> {
-            if let Ok(content_length) = self.env().get("Content-Length").unwrap().parse::<usize>() {
-                if let Ok(req_readed_size) = self.req_readed_size.read() {
-                    if content_length.eq(&req_readed_size) {
-                        return Ok(0);
+            if let Some(content_length) = self.env().get("Content-Length") {
+                if let Ok(length) = content_length.parse::<usize>() {
+                    if let Ok(req_readed_size) = self.req_readed_size.read() {
+                        if length.eq(&req_readed_size) {
+                            return Ok(0);
+                        }
                     }
                 }
+            }else { 
+                debug!("no Content-Length Header set; read 0");
+                return Ok(0);
             }
             //data.resize(self.req_buffer_size, 0);
             let rst = self.req_reader.write().unwrap().read(data);
@@ -140,7 +145,6 @@ fn main() {
             self.headers.borrow()
         }
     }
-
 
     struct Websocket {
         http: Http,
@@ -268,8 +272,8 @@ fn main() {
                 }
             }
             return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "websocket read erro",
+                io::ErrorKind::InvalidData,
+                "websocket read erro",
             ));
         }
 
@@ -294,12 +298,12 @@ fn main() {
             req_method: String::from("GET"),
             req_path: String::from("/"),
             req_version: String::from(""),
-            headers: HashMap::from([(String::from("req_body_method"), String::from("HTTP")),(String::from("Req_Buffer_Size"), String::from("256"))]),
+            headers: HashMap::from([(String::from("req_body_method"), String::from("HTTP")), (String::from("Req_Buffer_Size"), String::from("256"))]),
             req_reader: RwLock::new(reader),
             req_writer: RwLock::new(writer),
             req_stream: stream,
-            req_buffer_size : 256,
-            req_readed_size :RwLock::new(0)
+            req_buffer_size: 256,
+            req_readed_size: RwLock::new(0),
         };
         if let Ok(size) = http.req_reader.write().unwrap().read_line(&mut buffer) {
             let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
@@ -338,7 +342,7 @@ fn main() {
         }
 
         //
-        // parse_path_parms
+        // parse_path_params
         let mut path = http.req_path.splitn(2, "?");
         if let Some(req_path) = path.next() {
             http.headers.insert(String::from("req_path"), String::from(req_path));
@@ -367,7 +371,6 @@ fn main() {
         return Box::new(http);
     }
 
-
     fn call_script(req: Box<(dyn Req + Send + Sync)>) {
         let BUFFER_SIZE = match req.env().get("Req_Buffer_Size").unwrap().parse::<usize>() {
             Ok(size) => size,
@@ -395,7 +398,7 @@ fn main() {
             debug!("OS EXEC [{}][{}]",script.get_current_dir().unwrap().to_string_lossy(),script.get_program().to_string_lossy());
             match script.spawn() {
                 Ok(mut child) => {
-                    let req_body_method = req.env().get("req_body_method").unwrap().to_string(); 
+                    let req_body_method = req.env().get("req_body_method").unwrap().to_string();
                     //TRANS
                     let script_stdin = child.stdin.take();
                     let script_stdout = child.stdout.take();
@@ -409,7 +412,7 @@ fn main() {
                         if let Some(mut stdin) = script_stdin {
                             let mut buffer = Vec::new();
                             buffer.resize(BUFFER_SIZE, 0);
-                                                         // 按缓存读取内容，避免内存溢出
+                            // 按缓存读取内容，避免内存溢出
                             while let Ok(len) = req_read.read(&mut buffer) {
                                 debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                                 //debug!("tcpStream read len [{}]",len);
@@ -425,14 +428,15 @@ fn main() {
                                         break;
                                     }
                                     // test
-                                    if req_body_method.eq("WEBSOCKET") {
-                                        stdin.write(&[]).unwrap();
-                                        stdin.flush().unwrap();
-                                    }
+                                    // if req_body_method.eq("WEBSOCKET") {
+                                    //     stdin.write(&[0x0]).unwrap();
+                                    //     stdin.flush().unwrap();
+                                    //     debug!(">>>>>>>>>>>>>>>>>>>> : write [] done");
+                                    // }
                                     buffer.clear();
                                 } else {
                                     debug!("script stdin thread tcpStream read data len 0; break");
-                                    
+
                                     break;
                                 }
                             }
@@ -440,8 +444,8 @@ fn main() {
                     });
                     //
                     if let Some(mut stdout) = script_stdout {
-                       let mut buffer = Vec::new();
-                       buffer.resize(BUFFER_SIZE, 0);
+                        let mut buffer = Vec::new();
+                        buffer.resize(BUFFER_SIZE, 0);
                         while let Ok(len) = stdout.read(&mut buffer) {
                             debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                             //debug!("script stdout read len [{}]", len);
@@ -467,16 +471,23 @@ fn main() {
                         error!("script kill erro {:?}", e)
                     }
                     if let Ok(code) = child.wait() {
-                        debug!("script kill done [{:?}]",code)
+                        debug!("script kill done [{:?}]",code);
+                        if !code.success() {
+                            error!("script exit erro [{:?}]",code);
+                            _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]",code).as_bytes()).unwrap();
+                        }
                     }
 
                     if let Err(e) = _req.close() {
-                        debug!("tcpStream close erro {:?}",e);
+                        error!("tcpStream close erro {:?}",e);
                     } else {
                         debug!("tcpStream closed");
                     }
                 }
-                Err(e) => {}
+                Err(e) => {
+                    error!("script spawn  erro {:?}",e);
+                    req.write(format!("HTTP/1.0 404 Not Found\r\nContent-Type: text/text\r\n\r\nscript spawn fail [ {} ]",e.to_string()).as_bytes()).unwrap();
+                }
                 // do something
             }
         }
