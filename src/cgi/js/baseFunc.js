@@ -308,6 +308,7 @@ tools.dialog_progress = function (cfg) {
         }
 
         progress.done = function () {
+            div.append(" \n传输完成")
             setTimeout(() => {
                 d.remove()
             }, 3000)
@@ -422,6 +423,11 @@ tools.upload_file_post_progress = function (file, url, cb) {
                 } else {
                     cb(progressPercentage.toFixed(2))
                 }
+                if (progressPercentage === 100){
+                    if (cb['dom']){
+                        cb.dom.append(' 服务器接收中... ')
+                    }
+                }
                 //console.log(`Upload progress: ${progressPercentage.toFixed(2)}%`);
             }
         };
@@ -431,11 +437,13 @@ tools.upload_file_post_progress = function (file, url, cb) {
                 (cb && cb['done'] && cb.done())
                 resolve(xhr.response);
             } else {
+                console.error(xhr)
                 (cb && cb['error'] && cb.error('服务器响应失败'))
                 reject(new Error('Failed to upload file'));
             }
         };
         xhr.onerror = () => {
+            console.error(xhr)
             (cb && cb['error'] && cb.error('服务器网路链接失败'))
             reject(new Error('Network error'))
         };
