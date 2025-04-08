@@ -7458,8 +7458,8 @@ function get_sst_id(sst, str) {
 
 function get_cell_style(styles, cell, opts) {
   if (typeof style_builder != 'undefined') {
-    if (/^\d+$/.exec(cell.s)) { return cell.s}  // if its already an integer index, let it be
-    if (cell.s && (cell.s == +cell.s)) { return cell.s}  // if its already an integer index, let it be
+    if (/^\d+$/.exec(cell.s)) { return cell.s}  // if its already an integer index.rb, let it be
+    if (cell.s && (cell.s == +cell.s)) { return cell.s}  // if its already an integer index.rb, let it be
     var s = cell.s || {};
     if (cell.z) s.numFmt = cell.z;
     return style_builder.addStyle(s);
@@ -12221,7 +12221,7 @@ var XmlNode = (function () {
             .append(this.$tableStyles);
 
 
-        // need to specify styles at index 0 and 1.
+        // need to specify styles at index.rb 0 and 1.
         // the second style MUST be gray125 for some reason
 
         var defaultStyle = options.defaultCellStyle || {};
@@ -12241,7 +12241,7 @@ var XmlNode = (function () {
         return this;
       },
 
-      // create a style entry and returns an integer index that can be used in the cell .s property
+      // create a style entry and returns an integer index.rb that can be used in the cell .s property
       // these format of this object follows the emerging Common Spreadsheet Format
       addStyle: function (attributes) {
 

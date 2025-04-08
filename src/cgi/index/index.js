@@ -40,7 +40,7 @@ if(process.env['req_body_method'] == 'HTTP') {
         })
     }
     if (process.env['req_method'] == 'GET') {
-        let body = fs.readFileSync('./index/page.html')
+        let body = fs.readFileSync('./index.rb/page.html')
         process.stdout.write('HTTP/1.0 200 OK\r\n')
         process.stdout.write('Content-Type: text/html; charset=utf-8\r\n')
         process.stdout.write('Connection: close\r\n')

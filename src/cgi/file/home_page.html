@@ -13,8 +13,8 @@
 <script>
     let ctx = document.getElementById("content");
     let xtm = new Xterm(ctx);
-    tools.req_post("/file/list").then(v => v.json()).then((v) => {
-        xtm.echo(v.map(f => {
+    tools.req_post("/file/list").then((v) => {
+        xtm.echo(JSON.parse(v).map(f => {
             let li = document.createElement("li");
             li.innerText = JSON.stringify(f);
             let btn = document.createElement("button");

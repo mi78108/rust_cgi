@@ -8,8 +8,8 @@ use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, Error};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
-// use std::ptr::metadata;
 use std::fs::{metadata, read};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::RwLock;
 use std::thread;
@@ -33,7 +33,7 @@ extern crate lazy_static;
 lazy_static! {
     static ref WDIR: RwLock<String> = RwLock::new(String::from("/tmp"));
 }
-
+// todo 
 fn main() {
     env_logger::init();
     let matches = App::new("A WebService Program")
@@ -123,7 +123,7 @@ fn main() {
                         }
                     }
                 }
-            }else { 
+            } else {
                 debug!("no Content-Length Header set; read 0");
                 return Ok(0);
             }
@@ -360,6 +360,21 @@ fn main() {
                 }
             }
         }
+        // parse restful argv
+        let mut restful_argv:Vec<String> = [http.headers.get("req_path").unwrap().to_string()].to_vec();
+        parse_req_path(&mut restful_argv);
+        http.headers.insert(String::from("req_script_path"), restful_argv[0].to_string());
+        if restful_argv.len() > 1 {
+            restful_argv.remove(0);
+            restful_argv.reverse();
+            restful_argv.iter().enumerate().for_each(|(i,v)| {
+                http.headers.insert(format!("req_argv_{}", i + 1), String::from(v));
+                http.headers.insert(format!("req_param_argv_{}", i + 1), String::from(v));
+            });
+            http.headers.insert("req_argv_count".to_string(), restful_argv.len().to_string());
+            http.headers.insert("req_argv_params".to_string(), restful_argv.join("/"));
+        }
+        debug!("restful_argv = {:?}", restful_argv);
         //Websocket
         if let Some(upgrade) = http.headers.get("Upgrade") {
             if upgrade.to_lowercase() == "websocket" {
@@ -371,29 +386,57 @@ fn main() {
         return Box::new(http);
     }
 
-    fn call_script(req: Box<(dyn Req + Send + Sync)>) {
-        let BUFFER_SIZE = match req.env().get("Req_Buffer_Size").unwrap().parse::<usize>() {
-            Ok(size) => size,
-            Err(e) => 256
-        };
-        if let Some(req_path) = req.env().get("req_path") {
-            info!("Req [{}]", req_path);
-            let mut script_path = format!("{}", req_path);
-            if req_path == "/" {
-                script_path += "index"
+    fn parse_req_path(parse_path: &mut Vec<String>) {
+        let mut req_path = parse_path.get(0).unwrap().to_string();
+        // 特殊情况
+        if req_path == "/" {
+            req_path += "index"
+        }
+        let mut script_file_path = PathBuf::from(format!("{}{}", WDIR.read().unwrap(), req_path));
+        debug!("script_file_path = {:?}", script_file_path);
+        if script_file_path.exists() {
+            if script_file_path.is_file() {
+                debug!("script_file_path file= {:?}", script_file_path);
+                //文件存在 并且是文件  ok return
+                return;
             }
-            let script_file_path = format!("{}{}", WDIR.read().unwrap().as_str(), script_path);
-            if let Ok(file) = metadata(&script_file_path) {
-                debug!("{} -- True",script_file_path);
-                if file.is_dir() {
-                    script_path = format!("{}/index", script_path);
+            if script_file_path.is_dir() {
+                //文件存在 是文件夹 指向当下的 index ok return
+                script_file_path.push("index");
+                parse_path[0] = script_file_path.to_str().unwrap().to_string();
+                debug!("script_file_path dir= {:?}", script_file_path);
+                return;
+            }
+        }
+        while !script_file_path.exists() {
+            let argv = script_file_path.file_name().unwrap().to_str().unwrap();
+            parse_path.push(argv.to_string());
+            script_file_path.pop();
+           //
+            if script_file_path.exists() {
+                if script_file_path.is_file() {
+                    //文件存在 并且是文件  ok return
+                    debug!("script_file_path file while= {:?}", script_file_path);
+                    return;
                 }
-            } else {
-                debug!("{} -- False",script_file_path);
+                if script_file_path.is_dir() {
+                    //文件存在 是文件夹 指向当下的 index ok return
+                    script_file_path.push("index");
+                    parse_path[0] = script_file_path.to_str().unwrap().to_string();
+                    debug!("script_file_path dir while= {:?}", script_file_path);
+                    return;
+                }
             }
-            debug!("EXEC [{}]", script_path);
-            let mut script = Command::new(format!(".{}", script_path));
+        }
+        debug!("script_file_path while end= {:?}", script_file_path);
+    }
+    fn call_script(req: Box<(dyn Req + Send + Sync)>) {
+        let BUFFER_SIZE = req.env().get("Req_Buffer_Size").unwrap().parse::<usize>().unwrap_or_else(|e| 256);
+        if let Some(req_path) = req.env().get("req_script_path") {
+            info!("Req [{}]", req_path);
+            let mut script = Command::new(format!(".{}", req_path.replacen(WDIR.read().unwrap().as_str(),"",1)));
             script.current_dir(WDIR.read().unwrap().as_str());
+            //let mut env = req.env().clone();
             script.env_clear().envs(req.env()).stdin(Stdio::piped()).stdout(Stdio::piped());
             debug!("OS EXEC [{}][{}]",script.get_current_dir().unwrap().to_string_lossy(),script.get_program().to_string_lossy());
             match script.spawn() {
@@ -474,7 +517,7 @@ fn main() {
                         debug!("script kill done [{:?}]",code);
                         if !code.success() {
                             error!("script exit erro [{:?}]",code);
-                            _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]",code).as_bytes()).unwrap();
+                            _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]", code).as_bytes()).unwrap();
                         }
                     }
 
@@ -486,7 +529,7 @@ fn main() {
                 }
                 Err(e) => {
                     error!("script spawn  erro {:?}",e);
-                    req.write(format!("HTTP/1.0 404 Not Found\r\nContent-Type: text/text\r\n\r\nscript spawn fail [ {} ]",e.to_string()).as_bytes()).unwrap();
+                    req.write(format!("HTTP/1.0 404 Not Found\r\nContent-Type: text/text\r\n\r\nscript spawn fail [ {} ]", e.to_string()).as_bytes()).unwrap();
                 }
                 // do something
             }

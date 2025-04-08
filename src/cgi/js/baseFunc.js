@@ -16,7 +16,7 @@ tools.anime_blink = function (target, frame, time, cb_begin, cb_end) {
             } else {
                 cb_end && cb_end()
             }
-        }else {
+        } else {
             clearInterval(int)
         }
     }, frame)
@@ -38,17 +38,18 @@ tools.anime_blink = function (target, frame, time, cb_begin, cb_end) {
  * (content,dig,close,title,...menus)=>{
  *  }
  * @param title_name
- * @param menu
+ * @param menus
  * ([{
  *      title: '关闭',
+ *      tips: '关闭这个窗口',
  *      hotKey: 'X', //ctrl + x
  *      onclick : (ev,span,content) =>{
  *          ...
  *      }
  *  }]
  */
-tools.dialog = function (cb, title_name, menu) {
-    let menus = []
+tools.dialog = function (cb, title_name, menus) {
+    menus = menus || []
     let width = 60
     let dig = document.createElement("div");
     //fix 25/03/27
@@ -103,44 +104,40 @@ tools.dialog = function (cb, title_name, menu) {
             }
         }
     }
-    //menu
     let content = document.createElement("div");
-    if (menu) {
-        menu.forEach((v, i) => {
-            let _m = document.createElement("span");
-            _m.className = "cursor_point"
-            _m.style.cursor = "pointer"
-            _m.innerHTML = "[" + v['title'] + "]"
-            v['tips'] && (_m.title = v['tips'])
-            _m.style.color = "white"
-            //	_m.style.position = "absolute"
-            _m.style.marginLeft = "5px"
-            if (i == 0) {
-                _m.style.marginLeft = "25px"
-            }
-            _m.onclick = (ev) => {
-                v['onclick'] && v['onclick'](ev, _m, content)
-            }
-            menus.push(_m)
-            head.appendChild(_m)
-        })
-    }
+    //menu
+    menus.forEach((v, i) => {
+        let m = document.createElement("span");
+        m.className = "cursor_point"
+        m.style.cursor = "pointer"
+        m.innerHTML = "[" + v['title'] + "]"
+        v['tips'] && (m.title = v['tips'])
+        m.style.color = "white"
+        //	_m.style.position = "absolute"
+        m.style.marginLeft = "5px"
+        if (i === 0) {
+            m.style.marginLeft = "25px"
+        }
+        m.onclick = (ev) => {
+            v['onclick'] && v['onclick'](ev, m, content)
+        }
+        v['node'] = m;
+        head.appendChild(m)
+    })
     head.appendChild(close)
     // hotkey
     dig.addEventListener("keydown", function (ev) {
         console.log(' >> dialog key up', ev)
         if (ev.ctrlKey) {
-            if (menu.some((k, i) => {
+            menus.some((k, i) => {
                 if (k['hotKey'] === ev.key) {
-                    //if(ev.ctrlKey){
-                    menus[i].onclick(ev)
+                    // 取消默认事件
+                    ev.preventDefault();
+                    v['onclick'](ev,v['node'],content)
                     return true
-                    //}
                 }
                 return false
-            })) {
-                ev.preventDefault()
-            }
+            })
         }
     });
 
@@ -314,8 +311,8 @@ tools.dialog_progress = function (cfg) {
             }, 3000)
         }
         progress.error = function (msg) {
-            t.innerText = t.innerText.replace('进度','失败')
-            div.append(' ['+msg+']')
+            t.innerText = t.innerText.replace('进度', '失败')
+            div.append(' [' + msg + ']')
             div.style.backgroundColor = 'red'
             x.style.removeProperty('visibility')
             tools.anime_blink(div, 500, 0, () => {
@@ -423,8 +420,8 @@ tools.upload_file_post_progress = function (file, url, cb) {
                 } else {
                     cb(progressPercentage.toFixed(2))
                 }
-                if (progressPercentage === 100){
-                    if (cb['dom']){
+                if (progressPercentage === 100) {
+                    if (cb['dom']) {
                         cb.dom.append(' 服务器接收中... ')
                     }
                 }
