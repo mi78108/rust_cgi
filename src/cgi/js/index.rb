@@ -6,7 +6,7 @@ Q.on(:GET) do |r|
     file_name = ['name','f','argv_1'].some do |v|
         Q.param v
     end
-    file_name = [['f',->(v) { "./js#{v}.js" }],['name', -> (v){".js/#{v}"}],['argv_1',->(v) {"./js/#{v}.js"}]].some_proc do |v|
+    file_name = [['f',->(v) { "./js/#{v}.js" }],['name', -> (v){"./js/#{v}"}],['argv_1',->(v) {"./js/#{v}.js"}]].some_proc do |v|
         Q.param v
     end
     if File::exist? file_name

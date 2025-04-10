@@ -2,488 +2,537 @@ let _storeHash = {};
 let tools = {}
 
 function log(...msg) {
-    console.log(msg)
+  console.log(msg)
 }
 
-tools.anime_blink = function (target, frame, time, cb_begin, cb_end) {
-    cb_end && cb_end()
-    let count = 0;
-    let int = setInterval(() => {
-        if (document.body.contains(target)) {
-            count += 1;
-            if (count % 2 === 0) {
-                cb_begin && cb_begin()
-            } else {
-                cb_end && cb_end()
-            }
-        } else {
-            clearInterval(int)
-        }
-    }, frame)
+tools.anime = class{
+  constructor(target){
+    this.target = target
+  }
+}
 
-    if (time > 0) {
-        setTimeout(() => {
-            clearInterval(int)
-        }, time)
+tools.anime_blink = function (target, frame, timeout, cb_begin, cb_end) {
+  cb_end && cb_end()
+  let count = true;
+  let interval = setInterval(() => {
+    if (document.body.contains(target)) {
+      if (count) {
+        cb_begin && cb_begin(target)
+        count = false
+      } else {
+        cb_end && cb_end(target)
+        count = true
+      }
+    } else {
+      clearInterval(interval)
     }
-    return () => {
-        clearInterval(int)
+  }, frame)
+
+  if (timeout > 0) {
+    setTimeout(() => {
+      clearInterval(interval)
+    }, timeout)
+  }
+  return () => {
+    clearInterval(interval)
+  }
+}
+
+tools.target_move_event = function(ev, target){
+  if (ev.button === 0) {
+    ev.preventDefault();
+    let x = ev.clientX;
+    let y = ev.clientY;
+    let oL = target.offsetLeft;
+    let oT = target.offsetTop;
+    document.onmousemove = function (e) {
+      let xx = e.clientX;
+      let yy = e.clientY;
+      target.style.left = xx - x + oL + "px"
+      target.style.top = yy - y + oT + "px"
     }
+    document.onmouseup = function () {
+      document.onmousemove = null;
+      document.onmouseup = null;
+    }
+  }
+}
+
+tools.target_resize_event = function(ev, target){
+  if (ev.button === 2) {
+    let x = ev.clientX;
+    let y = ev.clientY;
+    let oL = target.offsetLeft;
+    let oT = target.offsetTop;
+    if(x < oL + (target.offsetWidth / 2)){
+      // 保留左边一半 右键正常使用
+      return 
+    }
+    target.style.cursor = "se-resize"
+    document.oncontextmenu = () => false
+    document.onmousemove = function (e) {
+      let xx = e.clientX;
+      let yy = e.clientY;
+      target.style.width = xx - oL + 30 + "px"
+      target.style.height = yy - oT + 30 + "px"
+    }
+    document.onmouseup = function (e) {
+      setTimeout(function () {
+        document.oncontextmenu = () => true
+      }, 1000)
+      target.style.cursor = "text"
+      document.onmousemove = null;
+      document.onmouseup = null;
+    }
+  }
 }
 
 
-/**
- *
- * @param cb
- * (content,dig,close,title,...menus)=>{
- *  }
- * @param title_name
- * @param menus
- * ([{
- *      title: '关闭',
- *      tips: '关闭这个窗口',
- *      hotKey: 'X', //ctrl + x
- *      onclick : (ev,span,content) =>{
- *          ...
- *      }
- *  }]
- */
-tools.dialog = function (cb, title_name, menus) {
-    menus = menus || []
-    let width = 60
-    let dig = document.createElement("div");
-    //fix 25/03/27
-    dig.tabIndex = 0
+tools.target_drag_event = function(cbk, target){
+  // 阻止默认处理以允许放置
+  // 元素事件有三个 dragstart drag dragend
+  // 容器事件
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    target.addEventListener(eventName, preventDefaults, false);
+  });
 
-    dig.style.width = width + "%"
-    dig.style.height = "60%"
-    dig.style.border = "2px solid black"
-    dig.style.position = "fixed"
-    dig.style.left = (100 - width) / 2 + "%"
-    dig.style.top = "17%"
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // 处理文件放置事件
+  target.addEventListener('drop', (ev)=>{
+    let files = ev.dataTransfer.files; // 获取文件列表
+    cbk && cbk(files)
+  }, false);
+}
 
 
-    let head = document.createElement("div");
-    let close = document.createElement("span");
-    let title = document.createElement("span");
-    close.innerHTML = "[X]"
-    close.style.color = "white"
-    close.style.position = "absolute"
-    close.style.right = "3px"
-    close.style.cursor = "pointer"
-    close.onclick = function (ev) {
-        console.log(' >>dialog close btn click')
-        dig.remove()
+tools.dialog = class{
+  constructor(cfg={},cbk){
+    cfg = Object.assign({
+      title: 'Dialog',
+      // {title: '测试',tips: '提示',hotkey: 'Enter',onclick: (self, ev)=>{},style: 'color: white'}
+      menus: [],
+      hotkeys: [{ hotkey : 'x', onclick : (self, ev) => { self.close() } }]
+    }, cfg)
+    //
+    this.wrq外容器 = document.createElement('div');
+    this.cdl菜单栏 = document.createElement('div');
+    this.nrq内容器 = document.createElement('div');
+    this.gb关闭 = document.createElement("span");
+    this.bt标题 = document.createElement("span"); 
+    this.cdl菜单栏.appendChild(this.bt标题)
+    this.cdl菜单栏.appendChild(this.gb关闭)
+    this.wrq外容器.appendChild(this.cdl菜单栏)
+    this.wrq外容器.appendChild(this.nrq内容器)
+    //默认样式
+    this.wrq外容器.tabIndex = 0
+    this.wrq外容器.className = 'dialog'
+    this.wrq外容器.style = 'border: 2px solid black; position: fixed; width: 60%; height: 60%; left: 20%; bottom: 20%; box-sizing: border-box; background: white'
+    //
+    this.cdl菜单栏.style = 'box-sizing: border-box; background: black; width: 100%; height: 30px; cursor: move'
+    //
+    this.bt标题.title = document.getElementsByClassName('dialog').length + 1
+    this.bt标题.innerHTML = cfg.title; 
+    this.bt标题.style = 'color: white; marginLeft: 3px; max-width: 50%'
+    //
+    this.gb关闭.innerHTML = '[X]'
+    this.gb关闭.title = '关闭'
+    this.gb关闭.style = 'color: white; position: absolute; cursor: pointer; right: 3px'
+    //
+    this.nrq内容器.style = 'box-sizing: border-box; width: 100%; height: calc(100% - 30px); background: white'
+    document.body.appendChild(this.wrq外容器)
+    //默认事件
+    let self = this;
+    this.cdl菜单栏.onmousedown = (ev) => {
+      tools.target_move_event(ev, self.wrq外容器)
     }
-    title.innerHTML = title_name ? title_name : "Dialog"
-    title.style.color = "white"
-    //name.style.position = "absolute"
-    title.style.left = "3px"
-    head.style.width = "100%"
-    head.style.height = "30px"
-    head.style.border = "1px solid black"
-    head.style.backgroundColor = "black"
-    head.style.cursor = "move"
-    head.appendChild(title)
-    // move
-    head.onmousedown = (ev) => {
-        if (ev.button === 0) {
-            let x = ev.clientX;
-            let y = ev.clientY;
-            let oL = dig.offsetLeft;
-            let oT = dig.offsetTop;
-            document.onmousemove = function (e) {
-                let xx = e.clientX;
-                let yy = e.clientY;
-                dig.style.left = xx - x + oL + "px"
-                dig.style.top = yy - y + oT + "px"
-            }
-            document.onmouseup = function () {
-                document.onmousemove = null;
-                document.onmouseup = null;
-            }
-        }
+    this.nrq内容器.onmousedown = (ev) => {
+      tools.target_resize_event(ev, self.wrq外容器)
     }
-    let content = document.createElement("div");
-    //menu
-    menus.forEach((v, i) => {
-        let m = document.createElement("span");
-        m.className = "cursor_point"
-        m.style.cursor = "pointer"
-        m.innerHTML = "[" + v['title'] + "]"
-        v['tips'] && (m.title = v['tips'])
-        m.style.color = "white"
-        //	_m.style.position = "absolute"
-        m.style.marginLeft = "5px"
-        if (i === 0) {
-            m.style.marginLeft = "25px"
+    this.gb关闭.onclick = (ev) => {
+      self.onclose && self.onclose(self,ev)
+      cfg.onclose && cfg.onclose(self,ev)
+      self.wrq外容器.remove()
+    }
+    // 调整为 map 避免键重复
+    this.hotKeys = cfg.hotkeys.reduce((a,c)=>{ 
+      a[c.hotkey] = c.onclick
+      return a
+    },new Map())
+    // 快捷键事件
+    this.wrq外容器.addEventListener("keydown", function (ev) {
+      //console.log(' >> dialog key up', ev, Object.keys(self.hotKeys))
+      if (ev.ctrlKey) {
+        if (self.hotKeys[ev.key]) {
+          // 取消默认事件
+          ev.preventDefault();
+          self.hotKeys[ev.key](self, ev)
         }
-        m.onclick = (ev) => {
-            v['onclick'] && v['onclick'](ev, m, content)
-        }
-        v['node'] = m;
-        head.appendChild(m)
-    })
-    head.appendChild(close)
-    // hotkey
-    dig.addEventListener("keydown", function (ev) {
-        console.log(' >> dialog key up', ev)
-        if (ev.ctrlKey) {
-            menus.some((k, i) => {
-                if (k['hotKey'] === ev.key) {
-                    // 取消默认事件
-                    ev.preventDefault();
-                    v['onclick'](ev,v['node'],content)
-                    return true
-                }
-                return false
-            })
-        }
+      }
     });
+    // 初始 参数中的按钮和快捷键
+    cfg.menus.forEach(menu => self.add_menu(menu))
+    // 默认聚焦
+    this.wrq外容器.focus()
+    cbk && cbk(this)
+  }
 
-    content.style.width = "calc(100% - 0px)"
-    content.style.height = "calc(100% - 32px)"
-    //content.style.overflowY = "auto"
-    content.style.overflowY = "hidden"
-    //content.style.paddingLeft = "5px"
-    //content.style.paddingBottom = "5px"
-    content.style.backgroundColor = "white"
-    // size
-    content.onmousedown = (ev) => {
-        // Todo 无法判断右键单击或者右键拖拽; 目前保留拖拽功能右键单击失效
-        if (ev.button === 2) {
-            let x = ev.clientX;
-            let y = ev.clientY;
-            //let oW = dig.offsetWidth;
-            //let oH = dig.offsetHeight;
-            let oL = dig.offsetLeft;
-            let oT = dig.offsetTop;
-            let flags = true
-            content.style.cursor = "se-resize"
-            document.oncontextmenu = () => false
-            document.onmousemove = function (e) {
-                flags = false
-                let xx = e.clientX;
-                let yy = e.clientY;
-                dig.style.width = xx - oL + 30 + "px"
-                dig.style.height = yy - oT + 30 + "px"
-            }
-            document.onmouseup = function (e) {
-                if (flags) {
-                    document.oncontextmenu = () => true
-                } else {
-                    setTimeout(function () {
-                        document.oncontextmenu = () => true
-                    }, 1000)
-                }
-                content.style.cursor = "text"
-                document.onmousemove = null;
-                document.onmouseup = null;
-            }
-        }
+  close(){
+    this.gb关闭.click()
+  }
+
+  add_element(target){
+    this.nrq内容器.appendChild(target)
+  }
+  add_menu(cfg={}){
+    let self = this;
+    let menu = document.createElement('span')
+    let index = self.cdl菜单栏.childNodes.length - 1;
+    cfg = Object.assign({
+      title: `按钮${index}`,
+      tips: `这是按钮${index}`,
+      onclick: (self, ev)=>{
+        console.log(`> ${cfg.title} ${index} is clicked`)
+      },
+      hotkey: `${index}`,
+      style: 'color: white; cursor: pointer; marginLeft: 5px'
+    }, cfg)
+
+    menu.style = cfg.style
+    menu.innerHTML = cfg.title
+    menu.title = cfg.tips
+    menu.style.marginLeft = "5px"
+    if (index === 1) {
+      menu.style.marginLeft = "25px"
     }
+    menu.onclick = (ev) => {
+      cfg.onclick && cfg.onclick(self, ev)
+    }
+    self.hotKeys[cfg.hotkey] = cfg.onclick
+    self.cdl菜单栏.appendChild(menu);
+    return menu;
+  }
 
-    dig.appendChild(head)
-    dig.appendChild(content)
-    cb && cb(content, dig, close, title, ...menus)
-    window.document.body.appendChild(dig)
-    //fix 25/03/27
-    dig.focus()
+  static open(cfg, cbk){
+    return new this(cfg, cbk)
+  }
 }
 
-tools.dialog_input = function (cfg = {}, cb, dialog_cb) {
-    tools.dialog((c, d, x, t, ...m) => {
-        let ip = document.createElement('input')
-        cfg['title'] && (t.innerHTML = cfg['title'])
-        ip.style.width = "100%"
-        ip.style.height = "30px"
-        ip.addEventListener("keyup", function (event) {
-            event.preventDefault();
-            if (event.keyCode === 13) {
-                d.remove()
-                cb && cb(ip)
+tools.dialog_tips = class extends tools.dialog{
+  constructor(cfg={},cbk){ 
+    cfg = Object.assign({timeout: 2000, title: 'Tips', content: '...'}, cfg)
+    super()
+    let self = this;
+    let random_pos =  Math.floor(Math.random() * 100) + 50;
+    this.wrq外容器.style.width = '30%'
+    this.wrq外容器.style.height = '30%'
+    this.wrq外容器.style.top = `calc(5% + ${random_pos}px)`
+    this.wrq外容器.style.left = `calc(30% + ${random_pos}px)`
 
-            }
-        });
-        c.appendChild(ip)
-        ip.focus()
-        c.style.height = "32px"
-        c.style.padding = "3px"
-        d.style.width = "40%"
-        d.style.height = "70px"
-        d.style.top = "47%"
-        d.style.left = "30%"
+    this.nrq内容器.readOnly = true
+    this.nrq内容器.style.resize = "none"
+    this.nrq内容器.style.overflow = "hidden"
+    this.nrq内容器.style.display= 'flex'
+    this.nrq内容器.style.justifyContent = 'center'
+    this.nrq内容器.style.alignItems = 'center'
+    this.bt标题.innerHTML = cfg.title  +  (this.bt标题.title > 1 ? ` (${this.bt标题.title})` : '') ; 
+    this.nrq内容器.innerHTML = cfg.content
 
-        dialog_cb && dialog_cb(c, d, x, t, ...m)
+    setTimeout(() => {
+      if (cfg.timeout > 0) {
+        self.close()
+        cbk && cbk()
+      }
+    }, cfg.timeout)
+  }
+}
+
+tools.dialog_input = class extends tools.dialog{
+  constructor(cfg={}, cbk){ 
+    cfg = Object.assign({title: 'Input', input: [{name: '输入一',tips: '在这里输入'}]}, cfg)
+    super({menus: [{title: '提交', hotkey: 'Enter',onclick: (self, ev)=>{
+      if(cbk && cbk(ev.target.value)){
+        self.close()
+      }
+    }}]})
+    let self = this;
+    this.wrq外容器.style.width = '20%'
+    this.wrq外容器.style.height = '20%'
+    this.wrq外容器.style.top = '40%'
+    this.wrq外容器.style.left = '40%'
+    this.bt标题.innerHTML = cfg.title
+
+    cfg.input.forEach(v=>{
+      let div = document.createElement('div');
+      let span = document.createElement('span');
+
+      let text = document.createElement('textarea')
+      text.style = 'width: 100%; height: 100%; box-sizing: border-box'
+      text.style.textAlign = 'center'
+
+      div.appendChild(span)
+      div.appendChild()
+      this.nrq内容器.style.overflow = 'hidden'
+      this.nrq内容器.appendChild(this.txt文本容器)
     })
+  }
 }
 
-/**
- * @param cfg
- * ({
- *     title: '',
- *     content: '',
- *     timeout: 0
- * })
- * @param cb 是否定时关闭tips true关闭 默认定时关闭
- * @param dialog_cb
- */
-tools.dialog_tips = function (cfg, cb, dialog_cb) {
-    cfg = Object.assign({timeout: 2000}, cfg)
-    tools.dialog((c, d, x, t, ...m) => {
-        let ip = document.createElement('textarea')
-        ip.style.width = "100%"
-        ip.style.height = "100%"
-        ip.style.resize = "none"
-        ip.style.overflow = "hidden"
-        ip.readOnly = true
-        cfg['title'] && (t.innerHTML = cfg['title'])
-        cfg['content'] && (ip.value = cfg['content'])
 
-        c.appendChild(ip)
-        c.style.height = "69px"
-        c.style.width = "100%"
-        c.style.padding = "0px"
-        d.style.width = "30%"
-        d.style.height = "100px"
-        d.style.top = "40%"
-        d.style.left = "35%"
+tools.dialog_progress = class extends tools.dialog {
+  constructor(cfg={}, ckb){
+    cfg = Object.assign({
+      title: '进度条'
+    }, cfg)
+    super(cfg)
+    //样式
+    this.wrq外容器.style.width = '320px'
+    this.wrq外容器.style.height = '120px'
+    // 样式一 >>>>>
+    this.jdt容器 = document.createElement('div')
+    this.jdt容器.style.display = 'grid'
+    this.jdt容器.style.placeItems = 'center'
+    this.jdt容器.style.backgroundColor = 'green'
+    this.jdt容器.style.width = '0%'
+    this.jdt容器.style.height = '100%'
+    this.jdt容器.innerText = '0%'
+    this.nrq内容器.appendChild(this.jdt容器)
 
-        dialog_cb && dialog_cb(c, d, x, t, ...m)
+    this.title = cfg.title
+  }
 
-        setTimeout(() => {
-            if (cb === undefined || cb(d) === true) {
-                d.remove()
-            }
-        }, cfg['timeout'])
+  fail(){
+    this.interval_func = tools.anime_blink(this.jdt容器, 500, 0, ()=>{
+      this.jdt容器.style.background = 'red'
+    }, ()=>{
+      this.jdt容器.style.background = 'white'
     })
+  }
+
+  success(){
+    tools.dialog_tips.open({timeout: 3000 ,content: '进度完成'},()=>{
+      this.close()
+    })
+  }
+
+  update(progress){
+    this.jdt容器.style.width = progress + '%'
+    this.jdt容器.innerText = progress + '%'
+    this.bt标题.innerHTML = `${this.title} (${progress}%)` 
+    this.interval_func && this.interval_func()
+  }
 }
 
-/**
- * @param cfg
- * ({
- *     title: '',
- *     content: '',
- *     timeout: 0
- * })
- */
-tools.dialog_progress = function (cfg) {
-    let progress = {}
-    tools.dialog((c, d, x, t, ...m) => {
-        //样式
-        x.style.visibility = 'hidden '
-        t.style.removeProperty('left')
-        t.style.display = 'inline-block'
-        t.style.overflow = 'hidden'
-        t.style.textOverflow = 'ellipsis'
-        t.style.whiteSpace = 'nowrap'
-        t.style.width = '80%'
-        t.style.height = '80%'
-        d.style.textAlign = 'center'
-        d.style.width = '320px'
-        d.style.height = '240px'
-        // 样式一 >>>>>
 
-        let div = document.createElement('div')
-        // div.style.display = 'flex'
-        // div.style.flexDirection = 'column'
-        // div.style.justifyContent = 'center'
-        div.style.display = 'grid'
-        div.style.placeItems = 'center'
-        div.style.backgroundColor = 'green'
-        div.style.height = '100%';
-        div.style.width = '0%'
-        div.innerText = '0%'
-
-        progress.update = function (n) {
-            div.style.width = n + '%'
-            div.innerText = n + '%'
-        }
-
-        progress.close = function () {
-            d.remove()
-        }
-
-        progress.done = function () {
-            div.append(" \n传输完成")
-            setTimeout(() => {
-                d.remove()
-            }, 3000)
-        }
-        progress.error = function (msg) {
-            t.innerText = t.innerText.replace('进度', '失败')
-            div.append(' [' + msg + ']')
-            div.style.backgroundColor = 'red'
-            x.style.removeProperty('visibility')
-            tools.anime_blink(div, 500, 0, () => {
-                div.style.backgroundColor = 'red'
-            }, () => {
-                div.style.backgroundColor = 'white'
-            })
-        }
-
-        progress.dom = div;
-        // 样式二 环形
-        // let cvs = document.createElement('canvas');
-        // let ctx = cvs.getContext('2d')
-        // cvs.style.height = '100%'
-        // cvs.style.width = '100%'
-        // cvs.style.backgroundColor = 'red'
-
-        c.appendChild(div)
-    }, cfg['title'] ? cfg['title'] : '进度条')
-    return progress;
-}
 
 
 tools.req_url_encode = function (url, params = {}) {
-    return fetch(url, {
-        method: (params['method'] || "POST"),
-        body: params['method'] === 'GET' ? undefined : Object.entries(Object.assign({
-            "_uuid_": new Date().getTime(),
-        }, params['body'])).reduce((a, c) => {
-            a.push(encodeURIComponent(c[0]) + '=' + encodeURIComponent(c[1]))
-            return a
-        }, []).join('&'),
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-    })
+  return fetch(url, {
+    method: (params['method'] || "POST"),
+    body: params['method'] === 'GET' ? undefined : Object.entries(Object.assign({
+      "_uuid_": new Date().getTime(),
+    }, params['body'])).reduce((a, c) => {
+      a.push(encodeURIComponent(c[0]) + '=' + encodeURIComponent(c[1]))
+      return a
+    }, []).join('&'),
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  })
 }
 
 
 tools.req = function (url, ext) {
-    return fetch(url, Object.assign({
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        }, ext)
-    ).then(resp => {
-        return resp.text()
-    })
+  return fetch(url, Object.assign({
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  }, ext)
+  ).then(resp => {
+    return resp.text()
+  })
 }
 
 tools.req_post = function (url, body = {}) {
-    return tools.req(url, {
-        method: "POST",
-        body: JSON.stringify(Object.assign({
-            "_uuid_": new Date().getTime(),
-        }, body)),
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    })
+  return tools.req(url, {
+    method: "POST",
+    body: JSON.stringify(Object.assign({
+      "_uuid_": new Date().getTime(),
+    }, body)),
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  })
 }
 
 tools.req_get = function (url) {
-    return tools.req(url, {
-        method: "GET",
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    })
+  return tools.req(url, {
+    method: "GET",
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  })
 }
 
 tools.upload_file_post = function (file, url) {
-    return tools.req(url, {
-        method: 'POST',
-        body: file,
-        headers: {
-            'Upload-File-Name': file.name
-        },
-        onprogress: (event) => {
-            const progressPercentage = Math.round((event.loaded / event.total) * 100);
-            console.log(`上传进度: ${progressPercentage}%`);
-        }
-    })
+  return tools.req(url, {
+    method: 'POST',
+    body: file,
+    headers: {
+      'Upload-File-Name': file.name
+    },
+    onprogress: (event) => {
+      const progressPercentage = Math.round((event.loaded / event.total) * 100);
+      console.log(`上传进度: ${progressPercentage}%`);
+    }
+  })
 }
 tools.upload_file_post_progress = function (file, url, cb) {
-    return new Promise((resolve, reject) => {
-        if (cb === undefined) {
-            // 默认行为
-            cb = tools.dialog_progress({
-                title: '上传进度 (' + file.name + ')'
-            })
+  return new Promise((resolve, reject) => {
+    if (cb === undefined) {
+      // 默认行为
+      cb = tools.dialog_progress.open({
+        title: '上传进度 (' + file.name + ')'
+      })
+    }
+    let xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    // 设置请求的头部
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.setRequestHeader('Upload-File-Name', file.name);
+    // 监听上传进度事件
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        let progressPercentage = Math.round((event.loaded / event.total) * 100);
+        if (cb.update) {
+          cb.update(progressPercentage.toFixed(2))
+        } else {
+          cb(progressPercentage.toFixed(2))
         }
-        let xhr = new XMLHttpRequest();
-        xhr.open('POST', url, true);
-        // 设置请求的头部
-        xhr.setRequestHeader('Accept', 'application/json');
-        xhr.setRequestHeader('Upload-File-Name', file.name);
-        // 监听上传进度事件
-        xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-                let progressPercentage = Math.round((event.loaded / event.total) * 100);
-                if (cb['update']) {
-                    cb.update(progressPercentage.toFixed(2))
-                } else {
-                    cb(progressPercentage.toFixed(2))
-                }
-                if (progressPercentage === 100) {
-                    if (cb['dom']) {
-                        cb.dom.append(' 服务器接收中... ')
-                    }
-                }
-                //console.log(`Upload progress: ${progressPercentage.toFixed(2)}%`);
-            }
-        };
+        if (progressPercentage === 100) {
+          if (cb.waiting) {
+            cb.waiting(' 服务器接收中... ')
+          }
+        }
+        //console.log(`Upload progress: ${progressPercentage.toFixed(2)}%`);
+      }
+    };
 
-        xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                (cb && cb['done'] && cb.done())
-                resolve(xhr.response);
-            } else {
-                console.error(xhr)
-                (cb && cb['error'] && cb.error('服务器响应失败'))
-                reject(new Error('Failed to upload file'));
-            }
-        };
-        xhr.onerror = () => {
-            console.error(xhr)
-            (cb && cb['error'] && cb.error('服务器网路链接失败'))
-            reject(new Error('Network error'))
-        };
-        xhr.send(file);
-    })
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        (cb && cb['done'] && cb.done())
+        resolve(xhr.response);
+      } else {
+        console.error(xhr)
+        (cb && cb['error'] && cb.error('服务器响应失败'))
+        reject(new Error('Failed to upload file'));
+      }
+    };
+    xhr.onerror = () => {
+      console.error(xhr)
+      (cb && cb['error'] && cb.error('服务器网路链接失败'))
+      reject(new Error('Network error'))
+    };
+    xhr.send(file);
+  })
 }
 
 tools.upload_file_formData = function (file, url) {
-    //formData
-    let formData = new FormData();
-    formData.append('file', file)
-    return tools.req(url, {
-        method: 'POST',
-        body: formData
-    })
+  //formData
+  let formData = new FormData();
+  formData.append('file', file)
+  return tools.req(url, {
+    method: 'POST',
+    body: formData
+  })
 }
 
-tools.upload_file_websocket = function () {
+//需要服务器端实现
+// 断点续传 实时进度 分片传输
+// /file/upload/file/uuid
+tools.upload_file_websocket = function (url, chunk, file) {
+  //请求数据 是否续传
+  fetch(url,{
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      chunkSize: chunk,
+      chunkIndex: 0
+    })
+  }).then(r=>r.json()).then(r=>{
+    let chunks = Math.ceil(file.size / r.chunkSize);
+    let send_chunk = (index, chunkSize, file, cbk)=>{
+      return new Promise((resolve)=>{
+        let chunk = file.slice(index*chunkSize,(index + 1) * chunkSize);
+        let reader = new FileReader();
+        reader.readAsArrayBuffer(chunk);
+        reader.onload = (data)=>{
+          let bytes = data.target.result
+          resolve(bytes)
+          cbk && cbk(bytes)
+        }
+      })
+    }
+    let ws = new WebSocket(url);
+    ws.onopen = async ()=>{
+      //开始上传
+      let bytes = await send_chunk(r.chunkIndex,r.chunkSize,file, (data)=>{
+        ws.send(data)
+      });
+      console.log('>>>>>>>>>>>> Bytes ',bytes);
+    }
+    ws.onmessage = async (m)=>{
+      //获取进度
+      let info = JSON.parse(m.data)
+      if(info.uploadedSize < info.fileSize){
+        let bytes = await send_chunk(info.chunkIndex,info.chunkSize,file);
+        ws.send(bytes)
+      }else{
+        tools.dialog_tips.open({content: '上传完毕', timeout: 5000})
+        console.log('>>>>>>>> upload done',info,chunks)
+        ws.close()
+      }
+    }
+    ws.onclose = ()=>{
 
+    }
+    ws.onerror = (e)=>{
+      console.error('>>> websocket uplaod error websocket err',e)
+    }
+  }).catch( e =>{
+    console.error('>>> websocket uplaod error post info',e)
+  })
+  //上传
 }
 
 
 function _get_added(k, cb) {
-    if (_storeHash['_get_addeds']) {
-        if (_storeHash['_get_addeds'][k]) {
-            _storeHash['_get_addeds'][k].v = _storeHash['_get_addeds'][k].f(
-                _storeHash['_get_addeds'][k].v
-            );
-            cb && cb(_storeHash['_get_addeds'][k])
-        } else {
-            //init
-            _storeHash['_get_addeds'][k] = {
-                v: cb && cb(null) || 0,
-                f: cb || function (v) {
-                    return v + 1
-                }
-            };
-        }
-        return _storeHash['_get_addeds'][k].v;
+  if (_storeHash['_get_addeds']) {
+    if (_storeHash['_get_addeds'][k]) {
+      _storeHash['_get_addeds'][k].v = _storeHash['_get_addeds'][k].f(
+        _storeHash['_get_addeds'][k].v
+      );
+      cb && cb(_storeHash['_get_addeds'][k])
     } else {
-        _storeHash['_get_addeds'] = {};
-        return _get_added(k, cb);
+      //init
+      _storeHash['_get_addeds'][k] = {
+        v: cb && cb(null) || 0,
+        f: cb || function (v) {
+          return v + 1
+        }
+      };
     }
+    return _storeHash['_get_addeds'][k].v;
+  } else {
+    _storeHash['_get_addeds'] = {};
+    return _get_added(k, cb);
+  }
 
 }
 
@@ -494,117 +543,117 @@ function _get_added(k, cb) {
 //}
 
 function get_local_video(id) {
-    let video = document.createElement("video");
-    video.id = id;
-    video.width = 320;
-    video.height = 240;
-    //add Event
-    video.float = 'right';
-    video.style.position = 'absolute';
-    video.style.right = '10px';
-    video.style.top = '10px';
-    video.style.zIndex = '999';
-    video.style.border = 'thick solid #0000FF';
-    video.take_photo = function () {
-    }
-    video.onmousedown = function (ev_d) {
-        video.onmousemove = function (ev_m) {
-            video.style.left = (ev_m.clientX - ev_d.layerX) + 'px';
-            video.style.top = (ev_m.clientY - ev_d.layerY) + 'px';
-        };
-        video.onmouseup = function () {
-            video.onmousemove = null;
-            video.onmouseup = null;
-        }
+  let video = document.createElement("video");
+  video.id = id;
+  video.width = 320;
+  video.height = 240;
+  //add Event
+  video.float = 'right';
+  video.style.position = 'absolute';
+  video.style.right = '10px';
+  video.style.top = '10px';
+  video.style.zIndex = '999';
+  video.style.border = 'thick solid #0000FF';
+  video.take_photo = function () {
+  }
+  video.onmousedown = function (ev_d) {
+    video.onmousemove = function (ev_m) {
+      video.style.left = (ev_m.clientX - ev_d.layerX) + 'px';
+      video.style.top = (ev_m.clientY - ev_d.layerY) + 'px';
     };
-    window.navigator.getUserMedia = MediaDevices.getUserMedia || navigator.getUserMedia || navigator.webKitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-    let peerConnection = new RTCPeerConnection(null);
-    if (window.navigator.getUserMedia) {
-        window.navigator.getUserMedia({
-            //video: {facingMode: {exact: "environment"}}
-            video: {'facingMode': "user"}
-        }, onSuccess, function (e) {
-            alert("Try To Share Screen");
-            window.navigator.getUserMedia({
-                //video: {facingMode: {exact: "environment"}}
-                video: {'mediaSource': "screen"}
-            }, onSuccess, function (ee) {
-                alert(ee)
-            });
-        });
-    } else {
-        alert('your browser not support getUserMedia;');
+    video.onmouseup = function () {
+      video.onmousemove = null;
+      video.onmouseup = null;
     }
+  };
+  window.navigator.getUserMedia = MediaDevices.getUserMedia || navigator.getUserMedia || navigator.webKitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+  let peerConnection = new RTCPeerConnection(null);
+  if (window.navigator.getUserMedia) {
+    window.navigator.getUserMedia({
+      //video: {facingMode: {exact: "environment"}}
+      video: {'facingMode': "user"}
+    }, onSuccess, function (e) {
+      alert("Try To Share Screen");
+      window.navigator.getUserMedia({
+        //video: {facingMode: {exact: "environment"}}
+        video: {'mediaSource': "screen"}
+      }, onSuccess, function (ee) {
+        alert(ee)
+      });
+    });
+  } else {
+    alert('your browser not support getUserMedia;');
+  }
 
-    function onSuccess(stream) {
-        //if (navigator.mozGetUserMedia) {
-        video.srcObject = stream;
-        //} else {
-        //    let vendorURL = window.URL || window.webkitURL;
-        //    video.src = vendorURL.createObjectURL(stream);
-        //}
-        video.onloadedmetadata = function (e) {
-            video.play();
-        };
-        peerConnection.addStream(stream);
-    }
+  function onSuccess(stream) {
+    //if (navigator.mozGetUserMedia) {
+    video.srcObject = stream;
+    //} else {
+    //    let vendorURL = window.URL || window.webkitURL;
+    //    video.src = vendorURL.createObjectURL(stream);
+    //}
+    video.onloadedmetadata = function (e) {
+      video.play();
+    };
+    peerConnection.addStream(stream);
+  }
 
-    return video;
+  return video;
 }
 
 
 function webRtc() {
-    window.RTCPeerConnection = window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-    let peerConnection = new RTCPeerConnection(null);
+  window.RTCPeerConnection = window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+  let peerConnection = new RTCPeerConnection(null);
 
-    window.navigator.getUserMedia = MediaDevices.getUserMedia || navigator.getUserMedia || navigator.webKitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-    if (window.navigator.getUserMedia) {
-        window.navigator.getUserMedia({
-            //video: {facingMode: {exact: "environment"}}
-            video: {'facingMode': "user"}
-        }, onSuccess, function (e) {
-            alert("Try To Share Screen");
-            window.navigator.getUserMedia({
-                //video: {facingMode: {exact: "environment"}}
-                video: {'mediaSource': "screen"}
-            }, onSuccess, function (ee) {
-                alert(ee)
-            });
-        });
-    } else {
-        alert('your browser not support getUserMedia;');
-    }
+  window.navigator.getUserMedia = MediaDevices.getUserMedia || navigator.getUserMedia || navigator.webKitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+  if (window.navigator.getUserMedia) {
+    window.navigator.getUserMedia({
+      //video: {facingMode: {exact: "environment"}}
+      video: {'facingMode': "user"}
+    }, onSuccess, function (e) {
+      alert("Try To Share Screen");
+      window.navigator.getUserMedia({
+        //video: {facingMode: {exact: "environment"}}
+        video: {'mediaSource': "screen"}
+      }, onSuccess, function (ee) {
+        alert(ee)
+      });
+    });
+  } else {
+    alert('your browser not support getUserMedia;');
+  }
 
-    function onSuccess(stream) {
-        peerConnection.addStream(stream);
-        //
-        peerConnection.createOffer(function (desc) {
-            console.log("创建offer成功");
-            // 将创建好的offer设置为本地offer
-            peerConnection.setLocalDescription(desc);
-            // 通过socket发送offer
-        }, function (error) {
-            // 创建offer失败
-            console.log("创建offer失败");
-        })
-    }
+  function onSuccess(stream) {
+    peerConnection.addStream(stream);
+    //
+    peerConnection.createOffer(function (desc) {
+      console.log("创建offer成功");
+      // 将创建好的offer设置为本地offer
+      peerConnection.setLocalDescription(desc);
+      // 通过socket发送offer
+    }, function (error) {
+      // 创建offer失败
+      console.log("创建offer失败");
+    })
+  }
 }
 
 function copyToclip(txt) {
-    if (document.execCommand("copy")) {
-        const input = document.createElement("input"); // 创建一个新input标签
-        input.setAttribute("readonly", "readonly"); // 设置input标签只读属性
-        input.setAttribute("value", txt); // 设置input value值为需要复制的内容
-        document.body.appendChild(input); // 添加input标签到页面
-        input.select(); // 选中input内容
-        input.setSelectionRange(0, 9999); // 设置选中input内容范围
-        document.execCommand("copy"); // 复制
-        document.body.removeChild(input);  // 删除新创建的input标签
-    }
+  if (document.execCommand("copy")) {
+    const input = document.createElement("input"); // 创建一个新input标签
+    input.setAttribute("readonly", "readonly"); // 设置input标签只读属性
+    input.setAttribute("value", txt); // 设置input value值为需要复制的内容
+    document.body.appendChild(input); // 添加input标签到页面
+    input.select(); // 选中input内容
+    input.setSelectionRange(0, 9999); // 设置选中input内容范围
+    document.execCommand("copy"); // 复制
+    document.body.removeChild(input);  // 删除新创建的input标签
+  }
 }
 
 
 function preventAll(ev) {
-    ev.preventDefault()
-    ev.stopPropagation()
+  ev.preventDefault()
+  ev.stopPropagation()
 }

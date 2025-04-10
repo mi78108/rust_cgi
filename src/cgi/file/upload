@@ -1,1 +1,65 @@
-upload.js
+#!/usr/bin/node
+
+let fs = require('fs')
+const Q = require('../_base')
+
+
+Q.on(Q.Method.GET, (r)=>{
+  // websocket上传文件时 请求或创建元数据
+  if(Q.param('argv_1') == 'file'){
+
+  }
+  Q.ok_html(fs.readFileSync('./file/upload_page.html','utf-8'))
+});
+
+Q.on(Q.Method.POST, (r) => {
+  Q.ready(()=>{
+    let type = Q.param('argv_1');
+    if(type){
+      if(type == 'text'){
+        let file = {
+          key: Q.param('argv_2'),
+          type: 'text',
+          count: Q.param('count') || 0,
+          content: Q.read().toString()
+        };
+        fs.writeFileSync(`/tmp/${file.key}`,JSON.stringify(file));
+        Q.ok_html("OK")
+      }
+      if(type == 'file'){
+        let key_file = `/tmp/${Q.param('argv_2')}`
+        let data = Q.read().toString()
+        if(fs.existsSync(key_file)){
+          Q.ok_json(fs.readFileSync(key_file,'utf-8'));
+        }else{
+          fs.writeFileSync(key_file, data);
+          Q.ok_json(data)
+        }
+        //let writeStream = fs.createWriteStream('/tmp/' + file_name)
+        //process.stdin.pipe(writeStream)
+        //writeStream.on('finish', () => {
+        //  Q.ok_html({msg: 'Finish', code: 200})
+        //})
+      }
+      Q.resp_500("不支持的操作参数")
+    }
+  })
+})
+
+
+Q.on(Q.Method.WEBSOCKET, (r) => {
+  if(Q.param('argv_1') == 'file'){
+    let key_file = `/tmp/${Q.param('argv_2')}`
+    let info = JSON.parse(fs.readFileSync(key_file).toString()); 
+    Q.write(JSON.stringify(info))
+    Q.recv((data) => {
+      if (data) {
+        fs.appendFileSync(`/tmp/${info.fileName}`, data,{flag: 'a'});
+        info.chunkIndex = info.chunkIndex + 1;
+        info.uploadedSize = fs.statSync(`/tmp/${info.fileName}`).size
+        fs.writeFileSync(key_file, JSON.stringify(info));
+        Q.write(JSON.stringify(info))
+      }
+    })
+  }
+})

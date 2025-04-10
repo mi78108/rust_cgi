@@ -363,6 +363,7 @@ fn main() {
         // parse restful argv
         let mut restful_argv:Vec<String> = [http.headers.get("req_path").unwrap().to_string()].to_vec();
         parse_req_path(&mut restful_argv);
+        debug!("parseed req path {:?}",restful_argv);
         http.headers.insert(String::from("req_script_path"), restful_argv[0].to_string());
         if restful_argv.len() > 1 {
             restful_argv.remove(0);
@@ -417,6 +418,7 @@ fn main() {
                 if script_file_path.is_file() {
                     //文件存在 并且是文件  ok return
                     debug!("script_file_path file while= {:?}", script_file_path);
+                    parse_path[0] = script_file_path.to_str().unwrap().to_string();
                     return;
                 }
                 if script_file_path.is_dir() {
@@ -424,6 +426,7 @@ fn main() {
                     script_file_path.push("index");
                     parse_path[0] = script_file_path.to_str().unwrap().to_string();
                     debug!("script_file_path dir while= {:?}", script_file_path);
+                    parse_path[0] = script_file_path.to_str().unwrap().to_string();
                     return;
                 }
             }
