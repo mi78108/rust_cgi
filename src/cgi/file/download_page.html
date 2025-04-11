@@ -1,0 +1,44 @@
+<html>
+<title>File</title>
+
+<head>
+    <script src="/js?f=baseFunc"></script>
+    <script src="/js?f=xterm"></script>
+</head>
+
+<body>
+    <div id="content" style="background-color: black; width: 100%; height: 80%;">
+    </div>
+</body>
+<script>
+    let ctx = document.getElementById("content");
+    let xtm = new Xterm(ctx);
+    tools.req_post("/file/list").then((v) => {
+        xtm.echo(JSON.parse(v).map(f => {
+            let li = document.createElement("li");
+            li.innerText = JSON.stringify(f);
+            let btn = document.createElement("button");
+            btn.innerText = "info"
+            btn.className = "btn_info"
+            btn.name = "info_" + f.index
+            btn.setAttribute("fname", f.name)
+            li.appendChild(btn);
+            return li.outerHTML
+        }).join(""))
+
+        document.querySelectorAll(".btn_info").forEach(v => {
+            v.addEventListener("click", ev => {
+                let name = ev.target.getAttribute("fname")
+                log("oc",name)
+            })
+            v.addEventListener("dblclick",ev =>{
+                let name = ev.target.getAttribute("fname")
+                log("db",name)
+            })
+        })
+    })
+
+
+</script>
+
+</html>
