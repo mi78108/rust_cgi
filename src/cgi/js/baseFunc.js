@@ -252,32 +252,47 @@ tools.dialog_tips = class extends tools.dialog{
 
 tools.dialog_input = class extends tools.dialog{
   constructor(cfg={}, cbk){ 
-    cfg = Object.assign({title: 'Input', input: [{name: '输入一',tips: '在这里输入'}]}, cfg)
+    cfg = Object.assign({title: 'Input', inputs: [{name: '输入一',tips: '在这里输入'}]}, cfg)
     super({menus: [{title: '提交', hotkey: 'Enter',onclick: (self, ev)=>{
-      if(cbk && cbk(ev.target.value)){
-        self.close()
+      if(cfg.onok){
+        if(cfg.onok(this.inputs.map(v=>v.value))){
+          self.close()
+        }
+        return
       }
+      self.close()
     }}]})
     let self = this;
     this.wrq外容器.style.width = '20%'
-    this.wrq外容器.style.height = '20%'
+    this.wrq外容器.style.height = '30px'
     this.wrq外容器.style.top = '40%'
     this.wrq外容器.style.left = '40%'
-    this.bt标题.innerHTML = cfg.title
+    this.bt标题.innerHTML = cfg.title;
+    this.inputs = []
 
-    cfg.input.forEach(v=>{
+    this.nrq内容器.style.overflow = 'hidden'
+    cfg.inputs.forEach((v,i)=>{
       let div = document.createElement('div');
+      div.style = 'width: 100%; height: 30px; box-sizing: border-box; display: flex; justify-content: space-between;'
       let span = document.createElement('span');
+      span.style = 'width: 30%; height: 100%'
+      span.innerHTML = v.name;
 
-      let text = document.createElement('textarea')
-      text.style = 'width: 100%; height: 100%; box-sizing: border-box'
-      text.style.textAlign = 'center'
 
+      let text = document.createElement('input')
+      text.value = v.default
+      text.type = v.type 
+      text.style = 'width: 70%; height: 100%; box-sizing: border-box;'
+      text.onchange=(ev)=>{
+        v.onchange && v.onchange(ev, self)
+      }
       div.appendChild(span)
-      div.appendChild()
-      this.nrq内容器.style.overflow = 'hidden'
-      this.nrq内容器.appendChild(this.txt文本容器)
+      div.appendChild(text)
+      self.inputs.push(text)
+      this.wrq外容器.style.height = `${30*(i+2)}px`
+      this.nrq内容器.appendChild(div)
     })
+    cbk && cbk(self)
   }
 }
 
@@ -323,6 +338,113 @@ tools.dialog_progress = class extends tools.dialog {
     this.jdt容器.innerText = progress + '%'
     this.bt标题.innerHTML = `${this.title} (${progress}%)` 
     this.interval_func && this.interval_func()
+  }
+}
+
+tools.upload_file = class{
+  constructor(cfg={}){
+    cfg = Object.assign({
+      chunkSize: 512,
+      progress :{},
+    }, cfg)
+    this.file =cfg.file;
+    this.url = cfg.url
+    this.uuid = cfg.uuid
+    this.fileName = this.file.name
+    this.chunkSize = cfg.chunkSize
+    this.chunkCount = Math.ceil(this.file.size / this.chunkSize)
+    this.fileHash = ''
+    this.chunkIndex = 0
+    this.uploadSize = 0
+    this.progress_class = cfg.progress
+    this.progress_default = tools.dialog_progress.open()
+  }
+
+  async  read_chunk_bytes(index, chunkSize){
+    //this.event_progess(index, chunkSize, this.file.size)
+    let do_chunk = (index, chunkSize, file)=>{
+      return new Promise((resolve)=>{
+        let chunk = file.slice(index*chunkSize,(index + 1) * chunkSize);
+        let reader = new FileReader();
+        reader.readAsArrayBuffer(chunk);
+        reader.onload = (data)=>{
+          let bytes = data.target.result
+          resolve(bytes)
+        }
+      })
+    };
+    return await do_chunk(index, chunkSize, this.file);
+  }
+
+  async get_upload_status(){
+    let self = this;
+    let resp = await fetch(this.url,{
+      method: 'POST',
+      body: JSON.stringify({
+        uuid: self.uuid,
+        fileName: self.file.name,
+        fileSize: self.file.size,
+        fileType: self.file.type,
+        chunkSize: self.chunkSize,
+        uploadSize: 0,
+        chunkCount: self.chunkCount,
+        chunkIndex: 0
+      })
+    })
+    let info = await resp.json()
+    this.chunkSize = info.chunkSize;
+    this.chunkCount = info.chunkCount
+    this.chunkIndex = info.chunkIndex
+    this.uploadSize = info.uploadSize
+    console.log('>>>> 远端文件状态',info)
+    return info
+  }
+
+  by_websocket(){
+    let self = this;
+    this.get_upload_status()
+    let ws = new WebSocket(self.url);
+
+    ws.onopen = async ()=>{
+      console.log('上传连接成功')
+      let bytes = await self.read_chunk_bytes(self.chunkIndex,self.chunkSize);
+      self.progress_class.start && self.progress_class.start()
+      ws.send(bytes)
+    }
+    ws.onmessage = async (v)=>{
+      let pg = JSON.parse(v.data)
+      self.chunkIndex = pg[0]
+      self.uploadSize = pg[1]
+      self.progress_class.chunkStart && self.progress_class.chunkStart(self.chunkIndex)
+      let bytes = await self.read_chunk_bytes(self.chunkIndex,self.chunkSize);
+      self.progress_class.chunkEnd && self.progress_class.chunkEnd(self.chunkIndex)
+      ws.send(bytes)
+      self.progress_class.update && self.progress_class.update(Math.round((self.chunkIndex / self.chunkCount) * 100))
+      if(self.chunkIndex >= self.chunkCount){
+        self.progress_class.end && self.progress_class.end()
+        tools.dialog_tips.open({content: '上传完毕', timeout: 3000})
+        console.log('>>>> upload finish reay close')
+        ws.close()
+      }
+    }
+    ws.onclose = ()=>{
+      self.progress_class.success && self.progress_class.success()
+    }
+    ws.onerror = ()=>{
+      self.progress_class.fail && self.progress_class.fail()
+    }
+    return this
+  }
+
+
+  progress(target){
+    if(target){
+      this.progress_class = target
+    }else{
+      this.progress_class = this.progress_default
+    }
+    //update finish error
+    return this
   }
 }
 
@@ -454,60 +576,70 @@ tools.upload_file_formData = function (file, url) {
 //需要服务器端实现
 // 断点续传 实时进度 分片传输
 // /file/upload/file/uuid
-tools.upload_file_websocket = function (url, chunk, file) {
+tools.upload_file_websocket = function (url, chunk, uuid, file) {
   //请求数据 是否续传
-  fetch(url,{
-    method: 'POST',
-    body: JSON.stringify({
+  let chunks = Math.ceil(file.size / chunk);
+  //fetch(url,{
+  //  method: 'POST',
+  //  body: JSON.stringify({
+  //    uuid: uuid,
+  //    fileName: file.name,
+  //    fileSize: file.size,
+  //    fileType: file.type,
+  //    chunkSize: chunk,
+  //    uploadedSize: 0,
+  //    totleChunkIndex: chunks,
+  //    chunkIndex: 0
+  //  })
+  //}).then(r=>r.json()).then(r=>{
+  let send_chunk = (index, chunkSize, file, cbk)=>{
+    return new Promise((resolve)=>{
+      let chunk = file.slice(index*chunkSize,(index + 1) * chunkSize);
+      let reader = new FileReader();
+      reader.readAsArrayBuffer(chunk);
+      reader.onload = (data)=>{
+        let bytes = data.target.result
+        resolve(bytes)
+        cbk && cbk(bytes)
+      }
+    })
+  }
+  let ws = new WebSocket(url);
+  ws.onopen = async ()=>{
+    //开始上传
+    ws.send(JSON.stringify({
+      uuid: uuid,
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
       chunkSize: chunk,
+      uploadedSize: 0,
+      chunkCount: chunks,
       chunkIndex: 0
-    })
-  }).then(r=>r.json()).then(r=>{
-    let chunks = Math.ceil(file.size / r.chunkSize);
-    let send_chunk = (index, chunkSize, file, cbk)=>{
-      return new Promise((resolve)=>{
-        let chunk = file.slice(index*chunkSize,(index + 1) * chunkSize);
-        let reader = new FileReader();
-        reader.readAsArrayBuffer(chunk);
-        reader.onload = (data)=>{
-          let bytes = data.target.result
-          resolve(bytes)
-          cbk && cbk(bytes)
-        }
-      })
-    }
-    let ws = new WebSocket(url);
-    ws.onopen = async ()=>{
-      //开始上传
-      let bytes = await send_chunk(r.chunkIndex,r.chunkSize,file, (data)=>{
-        ws.send(data)
-      });
-      console.log('>>>>>>>>>>>> Bytes ',bytes);
-    }
-    ws.onmessage = async (m)=>{
-      //获取进度
-      let info = JSON.parse(m.data)
-      if(info.uploadedSize < info.fileSize){
-        let bytes = await send_chunk(info.chunkIndex,info.chunkSize,file);
-        ws.send(bytes)
-      }else{
-        tools.dialog_tips.open({content: '上传完毕', timeout: 5000})
-        console.log('>>>>>>>> upload done',info,chunks)
-        ws.close()
-      }
-    }
-    ws.onclose = ()=>{
+    }))
 
+  }
+  ws.onmessage = async (m)=>{
+    //获取进度
+    let info = JSON.parse(m.data)
+    if(info.uploadedSize < file.size){
+      let bytes = await send_chunk(info.chunkIndex,info.chunkSize,file);
+      ws.send(bytes)
+    }else{
+      tools.dialog_tips.open({content: '上传完毕', timeout: 3000})
+      console.log('>>>>>>>> upload done',info)
+      ws.close()
     }
-    ws.onerror = (e)=>{
-      console.error('>>> websocket uplaod error websocket err',e)
-    }
-  }).catch( e =>{
-    console.error('>>> websocket uplaod error post info',e)
-  })
+  }
+  ws.onclose = ()=>{
+
+  }
+  ws.onerror = (e)=>{
+    console.error('>>> websocket uplaod error websocket err',e)
+  }
+  //}).catch( e =>{
+  //  console.error('>>> websocket uplaod error post info',e)
+  //})
   //上传
 }
 

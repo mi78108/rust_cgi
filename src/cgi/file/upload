@@ -23,15 +23,15 @@ Q.on(Q.Method.POST, (r) => {
           count: Q.param('count') || 0,
           content: Q.read().toString()
         };
-        fs.writeFileSync(`/tmp/${file.key}`,JSON.stringify(file));
+        fs.writeFileSync(`/tmp/upload/${file.key}`,JSON.stringify(file));
         Q.ok_html("OK")
       }
       if(type == 'file'){
-        let key_file = `/tmp/${Q.param('argv_2')}`
-        let data = Q.read().toString()
+        let key_file = `/tmp/upload/${Q.param('argv_2')}`
         if(fs.existsSync(key_file)){
           Q.ok_json(fs.readFileSync(key_file,'utf-8'));
         }else{
+          let data = Q.read().toString()
           fs.writeFileSync(key_file, data);
           Q.ok_json(data)
         }
@@ -47,19 +47,28 @@ Q.on(Q.Method.POST, (r) => {
 })
 
 
-Q.on(Q.Method.WEBSOCKET, (r) => {
+Q.on(Q.Method.WEBSOCKET,(r) => {
   if(Q.param('argv_1') == 'file'){
-    let key_file = `/tmp/${Q.param('argv_2')}`
-    let info = JSON.parse(fs.readFileSync(key_file).toString()); 
-    Q.write(JSON.stringify(info))
-    Q.recv((data) => {
-      if (data) {
-        fs.appendFileSync(`/tmp/${info.fileName}`, data,{flag: 'a'});
-        info.chunkIndex = info.chunkIndex + 1;
-        info.uploadedSize = fs.statSync(`/tmp/${info.fileName}`).size
-        fs.writeFileSync(key_file, JSON.stringify(info));
-        Q.write(JSON.stringify(info))
-      }
-    })
+    let key_file = `/tmp/upload/${Q.param('argv_2')}`
+    if(fs.existsSync(key_file)){
+      info = JSON.parse(fs.readFileSync(key_file).toString()); 
+      Q.recv((data) => {
+        if (data) {
+          if(info.chunkIndex <= info.chunkCount){
+            fs.appendFileSync(`/tmp/upload/${info.fileName}`, data,{flag: 'a'});
+            info.chunkIndex += 1;
+            //info.uploadedSize = fs.statSync(`/tmp/${info.fileName}`).size
+            info.uploadSize += data.length
+            fs.writeFileSync(key_file, JSON.stringify(info));
+            Q.write(JSON.stringify([info.chunkIndex,info.uploadSize]))
+            //Q.write(JSON.stringify({
+            //  uuid: info.uuid,
+            //  chunkIndex: info.chunkIndex,
+            //  uploadedSize: info.uploadedSize
+            //}))
+          }
+        }
+      })
+    }
   }
 })
