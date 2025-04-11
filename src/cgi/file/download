@@ -8,12 +8,12 @@ Q.on(Q.Method.GET, (r)=>{
   let type = Q.param('argv_1')
   if(type){
     if(type == 'text'){
-      let key = Q.param('argv_2')
-      if(key){
-        let file = fs.readFileSync(`/tmp/${key}`,'utf-8');
+      let file_path = `/tmp/upload/${Q.param('argv_2')}`
+      if(fs.existsSync(file_path)){
+        let file = fs.readFileSync(file_path,'utf-8');
         Q.ok('text/text; charset=utf-8',JSON.parse(file).content)
       }else{
-        Q.resp_404('key 不能为空')
+        Q.resp_404('文件不存在')
       }
     }
   }

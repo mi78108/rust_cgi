@@ -52,7 +52,7 @@
                 }else{
                   txt += '失败';
                 }
-                tools.dialog_tips({
+                tools.dialog_tips.open({
                   title: `${txt}`
                 })
               })
@@ -71,7 +71,7 @@
                 }else{
                   txt += '失败';
                 }
-                tools.dialog_tips({
+                tools.dialog_tips.open({
                   title: `${txt}`
                 })
                 return v.text()
