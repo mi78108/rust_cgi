@@ -104,15 +104,37 @@
             'title': '完整上传',
             'tips': '一次POST请求',
             'onclick': () => {
-              upload_func();
             }
           },
           {
             'title': '分片上传',
-            'tips': '多次POST请求 (可断点续传)',
+            'tips': 'WebSocket (可断点续传)',
             'onclick': () => {
-              tools.dialog_input.open({},(self)=>{
-                tools.upload_file_websocket(`/file/upload/file/webfile`,32,file_target.files[0])
+              tools.dialog_input.open({
+                inputs: [
+                  {
+                    name: 'UUID',
+                    type: 'text',
+                    default: 'test_uuid'
+                  },{
+                  name: 'Chunk大小',
+                  type: 'number',
+                    default: 256
+                  }
+                ],
+                onok:(datas)=>{
+                  if(datas && datas.length == 2){
+                    //tools.upload_file_websocket(`/file/upload/file/${datas[0]}`,parseInt(datas[1]) , datas[0] ,file_target.files[0])
+                    let upf = new tools.upload_file({
+                      url: `/file/upload/file/${datas[0]}`,
+                      uuid:datas[0],
+                      chunkSize: parseInt(datas[1]),
+                      file: file_target.files[0]
+                    }).by_websocket().progress()
+                    return true
+                  }
+                  return false
+                }
               })
             }
           },
