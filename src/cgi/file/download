@@ -1,0 +1,30 @@
+#!/usr/bin/node
+
+let fs = require('fs')
+const Q = require('../_base')
+
+
+Q.on(Q.Method.GET, (r)=>{
+  let type = Q.param('argv_1')
+  if(type){
+    if(type == 'text'){
+      let key = Q.param('argv_2')
+      if(key){
+        let file = fs.readFileSync(`/tmp/${key}`,'utf-8');
+        Q.ok('text/text; charset=utf-8',JSON.parse(file).content)
+      }else{
+        Q.resp_404('key 不能为空')
+      }
+    }
+  }
+  Q.resp_500('参数错误， 或文件不存在')
+});
+
+
+Q.on(Q.Method.WEBSOCKET, (r) => {
+  Q.recv((data) => {
+    if (data) {
+      console.error(`>>> [${uid}] req_body`, data.toString())
+    }
+  })
+})
