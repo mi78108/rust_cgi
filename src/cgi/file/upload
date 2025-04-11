@@ -63,13 +63,13 @@ Q.on(Q.Method.WEBSOCKET,(r) => {
             //info.uploadedSize = fs.statSync(`/tmp/${info.fileName}`).size
             info.uploadSize += data.length
             fs.writeFileSync(key_file, JSON.stringify(info));
-            Q.write(JSON.stringify([info.chunkIndex,info.uploadSize]))
             //Q.write(JSON.stringify({
             //  uuid: info.uuid,
             //  chunkIndex: info.chunkIndex,
             //  uploadedSize: info.uploadedSize
             //}))
           }
+          Q.write(JSON.stringify([info.chunkIndex,info.uploadSize]))
         }
       })
     }
