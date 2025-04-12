@@ -1,4 +1,4 @@
-#!/usr/bin/node
+#!/usr/bin/env node
 
 let fs = require('fs')
 const Q = require('../_base')
@@ -14,7 +14,7 @@ Q.on(Q.Method.GET, (r)=>{
 
 Q.on(Q.Method.POST, (r) => {
   if(!fs.existsSync('/tmp/upload')){
-    fs.mkdtempSync('/tmp/upload')
+    fs.mkdirSync('/tmp/upload')
   }
   Q.ready(()=>{
     let type = Q.param('argv_1');
@@ -72,6 +72,7 @@ Q.on(Q.Method.WEBSOCKET,(r) => {
           Q.write(JSON.stringify([info.chunkIndex,info.uploadSize]))
         }
       })
+      process.stderr.write(">>>>>>>>>>>>>>>>>>> UPLOAD WEBSOCKET DONE\n")
     }
   }
 })
