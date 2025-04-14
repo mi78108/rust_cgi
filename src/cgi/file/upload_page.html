@@ -1,155 +1,159 @@
 <!DOCTYPE html>
 <html lang="zh-CN" style="height: 100%;">
-  <head>
+<head>
     <meta charset="UTF-8">
     <title>HOME PAGE</title>
-  </head>
-  <script src="/js?f=baseFunc"></script>
-  <body style="background-color: antiquewhite; width: 100%;height: 100%; overflow: hidden; box-sizing: border-box;">
-    <div class="container" style="width: 90%;height: 100%;text-align: center;margin-top: 8%;margin-left: 5%;">
-      <div id="btn_1" class="btn">文件上传</div>
-      <div id="btn_2" class="btn">文本上传</div>
-    </div>
-  </body>
-  <style>
-.container {
-  display: flex;
-}
+</head>
+<script src="/js?f=baseFunc"></script>
+<body style="background-color: antiquewhite; width: 100%;height: 100%; overflow: hidden; box-sizing: border-box;">
+<div class="container" style="width: 90%;height: 100%;text-align: center;margin-top: 8%;margin-left: 5%;">
+    <div id="btn_1" class="btn">文件上传</div>
+    <div id="btn_2" class="btn">文本上传</div>
+</div>
+</body>
+<style>
+    .container {
+        display: flex;
+    }
 
-.btn {
-  width: 30%;
-  height: 60%;
-  background-color: white;
-  flex: 1;
-  border: 2px solid black;
-}
-  </style>
-  <script>
+    .btn {
+        width: 30%;
+        height: 60%;
+        background-color: white;
+        flex: 1;
+        border: 2px solid black;
+    }
+</style>
+<script>
     document.getElementById("btn_2").onclick = () => {
-      let text = document.createElement("textarea");
-      let key = document.createElement("input");
-      tools.dialog.open({
-        title: '菜单',
-        menus: [
-          {
-            'title': '保存',
-            'tips': '保存到磁盘',
-            'onclick': () => {
-
-            }
-          },
-          {
-            'title': '暂存',
-            'tips': '临时存放',
-            'onclick': () => {
-              fetch(`/file/upload/text/${key.value}`,{
-                method: 'POST',
-                body: text.value
-              }).then((v)=>{
-                let txt = '上传';
-                if(v.ok && v.status == 200){
-                  txt += '成功';
-                }else{
-                  txt += '失败';
+        let text = document.createElement("textarea");
+        let key = document.createElement("input");
+        tools.dialog.open({
+            title: '菜单',
+            menus: [
+                {
+                    'title': '保存',
+                    'tips': '保存到磁盘',
+                    'onclick': () => {
+                    }
+                },
+                {
+                    'title': '暂存',
+                    'tips': '临时存放',
+                    'onclick': () => {
+                        fetch(`/file/upload/text/${key.value}`, {
+                            method: 'POST',
+                            body: text.value
+                        }).then((v) => {
+                            let txt = '上传';
+                            if (v.ok && v.status == 200) {
+                                txt += '成功';
+                            } else {
+                                txt += '失败';
+                            }
+                            tools.dialog_tips.open({
+                                title: `${txt}`
+                            })
+                        })
+                    }
+                },
+                {
+                    'title': '取回',
+                    'tips': '取回存放的文本',
+                    'onclick': () => {
+                        fetch(`/file/download/text/${key.value}`, {
+                            method: 'GET',
+                        }).then((v) => {
+                            let txt = '下载';
+                            if (v.ok && v.status == 200) {
+                                txt += '成功';
+                            } else {
+                                txt += '失败';
+                            }
+                            tools.dialog_tips.open({
+                                title: `${txt}`
+                            })
+                            return v.text()
+                        }).then(v => {
+                            text.value = v
+                        })
+                    }
                 }
-                tools.dialog_tips.open({
-                  title: `${txt}`
-                })
-              })
-            }
-          },
-          {
-            'title': '取回',
-            'tips': '取回存放的文本',
-            'onclick': () => {
-              fetch(`/file/download/text/${key.value}`,{
-                method: 'GET',
-              }).then((v)=>{
-                let txt = '下载';
-                if(v.ok && v.status == 200){
-                  txt += '成功';
-                }else{
-                  txt += '失败';
-                }
-                tools.dialog_tips.open({
-                  title: `${txt}`
-                })
-                return v.text()
-              }).then(v =>{
-                text.value = v
-              })
-            }
-          }
-        ]
-      },(self)=>{
-        text.id = 'text';
-        text.style = 'width: 100%; height: 80%; box-sizing: border-box'
-        key.placeholder = '用于存取的密钥'
-        key.style = 'width: 100%; height: calc(20% - 2px); box-sizing: border-box'
-        self.add_element(text)
-        self.add_element(key)
-        text.focus()
-      })
+            ]
+        }, (self) => {
+            text.id = 'text';
+            text.style = 'width: 100%; height: 80%; box-sizing: border-box'
+            key.placeholder = '用于存取的密钥'
+            key.style = 'width: 100%; height: calc(20% - 2px); box-sizing: border-box'
+            self.add_element(text)
+            self.add_element(key)
+            text.focus()
+        })
     }
 
     document.getElementById("btn_1").onclick = () => {
-      let file_target = document.createElement("input");
-      file_target.type = 'file'
-      if(file_target.files == null || file_target.files.length == 0){
-        file_target.click();
-      }
-      let dialig = tools.dialog.open({title: '菜单', 
-        menus: [
-          {
-            'title': '完整上传',
-            'tips': '一次POST请求',
-            'onclick': () => {
-            }
-          },
-          {
-            'title': '分片上传',
-            'tips': 'WebSocket (可断点续传)',
-            'onclick': () => {
-              tools.dialog_input.open({
-                inputs: [
-                  {
-                    name: 'UUID',
-                    type: 'text',
-                    default: 'test_uuid'
-                  },{
-                  name: 'Chunk大小',
-                  type: 'number',
-                    default: 256
-                  }
-                ],
-                onok:(datas)=>{
-                  if(datas && datas.length == 2){
-                    //tools.upload_file_websocket(`/file/upload/file/${datas[0]}`,parseInt(datas[1]) , datas[0] ,file_target.files[0])
-                    let upf = new tools.upload_file({
-                      url: `/file/upload/file/${datas[0]}`,
-                      uuid:datas[0],
-                      chunkSize: parseInt(datas[1]),
-                      file: file_target.files[0]
-                    }).by_websocket().progress()
-                    return true
-                  }
-                  return false
-                }
-              })
-            }
-          },
-        ]},(self)=>{
-          let file_target = document.createElement("input");
-          file_target.type = "file";
-          file_target.id = "file";
-          file_target.style.display = 'hidden'
-          self.nrq内容器.style.textAlign = 'center'
-          self.nrq内容器.innerHTML = '点击或拖放'
+        let file_target = document.createElement("input");
+        file_target.type = 'file'
+        if (file_target.files == null || file_target.files.length == 0) {
+            file_target.click();
+        }
+        let dialig = tools.dialog.open({
+            title: '菜单',
+            menus: [
+                {
+                    'title': '完整上传',
+                    'tips': '一次POST请求',
+                    'onclick':  () => {
+                        tools.upload_file_post_progress(file_target.files.item(0),'/file/upload/file/123',tools.dialog_progress.open()).then(v=>{
+                            console.log(v)
+                        }).catch(e=>{
+                            console.log(e)
+                        })
+                    }
+                },
+                {
+                    'title': '分片上传',
+                    'tips': 'WebSocket (可断点续传)',
+                    'onclick': () => {
+                        tools.dialog_input.open({
+                            inputs: [
+                                {
+                                    name: 'UUID',
+                                    type: 'text',
+                                    default: btoa(file_target.files.item(0).name),
+                                    tips: '默认使用文件名称base64'
+                                }, {
+                                    name: 'Chunk大小',
+                                    type: 'number',
+                                    default: 1024 * 1024,
+                                    tips : '单位 Byte'
+                                }
+                            ],
+                            onok: (datas) => {
+                                if (datas && datas.length == 2) {
+                                    let upf = new tools.upload_file({
+                                        url: `/file/upload/file/${datas[0]}`,
+                                        uuid: datas[0],
+                                        chunkSize: parseInt(datas[1]),
+                                        file: file_target.files[0]
+                                    }).by_websocket_sync().progress()
+                                    return true
+                                }
+                                return false
+                            }
+                        },(self)=>{
+                        })
+                    }
+                },
+            ]
+        }, (self) => {
+            self.nrq内容器.style.textAlign = 'center'
+            self.nrq内容器.innerHTML = '点击或拖放'
 
         });
-      file_target.onchange = (ev)=>{
-        dialig.nrq内容器.innerHTML += `<br> ${file_target.files[0].name} <br>${file_target.files[0].size}`
-      }
+        file_target.onchange = (ev) => {
+            dialig.nrq内容器.innerHTML += `<br> ${file_target.files[0].name} <br>${file_target.files[0].size}`
+        }
     }
-  </script>
+</script>
 </html>
