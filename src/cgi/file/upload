@@ -3,76 +3,79 @@
 let fs = require('fs')
 const Q = require('../_base')
 
+const upload_dir = '/tmp/upload'
+if (! fs.existsSync(upload_dir))  fs.mkdirSync(upload_dir)
 
-Q.on(Q.Method.GET, (r)=>{
-  // websocket上传文件时 请求或创建元数据
-  if(Q.param('argv_1') == 'file'){
 
-  }
-  Q.ok_html(fs.readFileSync('./file/upload_page.html','utf-8'))
+Q.on(Q.Method.GET, (r) => {
+    if (Q.param('argv_1') === 'file') {
+
+    }
+    Q.ok_html(fs.readFileSync('./file/upload_page.html', 'utf-8'))
 });
 
 Q.on(Q.Method.POST, (r) => {
-  if(!fs.existsSync('/tmp/upload')){
-    fs.mkdirSync('/tmp/upload')
-  }
-  Q.ready(()=>{
-    let type = Q.param('argv_1');
-    if(type){
-      if(type == 'text'){
-        let file = {
-          key: Q.param('argv_2'),
-          type: 'text',
-          count: Q.param('count') || 0,
-          content: Q.read().toString()
-        };
-        fs.writeFileSync(`/tmp/upload/${file.key}`,JSON.stringify(file));
-        Q.ok_html("OK")
-      }
-      if(type == 'file'){
-        let key_file = `/tmp/upload/${Q.param('argv_2')}`
-        if(fs.existsSync(key_file)){
-          Q.ok_json(fs.readFileSync(key_file,'utf-8'));
-        }else{
-          let data = Q.read().toString()
-          fs.writeFileSync(key_file, data);
-          Q.ok_json(data)
+    Q.ready(() => {
+        let type = Q.param('argv_1');
+        if (['text','file'].find(v => v === type)) {
+            if (type === 'text') {
+                let file = {
+                    key: Q.param('argv_2'),
+                    type: 'text',
+                    count: Q.param('count') || 0,
+                    content: Q.read(Q.content_length).toString()
+                };
+                fs.writeFileSync(`/tmp/upload/${file.key}`, JSON.stringify(file));
+                Q.ok_html("OK")
+            }
+            if (type === 'file') {
+                if (Q.header('Upload-File-Name')){
+                    let writeStream = fs.createWriteStream(`/tmp/upload/${Q.header('Upload-File-Name')}`)
+                    process.stdin.pipe(writeStream)
+                    writeStream.on('finish', () => {
+                      Q.ok_json({msg: 'Finish', code: 200})
+                    })
+                }else {
+                    let key_file = `/tmp/upload/${Q.param('argv_2')}`
+                    if (!fs.existsSync(key_file)) {
+                        fs.writeFileSync(key_file, Q.read(Q.content_length).toString());
+                    }
+                    Q.ok_json(fs.readFileSync(key_file, 'utf-8'));
+                }
+            }
+        }else {
+            Q.resp_500("不支持的操作参数")
         }
-        //let writeStream = fs.createWriteStream('/tmp/' + file_name)
-        //process.stdin.pipe(writeStream)
-        //writeStream.on('finish', () => {
-        //  Q.ok_html({msg: 'Finish', code: 200})
-        //})
-      }
-      Q.resp_500("不支持的操作参数")
-    }
-  })
+    })
 })
 
 
-Q.on(Q.Method.WEBSOCKET,(r) => {
-  if(Q.param('argv_1') == 'file'){
-    let key_file = `/tmp/upload/${Q.param('argv_2')}`
-    if(fs.existsSync(key_file)){
-      info = JSON.parse(fs.readFileSync(key_file).toString()); 
-      Q.recv((data) => {
-        if (data) {
-          if(info.chunkIndex <= info.chunkCount){
-            fs.appendFileSync(`/tmp/upload/${info.fileName}`, data,{flag: 'a'});
-            info.chunkIndex += 1;
-            //info.uploadedSize = fs.statSync(`/tmp/${info.fileName}`).size
-            info.uploadSize += data.length
-            fs.writeFileSync(key_file, JSON.stringify(info));
-            //Q.write(JSON.stringify({
-            //  uuid: info.uuid,
-            //  chunkIndex: info.chunkIndex,
-            //  uploadedSize: info.uploadedSize
-            //}))
-          }
-          Q.write(JSON.stringify([info.chunkIndex,info.uploadSize]))
+Q.on(Q.Method.WEBSOCKET, (r) => {
+    if (Q.param('argv_1') === 'file') {
+        let key_file = `/tmp/upload/${Q.param('argv_2')}`
+        if (fs.existsSync(key_file)) {
+            info = JSON.parse(fs.readFileSync(key_file).toString());
+            let readSize = info.chunkSize;
+            Q.ready(() => {
+                let readSize = (info.fileSize - info.uploadSize >= info.chunkSize) ? info.chunkSize : info.fileSize - info.uploadSize
+                let data = process.stdin.read(readSize)
+                if (data) {
+                    process.stderr.write(`>>>>>>>>>>>>>>>>>>> UPLOAD ${info.chunkIndex} Data Len ${data.length};\n`)
+                    if (info.chunkIndex < info.chunkCount) {
+                        info.uploadSize += data.length
+                        // 写文件
+                        fs.appendFileSync(`/tmp/upload/${info.fileName}`, data, {flag: 'a'});
+                        // 更新info
+                        info.chunkIndex += 1;
+                        fs.writeFileSync(key_file, JSON.stringify(info));
+                        Q.write(JSON.stringify([info.chunkIndex, info.uploadSize]))
+                    }
+                }
+            })
+            process.stderr.write(">>>>>>>>>>>>>>>>>>> UPLOAD WEBSOCKET DONE\n")
+            Q.recv_end(() => {
+                process.stderr.write(">>>>>>>>>>>>>>>>>>> Readable End\n")
+            })
         }
-      })
-      process.stderr.write(">>>>>>>>>>>>>>>>>>> UPLOAD WEBSOCKET DONE\n")
     }
-  }
 })

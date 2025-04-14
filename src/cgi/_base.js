@@ -8,10 +8,12 @@ class Req {
     //this.header = process.env
     this.req_path = process.env['req_path']
     this.req_method = 'HTTP' == process.env['req_body_method'] ? process.env['req_method'] : process.env['req_body_method']
+    this.content_length = parseInt(process.env['Content-Length'])
     this.response = false;
   }
 
   on(method, cbk) {
+    process.stderr.write(` >>>>>>>>>> set ${method} API\n`)
     if (this.req_method == method) {
       this.response = true;
       cbk(this)
@@ -26,7 +28,7 @@ class Req {
     this.ok('text/html', body)
   }
   ok_json(body) {
-    this.ok('application/json', body)
+    this.ok('application/json', JSON.stringify(body))
   }
 
   header(name) {
@@ -63,9 +65,11 @@ class Req {
   }
 
   ready(cbk){
-    process.stdin.on('readable', () => {
+    let call_back = ()=>{
+      process.stdin.off('readable',call_back)
       cbk && cbk()
-    })
+    }
+    process.stdin.on('readable',call_back)
   }
 
 
