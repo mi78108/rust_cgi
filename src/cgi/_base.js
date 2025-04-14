@@ -13,7 +13,6 @@ class Req {
   }
 
   on(method, cbk) {
-    process.stderr.write(` >>>>>>>>>> set ${method} API\n`)
     if (this.req_method == method) {
       this.response = true;
       cbk(this)
