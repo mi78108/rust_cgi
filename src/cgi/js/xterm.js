@@ -64,7 +64,8 @@ class Xterm {
             // Default
             'Enter': function (ev) {
                 //ctrl+enter 提交
-                if (ev.ctrlKey) {
+                //改回enter 提交
+                if (true || ev.ctrlKey) {
                     ev.preventDefault()
                     self.insertLine([`${self.user_input_dom.innerHTML}`])
                     self.cb && self.cb(self.user_input_dom.textContent);

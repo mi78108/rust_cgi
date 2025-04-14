@@ -73,8 +73,10 @@ tools.target_resize_event = function (ev, target) {
         document.onmousemove = function (e) {
             let xx = e.clientX;
             let yy = e.clientY;
-            target.style.width = xx - oL + 30 + "px"
-            target.style.height = yy - oT + 30 + "px"
+            // target.style.width = xx - oL + 30 + "px"
+            // target.style.height = yy - oT + 30 + "px"
+             target.style.width = xx - oL + 5 + "px"
+             target.style.height = yy - oT + 5 + "px"
         }
         document.onmouseup = function (e) {
             setTimeout(function () {
@@ -125,13 +127,16 @@ tools.dialog = class {
         this.wrq外容器 = document.createElement('div');
         this.cdl菜单栏 = document.createElement('div');
         this.nrq内容器 = document.createElement('div');
+        this.nrqrq内容器容器 = document.createElement('div');
         this.gb关闭 = document.createElement("span");
         this.bt标题 = document.createElement("span");
         this.cdl菜单栏.appendChild(this.bt标题)
         this.cdl菜单栏.appendChild(this.gb关闭)
         this.wrq外容器.appendChild(this.cdl菜单栏)
-        this.wrq外容器.appendChild(this.nrq内容器)
+        this.nrqrq内容器容器.appendChild(this.nrq内容器)
+        this.wrq外容器.appendChild(this.nrqrq内容器容器)
         //默认样式
+        //
         this.wrq外容器.tabIndex = 0
         this.wrq外容器.className = 'dialog'
         this.wrq外容器.style = 'border: 2px solid black; position: fixed; width: 60%; height: 60%; left: 20%; bottom: 20%; box-sizing: border-box; background: white'
@@ -146,14 +151,16 @@ tools.dialog = class {
         this.gb关闭.title = '关闭'
         this.gb关闭.style = 'color: white; position: absolute; cursor: pointer; right: 3px'
         //
-        this.nrq内容器.style = 'box-sizing: border-box; width: 100%; height: calc(100% - 30px); background: white'
+        this.nrq内容器.style = 'box-sizing: border-box; width: calc(100% - 10px); height: calc(100% - 5px); background: white'
+        this.nrqrq内容器容器.style = 'box-sizing: border-box; width: 100%; height: calc(100% - 30px); background: black'
+
         document.body.appendChild(this.wrq外容器)
         //默认事件
         let self = this;
         this.cdl菜单栏.onmousedown = (ev) => {
             tools.target_move_event(ev, self.wrq外容器)
         }
-        this.nrq内容器.onmousedown = (ev) => {
+        this.nrqrq内容器容器.onmousedown = (ev) => {
             tools.target_resize_event(ev, self.wrq外容器)
         }
         this.gb关闭.onclick = (ev) => {
@@ -306,6 +313,24 @@ tools.dialog_input = class extends tools.dialog {
     }
 }
 
+tools.canvas_text = function (text, cfg = {}) {
+    cfg = Object.assign({
+        width: '320',
+        height: '240',
+        format: 'image/png',
+        x: 40,
+        y: 20,
+    }, cfg)
+    let canvas = document.createElement('canvas')
+    let ctx = canvas.getContext('2d')
+    canvas.height = cfg.height
+    canvas.width = cfg.width
+
+    ctx.textAlign = 'center'
+    ctx.fillText(text, cfg.x, cfg.y)
+    return canvas.toDataURL(cfg.format)
+}
+
 
 tools.dialog_progress = class extends tools.dialog {
     constructor(cfg = {}, ckb) {
@@ -331,16 +356,19 @@ tools.dialog_progress = class extends tools.dialog {
 
     fail(msg) {
         this.bt标题.innerHTML += `<span style="color: red"> [失败]</span>`
-        this.interval_func = tools.anime_blink(this.jdt容器, 500, 0, () => {
-            this.jdt容器.style.background = 'red'
+        this.interval_func = tools.anime_blink(this.nrq内容器, 500, 0, () => {
+            this.nrq内容器.style.backgroundColor = 'red'
         }, () => {
-            this.jdt容器.style.background = 'white'
+            this.nrq内容器.style.backgroundColor = 'white'
         })
-        if (msg) this.jdt容器.innerHTML += `<br> ${msg}`
+        if (msg) {
+            this.nrq内容器.style.backgroundImage = `url('${tools.canvas_text(msg)}')`
+            //this.jdt容器.innerHTML += `${msg}`
+        }
     }
 
     success() {
-        this.bt标题.innerHTML += `<span style="color: green"> [成功]</span>`
+        this.bt标题.innerHTML += `<span style="color: green"> [完成]</span>`
     }
 
     update(progress) {
@@ -449,7 +477,7 @@ tools.upload_file = class {
             ws.onclose = () => {
                 if (self.chunkIndex === self.chunkCount) {
                     self.progress_class.success && self.progress_class.success()
-                }else {
+                } else {
                     self.progress_class.fail && self.progress_class.fail()
                 }
             }

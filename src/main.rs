@@ -165,14 +165,14 @@ fn main() {
             //opcode 4bit 0附加数据 1文本数据 2二进制数据 3-7保留为控制帧 8链接关闭 9ping 0xApong b-f同3-7保留
             resp.push(h1);
             //B2=  +mask+len*7
-             match len {
+            match len {
                 n if n < 126 => {
                     resp.push(len as u8)
                 }
-                n if n >= 126 && n < (2 ^ 16) -1 => {
+                n if n >= 126 && n < (2 ^ 16) - 1 => {
                     resp.push(127);
                     // 2byte
-                    resp.extend_from_slice(&[(len >> 8) as u8,len as u8]);
+                    resp.extend_from_slice(&[(len >> 8) as u8, len as u8]);
                 }
                 n if n > (2 ^ 16) - 1 && n < (2 ^ 64) - 1 => {
                     resp.push(127);
@@ -321,7 +321,7 @@ fn main() {
             req_reader: RwLock::new(reader),
             req_writer: RwLock::new(writer),
             req_stream: stream,
-            req_buffer_size: 256,
+            req_buffer_size: 1024 * 128,
             req_readed_size: RwLock::new(0),
         };
         if let Ok(size) = http.req_reader.write().unwrap().read_line(&mut buffer) {
@@ -478,10 +478,12 @@ fn main() {
                             let mut buffer = Vec::new();
                             buffer.resize(BUFFER_SIZE, 0);
                             // 按缓存读取内容，避免内存溢出
-                            while let Ok(len_opt) = req_read.read(&mut buffer) {
-                                if let Some(len) = len_opt {
-                                    debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
-                                    //debug!("tcpStream read len [{}]",len);
+                            loop {
+                                //while let Ok(len_opt) = req_read.read(&mut buffer) {
+                                let len_rst = req_read.read(&mut buffer);
+                                if let Ok(Some(len)) = len_rst {
+                                    //debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
+                                    debug!("tcpStream read len [{}]",len);
                                     if len > 0 {
                                         if let Err(e) = stdin.write(&buffer[..len]) {
                                             error!("script stdin write thread {:?} break", e);
@@ -501,30 +503,43 @@ fn main() {
                                 } else {
                                     // 忽略None， 直接再次读取
                                 }
+                                if let Err(e) = len_rst {
+                                    // 读错误， 忽略并结束
+                                    error!("tcpStream read erro [{:?}]", e);
+                                    break;
+                                }
                             }
-                            // 读错误， 忽略并结束
+                            debug!("tcpStream read func end");
                         }
                     });
                     //
                     if let Some(mut stdout) = script_stdout {
                         let mut buffer = Vec::new();
                         buffer.resize(BUFFER_SIZE, 0);
-                        while let Ok(len) = stdout.read(&mut buffer) {
-                            debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
-                            //debug!("script stdout read len [{}]", len);
-                            if len > 0 {
-                                if let Err(e) = req_write.write(&buffer[..len]) {
-                                    error!("script stdout write tcpStream  erro; break");
+                        loop {
+                            //while let Ok(len) = stdout.read(&mut buffer) {
+                            let len_rst = stdout.read(&mut buffer);
+                            if let Ok(len) = len_rst {
+                                //debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
+                                debug!("script stdout read len [{}]", len);
+                                if len > 0 {
+                                    if let Err(e) = req_write.write(&buffer[..len]) {
+                                        error!("script stdout write tcpStream  erro; break");
+                                        break;
+                                    }
+                                    debug!("script stdout write tcpStream  [{}]",len);
+                                } else {
+                                    // 正常退出， 脚本退出后读取不到
+                                    debug!("script stdout read data len 0; break");
                                     break;
                                 }
-                                debug!("script stdout write tcpStream  [{}]",len);
-                            } else {
-                                // 正常退出， 脚本退出后读取不到
-                                debug!("script stdout read data len 0; break");
+                            }
+                            if let Err(e) = len_rst {
+                                error!("script stdout read erro [{:?}]", e);
                                 break;
                             }
                         }
-                        debug!("script stdout read end");
+                        debug!("script stdout read func end");
                     }
 
                     //script_stdin_thread.join().unwrap();
