@@ -219,6 +219,7 @@ fn main() {
             let mut reader = BufReader::new(self.http.req_stream.try_clone().unwrap());
             let mut bytes = [0u8; 2];
             if let Err(e) = reader.read_exact(&mut bytes) {
+                error!("websocket read package length fail read bytes part1 {:?}",e);
                 return Err(e);
             }
             debug!(" websocket read byte 1:{:b}",bytes[0]);
@@ -245,6 +246,7 @@ fn main() {
                 _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid data"))
             };
             if let Err(e) = length_rst {
+                error!("websocket read package length fail read bytes part2  {:?}",e);
                 return Err(e);
             }
             let length: usize = length_rst.unwrap();
@@ -252,6 +254,7 @@ fn main() {
             //part3 mask 4byte
             let mut mask = [0u8; 4];
             if let Err(e) = reader.read_exact(&mut mask) {
+                error!("websocket read package length fail read bytes mask {:?}",e);
                 return Err(e);
             }
             //println!("get mask {:?}", _mask);
@@ -259,7 +262,7 @@ fn main() {
             debug!("Websocket read package length {}",length);
             data.resize(length, 0);
             if let Err(e) = reader.read_exact(data) {
-                debug!("websocket read package length fail read bytes:{} {:?}",length,e);
+                error!("websocket read package length fail read bytes:{} {:?}",length,e);
                 return Err(e);
             }
             //unmask
@@ -317,7 +320,7 @@ fn main() {
             req_method: String::from("GET"),
             req_path: String::from("/"),
             req_version: String::from(""),
-            headers: HashMap::from([(String::from("req_body_method"), String::from("HTTP")), (String::from("Req_Buffer_Size"), String::from("256"))]),
+            headers: HashMap::from([(String::from("req_body_method"), String::from("HTTP")), (String::from("Req_Buffer_Size"), String::from(format!("{}", 1024 * 128)))]),
             req_reader: RwLock::new(reader),
             req_writer: RwLock::new(writer),
             req_stream: stream,

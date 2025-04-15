@@ -104,7 +104,7 @@
                     'title': '完整上传',
                     'tips': '一次POST请求',
                     'onclick':  () => {
-                        tools.upload_file_post_progress(file_target.files.item(0),'/file/upload/file/123',tools.dialog_progress.open()).then(v=>{
+                        tools.upload_file_post_progress(file_target.files.item(0),'/file/upload/file',tools.dialog_progress.open()).then(v=>{
                             console.log(v)
                         }).catch(e=>{
                             console.log(e)
