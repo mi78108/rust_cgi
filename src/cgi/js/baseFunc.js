@@ -145,7 +145,7 @@ tools.dialog = class {
         //
         this.bt标题.title = document.getElementsByClassName('dialog').length + 1
         this.bt标题.innerHTML = cfg.title;
-        this.bt标题.style = 'color: white; marginLeft: 3px; max-width: 50%'
+        this.bt标题.style = 'color: white; marginLeft: 3px; max-width: 50%; display: inline-block; white-space: nowrap; overflow-x: hidden'
         //
         this.gb关闭.innerHTML = '[X]'
         this.gb关闭.title = '关闭'
@@ -333,7 +333,7 @@ tools.canvas_text = function (text, cfg = {}) {
 
 
 tools.dialog_progress = class extends tools.dialog {
-    constructor(cfg = {}, ckb) {
+    constructor(cfg = {}, cbk) {
         cfg = Object.assign({
             title: '进度条'
         }, cfg)
@@ -362,6 +362,7 @@ tools.dialog_progress = class extends tools.dialog {
             this.nrq内容器.style.backgroundColor = 'white'
         })
         if (msg) {
+          console.error(msg)
             this.nrq内容器.style.backgroundImage = `url('${tools.canvas_text(msg)}')`
             //this.jdt容器.innerHTML += `${msg}`
         }
@@ -403,23 +404,22 @@ tools.upload_file = class {
         })
     }
 
-    read_chunk_bytes(index, chunkSize, cbk) {
+    read_chunk_bytes(index, chunkSize) {
         return new Promise((resolve) => {
             let chunk = this.file.slice(index * chunkSize, (index + 1) * chunkSize);
             let reader = new FileReader();
             reader.readAsArrayBuffer(chunk);
             reader.onload = (data) => {
                 let bytes = data.target.result
-                console.log(`data chunk ${index}, size ${bytes.byteLength}`)
-                cbk && cbk(bytes)
+                console.log(`data chunk ${index}, chunkSize ${chunkSize} ,size ${bytes.byteLength}`)
                 resolve(bytes)
             }
         })
     }
 
-    async get_upload_status() {
+    get_upload_status() {
         let self = this;
-        let resp = await fetch(this.url, {
+        return fetch(this.url, {
             method: 'POST',
             body: JSON.stringify({
                 uuid: self.uuid,
@@ -432,25 +432,21 @@ tools.upload_file = class {
                 chunkIndex: 0
             })
         })
-        let info = await resp.json()
-        self.chunkSize = info.chunkSize;
-        self.chunkCount = info.chunkCount
-        self.chunkIndex = info.chunkIndex
-        self.uploadSize = info.uploadSize
-        console.log('>>>> 远端文件状态', info)
-        return info
     }
 
     // 同步上传 同步读写 可靠性高
     by_websocket_sync() {
         let self = this;
-        this.get_upload_status().then(resp => {
-            console.log('------------', resp)
+        this.get_upload_status().then(resp => resp.json()).then(info =>{
+            self.chunkSize = info.chunkSize;
+            self.chunkCount = info.chunkCount
+            self.chunkIndex = info.chunkIndex
+            self.uploadSize = info.uploadSize
             let ws = new WebSocket(self.url);
 
             ws.onopen = () => {
-                console.log('上传连接成功')
-                self.read_chunk_bytes(self.chunkIndex, self.chunkSize, (bytes) => {
+                console.log('上传连接成功', info)
+                self.read_chunk_bytes(info.chunkIndex, info.chunkSize).then((bytes) => {
                     ws.send(bytes)
                 });
                 self.progress_class.start && self.progress_class.start()
@@ -461,7 +457,7 @@ tools.upload_file = class {
                 self.chunkIndex = pg[0]
                 self.uploadSize = pg[1]
                 self.progress_class.chunkStart && self.progress_class.chunkStart(self.chunkIndex)
-                self.read_chunk_bytes(self.chunkIndex, self.chunkSize, (bytes) => {
+                self.read_chunk_bytes(self.chunkIndex, self.chunkSize).then((bytes) => {
                     self.progress_class.chunkEnd && self.progress_class.chunkEnd(self.chunkIndex)
                     ws.send(bytes)
                 });
@@ -478,7 +474,7 @@ tools.upload_file = class {
                 if (self.chunkIndex === self.chunkCount) {
                     self.progress_class.success && self.progress_class.success()
                 } else {
-                    self.progress_class.fail && self.progress_class.fail()
+                    self.progress_class.fail && self.progress_class.fail('服务器意外关闭 (尝试减小chunk 大小)')
                 }
             }
             ws.onerror = (e) => {

@@ -27,7 +27,7 @@ class Req {
     this.ok('text/html', body)
   }
   ok_json(body) {
-    this.ok('application/json', JSON.stringify(body))
+    this.ok('application/json; charset=utf-8', body)
   }
 
   header(name) {
@@ -69,6 +69,12 @@ class Req {
       cbk && cbk()
     }
     process.stdin.on('readable',call_back)
+  }
+
+  recv_ready(cbk){
+    process.stdin.on('readable', () => {
+      cbk && cbk()
+    })
   }
 
 
