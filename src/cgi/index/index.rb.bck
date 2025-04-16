@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+
+require 'redis'
+require 'json'
+require_relative '../_base'
+
+
+
+Q.on :WEBSOCKET do |r|
+  redis = Redis.new
+  #
+  Q.on_close do |v|
+      redis.publish 'client_que', "#{$$} offline"
+      count = redis.hget('clients', 'count').to_i
+      redis.hset('clients', 'count', count - 1)
+      STDERR.puts '============================'
+  end
+  key = "#{$$}"
+  Q.send "#{key} online"
+  Thread.new do
+    redis.subscribe('client_que') do |on|
+      on.message do |c, m|
+        Q.send m
+      end
+    end
+  end
+  #
+  redis.publish 'client_que', "#{$$} online"
+  redis.hset 'clients', "#{key}", 'online'
+  count = redis.hget('clients', 'count').to_i + 1
+  redis.hset('clients', "count", count)
+  Q.send ({'opt' => 'cmd', 'value' => count }).to_json
+  Q.recv do |data|
+    Q.send data
+  end
+end
+
+Q.on :GET do |r|
+  resp_ok :html, File::read('./index/page.html')
+end
+
