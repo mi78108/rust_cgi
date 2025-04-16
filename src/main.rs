@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt::{format, Debug, Display};
 use std::ops::{Add, AddAssign};
 use std::ptr::null;
-use std::{io, vec};
+use std::{io, process, vec};
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, Error, ErrorKind};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::RwLock;
 use std::thread;
+use std::thread::Thread;
 use std::time::Duration;
 
 //use nix::unistd::Pid;
@@ -24,6 +25,8 @@ use base64::encode;
 use libc::setbuf;
 use sha1::digest::impl_write;
 use sha1::{Digest, Sha1};
+use sha1::digest::generic_array::typenum::Pow;
+
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -74,9 +77,9 @@ fn main() {
         match stream {
             Ok(_stream) => {
                 std::thread::spawn(move || {
-                    debug!("new Req thread started");
+                    println!("call start new Req thread started");
                     handle(_stream);
-                    debug!("handle Req thread ended");
+                    println!("call end handle Req thread ended\r\n\r\n");
                 });
             }
             Err(e) => {
@@ -156,25 +159,26 @@ fn main() {
     }
 
     impl Websocket {
-        fn write_with_h1(&self, h1: u8, data: &[u8]) -> io::Result<usize> {
+        fn write_with_h1(&self, head_byte_1: u8, data: &[u8]) -> io::Result<usize> {
             let mut writer = BufWriter::new(self.http.req_stream.try_clone()?);
             let mut resp: Vec<u8> = Vec::new();
             let len = data.len();
             //B1= +fin+rsv1+rsv2+rsv3+opcode*4+
             //fin 1末尾包 0还有后续包
             //opcode 4bit 0附加数据 1文本数据 2二进制数据 3-7保留为控制帧 8链接关闭 9ping 0xApong b-f同3-7保留
-            resp.push(h1);
+            resp.push(head_byte_1);
             //B2=  +mask+len*7
+            //debug!("websocket ready to write len {}",data.len());
             match len {
                 n if n < 126 => {
                     resp.push(len as u8)
                 }
-                n if n >= 126 && n < (2 ^ 16) - 1 => {
-                    resp.push(127);
+                n if n >= 126 && n < (2usize).pow(16) => {
+                    resp.push(126);
                     // 2byte
                     resp.extend_from_slice(&[(len >> 8) as u8, len as u8]);
                 }
-                n if n > (2 ^ 16) - 1 && n < (2 ^ 64) - 1 => {
+                n if n >= (2usize).pow(16)  && n < (2usize).pow(64)=> {
                     resp.push(127);
                     // 8byte
                     (0..=7).for_each(|v| resp.push((len >> 8 * (7 - v)) as u8));
@@ -183,17 +187,15 @@ fn main() {
                     return Err(ErrorKind::FileTooLarge.into());
                 }
             };
-            //mask 服务器发送不需要
-            //let _mask = [13u8, 9, 78, 108];
+            //let _mask = [13u8, 9, 78, 108];  mask 服务器发送不需要
             //data
             resp.extend(data);
-            match writer.write(&resp) {
-                Ok(len) => {
-                    writer.flush()?;
-                    return Ok(len);
+            return writer.write(&resp).and_then(|len| {
+                if let Err(e) = writer.flush() {
+                    return Err(e);
                 }
-                Err(e) => Err(e),
-            }
+                return Ok(len);
+            }).or_else(|e| Err(e))
         }
     }
     impl From<Http> for Websocket {
@@ -463,7 +465,12 @@ fn main() {
             script.current_dir(WDIR.read().unwrap().as_str());
             //let mut env = req.env().clone();
             script.env_clear().envs(req.env()).stdin(Stdio::piped()).stdout(Stdio::piped());
-            debug!("OS EXEC [{}][{}]",script.get_current_dir().unwrap().to_string_lossy(),script.get_program().to_string_lossy());
+            debug!("OS EXEC [{}][{}] with {} pid {}",
+                script.get_current_dir().unwrap().to_string_lossy(),
+                script.get_program().to_string_lossy(),
+                format!("{} {}",req.env().get("req_method").unwrap_or("".to_string().borrow()),req.env().get("req_body_method").unwrap_or("".to_string().borrow())),
+                process::id()
+            );
             match script.spawn() {
                 Ok(mut child) => {
                     let req_body_method = req.env().get("req_body_method").unwrap().to_string();
@@ -486,7 +493,7 @@ fn main() {
                                 let len_rst = req_read.read(&mut buffer);
                                 if let Ok(Some(len)) = len_rst {
                                     //debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
-                                    debug!("tcpStream read len [{}]",len);
+                                    debug!("tcpStream read len [{}]", len);
                                     if len > 0 {
                                         if let Err(e) = stdin.write(&buffer[..len]) {
                                             error!("script stdin write thread {:?} break", e);
@@ -527,7 +534,7 @@ fn main() {
                                 debug!("script stdout read len [{}]", len);
                                 if len > 0 {
                                     if let Err(e) = req_write.write(&buffer[..len]) {
-                                        error!("script stdout write tcpStream  erro; break");
+                                        error!("script stdout write tcpStream  erro; break [{:?}]",e);
                                         break;
                                     }
                                     debug!("script stdout write tcpStream  [{}]",len);
@@ -548,9 +555,11 @@ fn main() {
                     //script_stdin_thread.join().unwrap();
                     // kill thread
                     // kill script
+                    debug!("script ready to kill");
                     if let Err(e) = child.kill() {
                         error!("script kill erro {:?}", e)
                     }
+                    debug!("script kill done wait result");
                     if let Ok(code) = child.wait() {
                         debug!("script kill done [{:?}]",code);
                         if !code.success() {
@@ -575,8 +584,6 @@ fn main() {
     }
 
     fn handle(stream: TcpStream) {
-        println!("call start");
         call_script(parse_req(stream));
-        println!("call end");
     }
 }

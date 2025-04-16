@@ -5,6 +5,8 @@ function log(...msg) {
     console.log(msg)
 }
 
+tools.store = {}
+
 tools.anime = class {
     constructor(target) {
         this.target = target
@@ -56,6 +58,17 @@ tools.target_move_event = function (ev, target) {
             document.onmouseup = null;
         }
     }
+}
+
+tools.target_stillBottom_event = function (ev, target){
+    let scrollHeight = target.scrollHeight || 1;
+    // let domHeight = target.offsetHeight;
+    // let domScrollTop = target.scrollTop;
+    // //console.log(domScrollTop, domHeight,scrollHeight)
+    // if (domScrollTop + domHeight + 100 > scrollHeight) {
+        //console.log(this)
+        target.scrollTop = scrollHeight;
+    //}
 }
 
 tools.target_resize_event = function (ev, target) {
@@ -812,6 +825,20 @@ function copyToclip(txt) {
         document.body.removeChild(input);  // 删除新创建的input标签
     }
 }
+
+async function copyText(selector) {
+    // 选中要复制的单元格
+    let tdElement = document.querySelector(selector);
+    if (tdElement) {
+        try {
+            await navigator.clipboard.writeText(tdElement.innerText); // 使用Clipboard API复制文本
+            console.log('Text copied successfully');
+        } catch (err) {
+            console.error('Failed to copy!', err);
+        }
+    }
+}
+// 使用方法，例如复制第一个td的内容
 
 
 function preventAll(ev) {
