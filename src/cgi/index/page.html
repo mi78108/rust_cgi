@@ -1,58 +1,141 @@
 <!DOCTYPE html>
 <html lang="en-US" style="height: 100%">
-  <head>
+<head>
     <title>INDEX PAGE</title>
-  </head>
-  <script src="/js/baseFunc"></script>
-  <script src="/js/xterm"></script>
-  <style>
-.page {
-  border: black solid 2px;
-}
-
+</head>
+<script src="/js/baseFunc"></script>
+<script src="/js/xterm"></script>
+<style>
     .xterm {
-      box-shadow: 0 0 2px 3px red;
+        box-shadow: 0 0 2px 3px red;
     }
-  </style>
-  <body style="width: 100%;height: 100%;overflow: hidden;box-sizing: border-box;">
-    <div style="background-color: white; width: 100%;height: 100%">
-      <div class="xterm" id="xterm" style="width: calc(100% - 20px);height: 70%;;background-color: black"></div>
-      <div class="page" style="width: calc(100% - 20px)">
+</style>
+<body style="width: 100%;height: 100%;overflow: hidden;box-sizing: border-box;">
+<div style="background-color: white; width: 100%;height: 100%">
+    <div class="xterm" id="xterm" style="width: calc(100% - 20px);height: 70%;;background-color: black"></div>
+    <div class="page" style="border: black solid 2px;width: calc(100% - 20px)">
         <button id="btn_1">上传</button>
         <button id="btn_2">寄存</button>
-      </div>
-      <div class="page" id="info" style="width: calc(100% - 20px);height:  23%"></div>
     </div>
-    <script>
-      let node = document.getElementById('xterm');
-      let ws = new WebSocket(document.location.href.replace('http', 'ws'))
-      let xtm = new Xterm(node, (input) => {
+    <div class="page" id="info"
+         style="border: black solid 2px ;width: calc(100% - 20px);height:  23%; overflow-y: auto"></div>
+</div>
+<script>
+    let node = document.getElementById('xterm');
+    let info = document.getElementById('info');
+    let ws = new WebSocket(document.location.href.replace('http', 'ws'))
+    info.update = (self) => {
+        let info_length = document.getElementsByClassName('info').length
+        self.style.backgroundImage = `url('${tools.canvas_text(`消息数量 ${info_length}`)}')`
+        tools.target_stillBottom_event(null, info)
+        if(info_length > 10){
+            Array.from(self.getElementsByClassName('info')).slice(0,info_length - 10).forEach(v=>{
+                v.remove()
+            })
+        }
+    }
+
+    let xtm = new Xterm(node, (input) => {
         console.log(`用户输入 : ${input}`)
-        ws.send(input)
-      })
+        let info = {
+            opt: 'input',
+            value: input
+        }
+        if (input.startsWith('@')) {
+            let val = info.value.split(' ')
+            console.log(val)
+            switch (val[0]) {
+                case '@refresh': {
+                    info.opt = 'cmd';
+                    break
+                }
+                case '@send' :{
+                    info.opt = 'send'
+                    info.to = val[1]
+                    info.value = val.slice(2).join(' ')
+                    break
+                }
+                default : {
+                    console.log('unKnown CMD')
+                }
+            }
+        }
+        console.log('Send Req',info)
+        ws.send(JSON.stringify(info))
+    })
 
-      ws.onopen = () => {
+    ws.onopen = () => {
         node.style.boxShadow = '0 0 2px 3px green'
-      }
-      ws.onmessage = (value) => {
-        xtm.echo(value.data)
-      }
-      ws.onclose = () => {
+    }
+    ws.onmessage = (value) => {
+        console.log(`收到信息: ${value.data}`)
+        let data = JSON.parse(value.data.toString())
+        if (data.opt === 'text') {
+            xtm.echo(data.value)
+        }
+        if (data.opt === 'info') {
+            display_info(data.value)
+        }
+        if (data.opt === 'set') {
+            Object.entries(data.value).forEach(([k,v]) =>{
+                tools.store['k'] = v;
+            })
+        }
+        info.update(info)
+    }
+    ws.onclose = () => {
         node.style.boxShadow = '0 0 2px 3px red'
-      }
-      //
-      document.getElementById('btn_1').onclick = ()=>{
+    }
+    //
+    document.getElementById('btn_1').onclick = () => {
         tools.dialog.open({}, (self) => {
-          let page = document.createElement('iframe');
-          page.src = '/file/upload'
-          page.style.width = '100%'
-          page.style.height = '100%'
+            let page = document.createElement('iframe');
+            page.src = '/file/upload'
+            page.style.width = '100%'
+            page.style.height = '100%'
 
-          self.add_element(page)
+            self.add_element(page)
         })
-      }
-    </script>
-  </body>
-  <script>
-  </script>
+    }
+
+    //
+    function display_info(value) {
+        let now = new Date()
+        let div = document.createElement('div')
+        div.className = 'info'
+        div.style = 'border: green solid 2px; heigth: 80%; width: auto'
+        div.innerHTML += `<span style="margin-left: 50%">At: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()} [${info.getElementsByClassName('info').length + 1}]</span><br>`
+        Object.entries(value).forEach(([k, v]) => {
+            div.innerHTML += `<span class="send_to" value="${k}" title="单击打开" style="cursor: pointer">${k} : ${v}</span><br>`
+        })
+        div.innerHTML += '<br>'
+        document.getElementById('info').appendChild(div)
+    }
+
+    info.onclick = (ev) => {
+        console.log(ev)
+        let value = ev.target.getAttribute('value')
+        ws.send(JSON.stringify({
+            opt: 'send',
+            value: {
+                opt : 'req',
+                value: ''
+            },
+            to: value
+        }))
+        if (ev.target.getAttribute('value')){
+            tools.dialog.open({
+
+            },(self)=>{
+                let iframe = document.createElement('iframe');
+                iframe.style = 'height: 100%; width: 100%'
+                iframe.src = `/index/room/${ev.target.getAttribute('value')}`
+                self.nrq内容器.appendChild(iframe)
+            })
+        }
+    }
+</script>
+</body>
+<script>
+</script>
 </html>

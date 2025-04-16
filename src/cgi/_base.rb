@@ -12,12 +12,12 @@ def mime_type name
   return mime + '; charset=utf-8'
 end
 
-def recv_length buffer_size, &cb
+def recv_length buffer_size, &cbk
   loop do
     if select([STDIN])
       break if STDIN.eof?
       data = STDIN.read_nonblock buffer_size
-      cb.call(data) if block_given?
+      cbk.call(data) if block_given?
     end
   end
 end
@@ -51,9 +51,7 @@ def resp code, status, mime, body, header={}
   exit 0
 end
 
-
-BEGIN {
-  class Array
+ class Array
     def some(&cbk)
       for v in self
         rst = cbk.call v
@@ -75,15 +73,21 @@ BEGIN {
   end
 
 
+BEGIN {
   class Req
-    attr_accessor :response
+    attr_accessor :response, :onclosefunc
     attr_reader :header, :req_method, :req_path
     def initialize()
       @req_path = ENV['req_path']
       @req_method = 'HTTP'.eql?(ENV['req_body_method']) ? ENV['req_method'] : ENV['req_body_method']
       @header = ENV.to_h
+      @onclosefunc = Array.new
       @response = false
 
+    end
+
+    def method_is(method)
+       @req_method.to_sym == method.to_sym
     end
 
     def param(name)
@@ -108,16 +112,26 @@ BEGIN {
     end
 
 
-    def recv &cb
+    def recv &cbk
       buffer_size = ENV['Req_Buffer_Size'].to_i
       if ENV['req_body_method'] == 'HTTP'
         buffer_size = ENV['Content-Length'].to_i
       end
-      recv_length buffer_size, &cb
+      recv_length buffer_size, &cbk
+    end
+
+    def send text
+      STDOUT.write text
+      STDOUT.flush
+      sleep 0.1
+    end
+
+    def on_close &cbk
+      @onclosefunc.push cbk
     end
 
     def on(method, &cbk)
-      if @req_method.to_sym == method.to_sym
+      if method_is method.to_sym
         @response = true
         begin
           cbk.call self
@@ -134,6 +148,14 @@ BEGIN {
 
 
 END {
-  exit 0 if Q.response
+  Q.onclosefunc.each do |func|
+    func.call()
+  end
+  if Q.response
+      exit 0
+  end
+  if Q.method_is :WEBSOCKET
+      exit 0
+  end
   resp_501 'unHandle'
 }

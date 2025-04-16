@@ -97,6 +97,13 @@ class Xterm {
             }
             if (i === 1) {
                 cell.innerHTML = contents && contents[0] || '';
+                cell.ondblclick = (ev)=>{
+                    navigator.clipboard.writeText(cell.innerText).then(v=>{
+                        console.log('复制成功')
+                    }).catch(e=>{
+                        console.error('复制失败',e)
+                    })
+                }
             }
             if (i === 2) {
                 cell.innerHTML = (contents && contents[2]) || time_now();
@@ -105,10 +112,11 @@ class Xterm {
         });
         //still bottom
         let scrollHeight = this.node_dom.scrollHeight || 1;
-        //let _dh = $(this.tdm).height();
-        let domHeight = this.node_dom.height;
+        let domHeight = this.node_dom.clientHeight;
         let domScrollTop = this.node_dom.scrollTop;
+        //console.log(domScrollTop, domHeight,scrollHeight)
         if (domScrollTop + domHeight + 100 > scrollHeight) {
+            //console.log(this)
             this.node_dom.scrollTop = scrollHeight;
         }
         cb && cb(row);
