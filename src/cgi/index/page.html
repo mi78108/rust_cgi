@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="en-US" style="height: 100%">
+<html lang="zh-CN" style="height: 100%">
 <head>
+    <meta charset="UTF-8">
     <title>INDEX PAGE</title>
 </head>
 <script src="/js/baseFunc"></script>
@@ -21,17 +22,22 @@
          style="border: black solid 2px ;width: calc(100% - 20px);height:  23%; overflow-y: auto"></div>
 </div>
 <script>
+    let params = tools.url_param_parse(window.location.href)
     let node = document.getElementById('xterm');
     let info = document.getElementById('info');
     //let ws = new WebSocket(document.location.href.replace('http', 'ws'))
     //let ws = new WebSocket(`${document.location.protocol.replace('http', 'ws')}//${document.location.host}${document.location.pathname}`)
-    let ws = new WebSocket(`${document.location.protocol.replace('http', 'ws')}//${document.location.host}/room/default`)
+    let room_id = 'default'
+    if (Object.values(params).find(v => v === 'room')) {
+        room_id = params.part_0
+    }
+    let ws = new WebSocket(`${document.location.protocol.replace('http', 'ws')}//${document.location.host}/room/${room_id}`)
     info.update = (self) => {
         let info_length = document.getElementsByClassName('info').length
         self.style.backgroundImage = `url('${tools.canvas_text(`消息数量 ${info_length}`)}')`
         tools.target_stillBottom_event(null, info)
-        if(info_length > 10){
-            Array.from(self.getElementsByClassName('info')).slice(0,info_length - 10).forEach(v=>{
+        if (info_length > 10) {
+            Array.from(self.getElementsByClassName('info')).slice(0, info_length - 10).forEach(v => {
                 v.remove()
             })
         }
@@ -48,13 +54,30 @@
             console.log(val)
             switch (val[0]) {
                 case '@refresh': {
+                    info.value = input
                     info.opt = 'cmd';
                     break
                 }
-                case '@send' :{
-                    info.opt = 'send'
+                case '@call' : {
+                    info.value = val[0]
+                    info.opt = 'cmd'
                     info.to = val[1]
-                    info.value = val.slice(2).join(' ')
+                    info.room = tools.gen_random_text()
+                    info.text = val.slice(2).join(' ')
+                    //
+                    tools.dialog.open({}, (self) => {
+                        let iframe = document.createElement('iframe');
+                        iframe.style = 'height: 100%; width: 100%'
+                        iframe.src = `/index/room/${info.room}`
+                        self.nrq内容器.appendChild(iframe)
+                    })
+                    break
+                }
+                case '@send' : {
+                    info.value = val[0]
+                    info.opt = 'cmd'
+                    info.to = val[1]
+                    info.text = val.slice(2).join(' ')
                     break
                 }
                 default : {
@@ -62,7 +85,7 @@
                 }
             }
         }
-        console.log('Send Req',info)
+        console.log('Send Req', info)
         ws.send(JSON.stringify(info))
     })
 
@@ -76,10 +99,10 @@
             xtm.echo(data.value)
         }
         if (data.opt === 'info') {
-            display_info(data.value)
+            display_info(data)
         }
         if (data.opt === 'set') {
-            Object.entries(data.value).forEach(([k,v]) =>{
+            Object.entries(data.value).forEach(([k, v]) => {
                 tools.store['k'] = v;
             })
         }
@@ -107,8 +130,43 @@
         div.className = 'info'
         div.style = 'border: green solid 2px; heigth: 80%; width: auto'
         div.innerHTML += `<span style="margin-left: 50%">At: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()} [${info.getElementsByClassName('info').length + 1}]</span><br>`
-        Object.entries(value).forEach(([k, v]) => {
-            div.innerHTML += `<span class="send_to" value="${k}" title="单击打开" style="cursor: pointer">${k} : ${v}</span><br>`
+        Object.entries(value.value).forEach(([k, v]) => {
+            let span = document.createElement('span')
+            if (value['cmd']) {
+                if (value['cmd'] === '@call') {
+                    span.className = 'info_item click req'
+                    span.setAttribute('value', v)
+                    span.title= '单击'
+                    div.style.cursor = 'pointer'
+                    span.innerText = `${k} : ${v}`
+
+                    tools.anime_blink(div, 1000, 0, (target) => {
+                        target.style.backgroundColor = 'white'
+                    }, (target) => {
+                        target.style.backgroundColor = 'red'
+                    })
+                    //event
+                    div.onclick = () => {
+                        tools.dialog.open({}, (self) => {
+                            let iframe = document.createElement('iframe');
+                            iframe.style = 'height: 100%; width: 100%'
+                            iframe.src = `/index/room/${value.room}`
+                            self.nrq内容器.appendChild(iframe)
+                        })
+                    }
+                }
+                if (value['cmd'] === '@refresh') {
+                    span.className = 'info_item click'
+                    span.setAttribute('value', k)
+                    span.style.cursor = 'pointer'
+                    span.innerText = `${k} : ${v}`
+                }
+            } else {
+                span.className = 'info_item'
+                span.innerText = `${k} : ${v}`
+            }
+            div.appendChild(span)
+            div.appendChild(document.createElement('br'))
         })
         div.innerHTML += '<br>'
         document.getElementById('info').appendChild(div)
@@ -117,23 +175,22 @@
     info.onclick = (ev) => {
         console.log(ev)
         let value = ev.target.getAttribute('value')
-        ws.send(JSON.stringify({
-            opt: 'send',
-            value: {
-                opt : 'req',
-                value: ''
-            },
-            to: value
-        }))
-        if (ev.target.getAttribute('value')){
-            tools.dialog.open({
-
-            },(self)=>{
-                let iframe = document.createElement('iframe');
-                iframe.style = 'height: 100%; width: 100%'
-                iframe.src = `/index/room/${ev.target.getAttribute('value')}`
-                self.nrq内容器.appendChild(iframe)
-            })
+        if (ev.target.classList.contains('click')) {
+            ws.send(JSON.stringify({
+                opt: 'send',
+                value: {
+                    Notice: '邀请'
+                },
+                to: value
+            }))
+            if (ev.target.getAttribute('value')) {
+                tools.dialog.open({}, (self) => {
+                    let iframe = document.createElement('iframe');
+                    iframe.style = 'height: 100%; width: 100%'
+                    iframe.src = `/index/room/${value}`
+                    self.nrq内容器.appendChild(iframe)
+                })
+            }
         }
     }
 </script>
