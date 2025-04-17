@@ -9,6 +9,7 @@ use std::io::{BufReader, BufWriter, Error, ErrorKind};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::fs::{metadata, read};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::RwLock;
@@ -19,10 +20,13 @@ use std::time::Duration;
 //use nix::unistd::Pid;
 //use nix::sys::signal::{self,Signal};
 use clap::{App, Arg};
-use libc::{self, size_t};
+//use libc::{self, signal, size_t, SIGTERM};
 
 use base64::encode;
-use libc::setbuf;
+//use libc::setbuf;
+//use libc::kill;
+//use libc::sighandler_t;
+
 use sha1::digest::impl_write;
 use sha1::{Digest, Sha1};
 use sha1::digest::generic_array::typenum::Pow;
@@ -519,9 +523,11 @@ fn main() {
                                     break;
                                 }
                             }
+                            //drop(stdin);
                             debug!("tcpStream read func end");
                         }
                     });
+                    //drop(script_stdin_thread);
                     //
                     if let Some(mut stdout) = script_stdout {
                         let mut buffer = Vec::new();
@@ -551,17 +557,14 @@ fn main() {
                         }
                         debug!("script stdout read func end");
                     }
-
-                    //script_stdin_thread.join().unwrap();
-                    // kill thread
                     // kill script
-                    debug!("script ready to kill");
+                    error!("script ready to kill {:?}", child.id());
                     if let Err(e) = child.kill() {
                         error!("script kill erro {:?}", e)
                     }
                     debug!("script kill done wait result");
                     if let Ok(code) = child.wait() {
-                        debug!("script kill done [{:?}]",code);
+                        debug!(">>> [{}] script kill done [{:?}]",_req.env().get("req_script_path").unwrap(),code);
                         if !code.success() {
                             error!("script exit erro [{:?}]",code);
                             _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]", code).as_bytes()).unwrap();

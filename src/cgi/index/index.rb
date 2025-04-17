@@ -8,17 +8,16 @@ require 'connection_pool'
 require_relative '../_base'
 
 
+key = $$.to_s
+uid = $$.to_s
 #全局广播
 #聊天室
 Q.on :WEBSOCKET do |r|
-  key = $$.to_s
-  uid = $$.to_s
     if Q.param('argv_1') == 'room'
         if Q.param('argv_2')
             key = Q.param('argv_2')
         end
     end
-  STDERR.puts ">>>>>>>>>>>>>>>>>>>>>>> #{key}"
 
   redis ||= ConnectionPool::Wrapper.new do
       Redis.new
@@ -73,7 +72,7 @@ Q.on :WEBSOCKET do |r|
   redis.hset('clients', "count", count)
 
   Q.send({'opt' => 'text', 'value'=> "#{uid} 已上线"}.to_json)
-  Q.send ({'opt' => 'set', 'value' => {'uid' => uid} }).to_json
+  Q.send ({'opt' => 'set', 'value' => {'uid' => uid, 'room' => key} }).to_json
   if Q.param('argv_1') == 'room'
     #Q.send ({'opt' => 'set', 'value' => {'sendTo' => "#{key}"} }).to_json
   else
