@@ -90,6 +90,11 @@ BEGIN {
        @req_method.to_sym == method.to_sym
     end
 
+    def param_or(name, val)
+        return val if param(name) == false
+        return param(name)
+    end
+
     def param(name)
       value = ENV["req_param_#{name}"]
       if value.nil? or value.empty?

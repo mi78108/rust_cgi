@@ -65,7 +65,15 @@ class Xterm {
             'Enter': function (ev) {
                 //ctrl+enter 提交
                 //改回enter 提交
-                if (true || ev.ctrlKey) {
+                if (ev.ctrlKey) {
+                    ev.preventDefault()
+                    self.insertLine([`${self.user_input_dom.innerHTML}`])
+                    self.cb && self.cb(self.user_input_dom.innerHTML);
+                    //
+                    self.user_input_dom.childNodes.forEach(v => v.remove());
+                    self.user_input_dom.innerHTML = ''
+                    return true
+                }else {
                     ev.preventDefault()
                     self.insertLine([`${self.user_input_dom.innerHTML}`])
                     self.cb && self.cb(self.user_input_dom.textContent);
@@ -115,10 +123,10 @@ class Xterm {
         let domHeight = this.node_dom.clientHeight;
         let domScrollTop = this.node_dom.scrollTop;
         //console.log(domScrollTop, domHeight,scrollHeight)
-        if (domScrollTop + domHeight + 100 > scrollHeight) {
+       // if (domScrollTop + domHeight + 100 > scrollHeight) {
             //console.log(this)
             this.node_dom.scrollTop = scrollHeight;
-        }
+       // }
         cb && cb(row);
         return row;
     }
