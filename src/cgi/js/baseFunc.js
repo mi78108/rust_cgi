@@ -7,6 +7,47 @@ function log(...msg) {
 
 tools.store = {}
 
+tools.url_param_parse = (url) => {
+    let resp = {}
+    let two = url.split('?')
+    if (two.length > 0) {
+        resp = Object.assign(resp, two[0].split('/').filter(v => v.length > 0).reverse().reduce((a,c)=>{
+            a[`part_${Object.keys(a).length}`] = c;
+            return a
+        },{}))
+    }
+    if (two.length === 2) {
+        let tree = two[1].split('&')
+        Object.assign(resp, tree.reduce((a, c) => {
+            let tmp = c.split('=');
+            a[tmp[0]] = tmp[1]
+            return a
+        }, {}))
+    }
+    return resp
+}
+
+tools.gen_random_text = (cfg = {
+    number: true,
+    char: true,
+    length: 4
+})=>{
+    let dict = ''
+    if (cfg.number){
+        dict += '0123456789'
+    }
+    if (cfg.char){
+        dict += 'abcdefghijklmnopqrst'
+    }
+    dict = dict.split('')
+    let rst = ''
+    for (let i = 0; i < cfg.length; i++) {
+        let index = Math.round(Math.random() * dict.length)
+        rst += dict[index]
+    }
+    return rst
+}
+
 tools.anime = class {
     constructor(target) {
         this.target = target
@@ -14,7 +55,7 @@ tools.anime = class {
 }
 
 tools.anime_blink = function (target, frame, timeout, cb_begin, cb_end) {
-    cb_end && cb_end()
+    cb_end && cb_end(target)
     let count = true;
     let interval = setInterval(() => {
         if (document.body.contains(target)) {
@@ -60,16 +101,17 @@ tools.target_move_event = function (ev, target) {
     }
 }
 
-tools.target_stillBottom_event = function (ev, target){
+tools.target_stillBottom_event = function (ev, target) {
     let scrollHeight = target.scrollHeight || 1;
     // let domHeight = target.offsetHeight;
     // let domScrollTop = target.scrollTop;
     // //console.log(domScrollTop, domHeight,scrollHeight)
     // if (domScrollTop + domHeight + 100 > scrollHeight) {
-        //console.log(this)
-        target.scrollTop = scrollHeight;
+    //console.log(this)
+    target.scrollTop = scrollHeight;
     //}
 }
+
 
 tools.target_resize_event = function (ev, target) {
     if (ev.button === 2) {
@@ -88,8 +130,8 @@ tools.target_resize_event = function (ev, target) {
             let yy = e.clientY;
             // target.style.width = xx - oL + 30 + "px"
             // target.style.height = yy - oT + 30 + "px"
-             target.style.width = xx - oL + 5 + "px"
-             target.style.height = yy - oT + 5 + "px"
+            target.style.width = xx - oL + 5 + "px"
+            target.style.height = yy - oT + 5 + "px"
         }
         document.onmouseup = function (e) {
             setTimeout(function () {
@@ -375,7 +417,7 @@ tools.dialog_progress = class extends tools.dialog {
             this.nrq内容器.style.backgroundColor = 'white'
         })
         if (msg) {
-          console.error(msg)
+            console.error(msg)
             this.nrq内容器.style.backgroundImage = `url('${tools.canvas_text(msg)}')`
             //this.jdt容器.innerHTML += `${msg}`
         }
@@ -450,7 +492,7 @@ tools.upload_file = class {
     // 同步上传 同步读写 可靠性高
     by_websocket_sync() {
         let self = this;
-        this.get_upload_status().then(resp => resp.json()).then(info =>{
+        this.get_upload_status().then(resp => resp.json()).then(info => {
             self.chunkSize = info.chunkSize;
             self.chunkCount = info.chunkCount
             self.chunkIndex = info.chunkIndex
@@ -838,6 +880,7 @@ async function copyText(selector) {
         }
     }
 }
+
 // 使用方法，例如复制第一个td的内容
 
 
