@@ -65,7 +65,7 @@
                     info.room = tools.gen_random_text()
                     info.text = val.slice(2).join(' ')
                     //
-                    tools.dialog.open({}, (self) => {
+                    tools.dialog.open({title:`会话 ${info.room}`}, (self) => {
                         let iframe = document.createElement('iframe');
                         iframe.style = 'height: 100%; width: 100%'
                         iframe.src = `/index/room/${info.room}`
@@ -147,7 +147,7 @@
                     })
                     //event
                     div.onclick = () => {
-                        tools.dialog.open({}, (self) => {
+                        tools.dialog.open({title:`会话 ${value.room}`}, (self) => {
                             let iframe = document.createElement('iframe');
                             iframe.style = 'height: 100%; width: 100%'
                             iframe.src = `/index/room/${value.room}`
