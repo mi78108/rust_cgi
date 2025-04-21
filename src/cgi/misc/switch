@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require_relative '../_base'
+
+Q.on(:GET) do |r|
+    resp 301, 'Moved Permanently', '', '', {'Location' => "#{`/home/hawk/Sync/bin/getcpolaraddr | grep https`}"}
+end

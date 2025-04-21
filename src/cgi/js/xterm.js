@@ -30,7 +30,7 @@ class Xterm {
         this.user_input_dom.style.color = 'white';
         this.user_input_dom.style.minHeight = this.row_h / 2 + 'px';
 
-        this.table.style.width = "100%";
+        this.table.style.width = "calc(100% - 20px)";
         this.table.style.color = "white";
         this.table.style.tableLayout = "fixed";
         // this.tb.style.height = "100%";
