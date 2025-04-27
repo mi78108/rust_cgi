@@ -9,24 +9,33 @@ require_relative '../_base'
 
 uid = $$.to_s
 room = Q.param_or('argv_1', 'default')
+expire_time = 60 * 30
+room_key = "client_#{room}"
+uid_key = "client_#{uid}"
 #全局广播
 #聊天室
 Q.on :WEBSOCKET do |r|
   thread = Thread.new do
       redis = Redis.new
-      redis.subscribe('client_opt', "client_#{room}", "client_#{uid}") do |on|
+      redis.subscribe('client_opt', room_key, uid_key, '__keyevent@0__:expired') do |on|
         on.message do |c, val|
             STDERR.puts ">>>>>>>>>>>>>>>>>>>>>>> redis sub recv #{uid} #{c} #{val}"
+            if c == '__keyevent@0__:expired'
+              Q.send ({'opt' => 'info', 'value' => {"Notice" => "Room: #{room} -> 已过期关闭"}}).to_json
+              Q.send ({'opt' => 'text', 'value' => "Room: #{room} 已过期关闭" }).to_json
+              val == room_key && exit(0)
+              next
+            end
             begin
                 val = JSON.parse val.force_encoding('utf-8')
                 if val['from'] != uid
-                    if c == "client_#{room}"
+                    if c == room_key
                         # 同一房间 下发信息
                         STDERR.puts ">>>>>>>>>>>>>>>>>>>>>>> redis sub send"
                         val['type'] = 'room'
                         Q.send val.to_json
                     end
-                    if c == "client_#{uid}"
+                    if c == uid_key
                         # 指定发送 下发信息
                         val['type'] = 'private'
                         Q.send val.to_json
@@ -48,18 +57,20 @@ Q.on :WEBSOCKET do |r|
 
   redis = Redis.new
   redis.publish 'client_opt', ({'opt' => 'info', 'value' => {"Notice" => "#{room} -> #{uid} 已上线"}}).to_json
-  redis.hset "client_#{room}", "#{uid}", 'online'
-  redis.hincrby("client_#{room}", "count", 1)
+  redis.hset room_key, "#{uid}", 'online'
+  redis.hincrby(room_key, "count", 1)
+  redis.expire(room_key, expire_time)
 
   Q.send ({'opt' => 'text', 'value'=> "#{uid} 已上线"}).to_json
   Q.send ({'opt' => 'set', 'value' => {'uid' => uid, 'room' => room}}).to_json
-  Q.send ({'opt' => 'info', 'event' => 'click' ,'value' => redis.hgetall("client_#{room}")}).to_json
+  Q.send ({'opt' => 'info', 'event' => 'click' ,'value' => redis.hgetall(room_key)}).to_json
 
   Q.recv do |data|
+      redis.expire(room_key, expire_time)
       info = JSON.parse data
       case info['opt']
           when 'input'
-              redis.publish "client_#{room}", ({'opt' => 'text', 'from' => uid ,'to' => room, 'value' => info['value']}).to_json
+              redis.publish room_key, ({'opt' => 'text', 'from' => uid ,'to' => room, 'value' => info['value']}).to_json
               info['opt'] = 'info'
               info['value'] = {'Status': '发送成功'}
           when 'cmd'
@@ -67,7 +78,7 @@ Q.on :WEBSOCKET do |r|
                   when '@refresh'
                       info['opt'] = 'info'
                       info['cmd'] = '@refresh'
-                      info['value'] = redis.hgetall("client_#{room}")
+                      info['value'] = redis.hgetall(room_key)
                   when '@send'
                       redis.publish "client_#{info['to']}" , ({'opt' => 'text', 'cmd'=>'@send', 'from' => uid, 'room' => room, 'to' => info['to'], 'value' => info['text']}).to_json
                       info['opt'] = 'info'
@@ -89,10 +100,9 @@ Q.on :WEBSOCKET do |r|
 
   Q.on_close do
       Thread::kill thread
-      #redis = Redis.new
       redis.publish 'client_opt', ({'opt' => 'info', 'value' => {"Notice" => "#{room} -> #{uid} 已下线"}}).to_json
-      redis.hincrby "client_#{room}", "count", -1
-      redis.hdel "client_#{room}", uid
+      redis.hincrby room_key, "count", -1
+      redis.hdel room_key, uid
       redis.close
   end
 end
