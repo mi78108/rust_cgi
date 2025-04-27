@@ -128,7 +128,7 @@ BEGIN {
     def send text
       STDOUT.write text
       STDOUT.flush
-      sleep 0.1
+      sleep 0.01
     end
 
     def on_close &cbk
