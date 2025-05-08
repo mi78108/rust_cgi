@@ -6,7 +6,7 @@ use std::ptr::null;
 use std::{io, process, vec};
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, Error, ErrorKind};
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::fs::{metadata, read};
 use std::os::fd::AsRawFd;
@@ -319,6 +319,7 @@ fn main() {
     }
 
     fn parse_req(stream: TcpStream) -> Box<dyn Req + Send + Sync> {
+        let peer_addr = stream.peer_addr().unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut writer = BufWriter::new(stream.try_clone().unwrap());
         let mut buffer = String::new();
@@ -326,7 +327,13 @@ fn main() {
             req_method: String::from("GET"),
             req_path: String::from("/"),
             req_version: String::from(""),
-            headers: HashMap::from([(String::from("req_body_method"), String::from("HTTP")), (String::from("Req_Buffer_Size"), String::from(format!("{}", 1024 * 128)))]),
+            headers: HashMap::from([
+                (String::from("req_body_method"), String::from("HTTP")), 
+                (String::from("Req_Buffer_Size"), String::from(format!("{}", 1024 * 128))),
+                (String::from("Req_Peer_Addr"),String::from(format!("{}:{}",peer_addr.ip().to_string(),peer_addr.port()))),
+                (String::from("Req_Peer_Ip"),String::from(format!("{}",peer_addr.ip().to_string()))),
+                (String::from("Req_Peer_Port"),String::from(format!("{}",peer_addr.port()))),
+            ]),
             req_reader: RwLock::new(reader),
             req_writer: RwLock::new(writer),
             req_stream: stream,
