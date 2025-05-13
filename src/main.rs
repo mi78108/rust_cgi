@@ -574,7 +574,9 @@ fn main() {
                         debug!(">>> [{}] script kill done [{:?}]",_req.env().get("req_script_path").unwrap(),code);
                         if !code.success() {
                             error!("script exit erro [{:?}]",code);
-                            _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]", code).as_bytes()).unwrap();
+                            if let Err(e) = _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]", code).as_bytes()) {
+                            error!("script exit erro resp erro [{:?}]",e);
+                            }
                         }
                     }
 
@@ -586,7 +588,9 @@ fn main() {
                 }
                 Err(e) => {
                     error!("script spawn  erro {:?}",e);
-                    req.write(format!("HTTP/1.0 404 Not Found\r\nContent-Type: text/text\r\n\r\nscript spawn fail [ {} ]", e.to_string()).as_bytes()).unwrap();
+                    if let Err(e) = req.write(format!("HTTP/1.0 404 Not Found\r\nContent-Type: text/text\r\n\r\nscript spawn fail [ {} ]", e.to_string()).as_bytes()) {
+                            error!("script spawn erro resp erro [{:?}]",e);
+                    }
                 }
                 // do something
             }
