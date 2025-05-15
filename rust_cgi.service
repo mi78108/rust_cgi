@@ -4,7 +4,7 @@ Description=Rust_CGI Program
 [Service]
 Type=simple
 Environment="RUST_LOG=debug"
-ExecStart=/home/${USERNAME}/Web/rust_cgi -l 0.0.0.0:8080 -w /home/${USERNAME}/Web/cgi
+ExecStart=/home/${USERNAME}/Web/rust_cgi -l 0.0.0.0:8080 -f /home/${USERNAME}/Web/cgi
 
 [Install]
 WantedBy=multi-user.target
