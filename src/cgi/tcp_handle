@@ -1,0 +1,5 @@
+#!/usr/bin/env zsh
+
+while read -r val; do
+    echo "$val"
+done
