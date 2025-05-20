@@ -7,4 +7,4 @@ Environment="RUST_LOG=debug"
 ExecStart=/home/${USERNAME}/Web/rust_cgi -l 0.0.0.0:8080 -f /home/${USERNAME}/Web/cgi
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
