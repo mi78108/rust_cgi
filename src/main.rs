@@ -1,5 +1,7 @@
 use clap::{App, Arg};
-use std::net::{TcpListener,  UdpSocket};
+use udp_class::udp_base::Client;
+use std::net::{SocketAddr, TcpListener, UdpSocket};
+use std::str::FromStr;
 use std::sync::OnceLock;
 use std::thread::spawn;
 
@@ -45,6 +47,20 @@ fn main() {
             .help("bind port address")
             .takes_value(true).conflicts_with("addr").requires("host")
         )
+        .arg(
+            Arg::with_name("serv")
+            .short("s")
+            .long("serv")
+            .help("upstream client address")
+            .takes_value(true)
+            .value_delimiter(",")
+        )
+        .arg(
+            Arg::with_name("udp")
+            .short("u")
+            .long("udp")
+            .help("listen udp")
+        )
         .get_matches();
 
     if let Some(wd) = matches.value_of("workdir") {
@@ -53,18 +69,27 @@ fn main() {
         });
         info!("set workdir [{}]", wd);
     }
+    if let Some(serv) = matches.values_of("serv"){
+        serv.enumerate().for_each(|(i,v)|{
+            if let Ok(mut write) = udp_class::udp_base::CLIENTS.write(){
+                write.insert(format!("serv_{}",i), Client { from:"static".to_string(), addr: SocketAddr::from_str(v).unwrap(), name: format!("SERV_{}",i), via: None });
+            }  
+        });
+    }
 
     let addr = match matches.is_present("addr") {
         true =>  matches.value_of("addr").unwrap_or_else(|| "0.0.0.0:8080").to_string(),
-        false => format!("{}:{}",matches.value_of("host").unwrap(), matches.value_of("port").unwrap())
+        false => format!("{}:{}",matches.value_of("host").unwrap_or("127.0.0.1"), matches.value_of("port").unwrap_or("8080"))
     };
     let addr = addr.as_str();
 
-    let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro",addr).as_str());
-    spawn(move ||{
-        udp_listener.set_broadcast(true).unwrap();
-        udp_class::udp_base::handle(udp_listener);
-    });
+    if matches.is_present("udp"){
+        let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro",addr).as_str());
+        spawn(move ||{
+            udp_listener.set_broadcast(true).unwrap();
+            udp_class::udp_base::handle(udp_listener);
+        });
+    }
 
     let tcp_listener = TcpListener::bind(addr).expect(format!("bind {} erro", addr).as_str());
     info!("Listen on [{}] Work in [{}]", addr, WDIR.get().unwrap());
@@ -83,5 +108,5 @@ fn main() {
         };
     }
 
-    
+
 }
