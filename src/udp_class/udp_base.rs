@@ -108,6 +108,16 @@ fn call_script(socket:UdpSocket){
                         }
                         socket.send_to(&buffer[0..len], addr).unwrap();
                     }
+                    if let Err(e) = child.kill() {
+                        error!("script kill erro {:?}", e)
+                    }
+                    debug!("script kill done wait result");
+                    if let Ok(code) = child.wait() {
+                        debug!(">>> [udp_handle] script kill done [{:?}]",code);
+                        if !code.success() {
+                            error!("script exit erro [{:?}]", code);
+                        }
+                    }
                 },
                 Err(e) =>{
                     error!("udp script spawn  erro {:?}", e);
