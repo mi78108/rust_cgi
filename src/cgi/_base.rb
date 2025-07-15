@@ -51,31 +51,31 @@ def resp code, status, mime, body, header={}
   exit 0
 end
 
- class Array
-    def some(&cbk)
-      for v in self
-        rst = cbk.call v
-        return rst if rst != false
-      end
+class Array
+  def some(&cbk)
+    for v in self
+      rst = cbk.call v
+      return rst if rst != false
     end
+  end
 
-    def some_proc(&cbk)
-      for v in self
-        rst = cbk.call v[0]
-        if rst != false
-          if not v[1].nil?
-            return v[1].call(rst)
-          end
-          return rst
+  def some_proc(&cbk)
+    for v in self
+      rst = cbk.call v[0]
+      if rst != false
+        if not v[1].nil?
+          return v[1].call(rst)
         end
+        return rst
       end
     end
   end
+end
 
 
 BEGIN {
   class Req
-    attr_accessor :response, :onclosefunc
+    attr_accessor :response, :onclosefunc, :resp_header
     attr_reader :header, :req_method, :req_path
     def initialize()
       @req_path = ENV['req_path']
@@ -83,16 +83,17 @@ BEGIN {
       @header = ENV.to_h
       @onclosefunc = Array.new
       @response = false
+      @resp_header = Hash.new
 
     end
 
     def method_is(method)
-       @req_method.to_sym == method.to_sym
+      @req_method.to_sym == method.to_sym
     end
 
     def param_or(name, val)
-        return val if param(name) == false
-        return param(name)
+      return val if param(name) == false
+      return param(name)
     end
 
     def param(name)
@@ -102,6 +103,10 @@ BEGIN {
       else
         return value
       end
+    end
+
+    def resp_ok mime, body
+      resp 200, "OK", mime, body, @resp_header
     end
 
     def ok(mime, body)
@@ -128,7 +133,7 @@ BEGIN {
     def send text
       STDOUT.write text
       STDOUT.flush
-      sleep 0.01
+      sleep 0.1
     end
 
     def on_close &cbk
@@ -157,10 +162,10 @@ END {
     func.call()
   end
   if Q.response
-      exit 0
+    exit 0
   end
   if Q.method_is :WEBSOCKET
-      exit 0
+    exit 0
   end
   resp_501 'unHandle'
 }

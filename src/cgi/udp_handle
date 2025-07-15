@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
 
-while read -r val; do
-  print $val
-done
+read -n 8 val
+echo $val
+return 0

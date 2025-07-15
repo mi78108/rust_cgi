@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require_relative '../_base'
+
+Q.on(:GET) do |r|
+  r.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{Q.param('m')}"`
+end
+ 
+Q.on(:POST) do |r|
+  r.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{STDIN.read}"`
+end
