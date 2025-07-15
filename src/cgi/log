@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'open3'
+require_relative './_base'
+
+
+Q.on(:WEBSOCKET) do |r|
+  puts "Ready"
+  Open3.popen3('journalctl --follow') do |stdin, stdout, stderr, wait_thr|
+    # 读取标准输出
+    stdout.each do |line|
+      #r.send `printf "'%s'\n" "#{line.gsub(/'\|/,'<>')}" | bat --color=always -p -l json | ansi2html -i`
+      r.send line
+    end
+
+    stderr.each do |line|
+      r.send "Error: #{line}"
+    end
+
+    # 等待命令执行完毕
+    exit_status = wait_thr.value
+    r.send "Command exited with status: #{exit_status.exitstatus}"
+  end
+end

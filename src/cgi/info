@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require_relative './_base'
+
+Q.on(:GET) do |r|
+  r.resp_header['Access-Control-Allow-Origin'] = '*'
+  if Q.param('argv_1') == 'clients'
+    v = JSON.parse(`echo -e "\x05\x02client_list" | socat - udp-sendto:127.0.0.1:1309`)
+    r.ok_html v.reduce(Hash.new) {|a, c| a[`curl http://#{c}:1309/info/hostname`] = c; a }.to_json
+  end
+  if Q.param('argv_1') == 'hostname'
+    r.ok_html `hostname`.chomp
+  end
+  if Q.param('argv_1') == 'bg'
+    r.resp_header['Content-Type'] = 'video/mp4'
+    r.ok 'video/mp4', File.open('/home/hawk/Downloads/lmud.mp4', 'rb').read
+  end
+end
+
+Q.on(:POST) do |r|
+  r.resp_header['Access-Control-Allow-Origin'] = '*'
+end
+
+Q.on(:WEBSOCKET) do |r|
+  if Q.param('argv_1') == 'clients'
+    puts 'Scan ...'
+    loop do
+      puts `echo -e "\x05\x02client_list" | socat - udp-sendto:127.0.0.1:1309`
+      sleep 30
+    end
+  end
+end
+

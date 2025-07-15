@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require_relative './_base'
+
+Q.on(:GET) do |r|
+  r.ok_json ENV.to_a.to_json
+end
