@@ -168,7 +168,7 @@ Q.on(Q.Method.WEBSOCKET).map('/shell/index').do(async (v1) => {
   }
   const storecode = fs.readFileSync(authfile).toString();
   fs.unlinkSync(authfile);
-  if (true || Q.param('code') === storecode) {
+  if (Q.param('code') === storecode) {
     const shell = fs.existsSync('/bin/zsh') ? 'zsh' : 'bash';
     Q.write(`using ${shell} ${Q.header("req_params")}\r\n`)
     const cmd = pty.spawn(shell, [], {
