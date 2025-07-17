@@ -1,4 +1,5 @@
 let fs = require('fs')
+const { console } = require('inspector')
 
 class Req {
   constructor() {
@@ -15,6 +16,20 @@ class Req {
     this.closed = false
     this.mapped = false
     this.response = false;
+  }
+
+
+
+  mapon(method, path) {
+    return new Promise((resolve, reject) => {
+      if (this.req_method === method) {
+        if (this.req_path === path) {
+          console.error('==================================',process.env['req_params']);
+
+          resolve(...(process.env['req_params'].split('&').map(v => v.split('=')[1])))
+        }
+      }
+    })
   }
 
   on(method, cbk) {
@@ -116,14 +131,14 @@ class Req {
   }
 
 
-  resp(code, status, mime, body, header = {}) {
-    if(this.response == true){
+  async resp(code, status, mime, body, header = {}) {
+    if (this.response == true) {
       return
-    }else{
+    } else {
       this.response = true;
     }
     body = Buffer.from(body)
-    let resp_body=Buffer.from(`HTTP/1.0 ${code} ${status}\r\n`);
+    let resp_body = Buffer.from(`HTTP/1.0 ${code} ${status}\r\n`);
     for (let [k, v] of Object.entries(Object.assign({
       'Connection': 'close',
       'Content-Type': `${mime}`,
@@ -132,8 +147,8 @@ class Req {
       process.stderr.write(`${k} -> ${v} \r\n`)
       resp_body += `${k}: ${v}\r\n`;
     }
-    resp_body+=`\r\n${body}`
-    process.stdout.write(resp_body,()=>{
+    resp_body += `\r\n${body}`
+    await process.stdout.write(resp_body, () => {
       //this.response = true;
       process.exit(0)
     })
