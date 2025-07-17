@@ -95,27 +95,28 @@ fn call_script(socket:UdpSocket){
 
             match script.spawn() {
                 Ok(mut child)=>{
+                    let pid = child.id();
                     let mut script_stdin = child.stdin.take().unwrap();
                     let mut script_stdout = child.stdout.take().unwrap();
 
                     if let Err(e) = script_stdin.write_all(&buffer[0..len]){
-                        error!("udp script stdin write erro {:?}", e);
+                        error!("[{}] udp script stdin write erro {:?}",pid, e);
                     }
                     while let Ok(len) =  script_stdout.read(&mut buffer) {
-                        debug!("udp script stdout read {}",len);
+                        debug!("[{}] udp script stdout read {}",pid,len);
                         if len == 0 {
                             break;
                         }
                         socket.send_to(&buffer[0..len], addr).unwrap();
                     }
                     if let Err(e) = child.kill() {
-                        error!("script kill erro {:?}", e)
+                        error!("[{}] script kill erro {:?}",pid, e)
                     }
-                    debug!("script kill done wait result");
+                    debug!("[{}] script kill done wait result",pid);
                     if let Ok(code) = child.wait() {
-                        debug!(">>> [udp_handle] script kill done [{:?}]",code);
+                        debug!("[{}] >>> [udp_handle] script kill done [{:?}]",pid,code);
                         if !code.success() {
-                            error!("script exit erro [{:?}]", code);
+                            error!("[{}] script exit erro [{:?}]", pid, code);
                         }
                     }
                 },
