@@ -49,6 +49,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
         );
         match script.spawn() {
             Ok(mut child) => {
+                let pid = child.id();
                 debug!(
                     "OS RUN [{}] with {} pid {}",
                     script.get_program().to_string_lossy(),
@@ -77,16 +78,16 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                             match req_read.read(&mut buffer) {
                                 //debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                                 Ok(Some(len)) => {
-                                    debug!("tcpStream read len [{}]", len);
+                                    debug!("[{}] tcpStream read len [{}]", pid ,len);
                                     if len > 0 {
                                         if let Err(e) = stdin.write(&buffer[..len]) {
-                                            error!("script stdin write thread {:?} break", e);
+                                            error!("[{}] script stdin write thread {:?} break",pid, e);
                                             break;
                                         }
-                                        debug!("script stdin write [{}]", len);
+                                        debug!("[{}] script stdin write [{}]", pid, len);
                                         if let Err(e) = stdin.flush() {
                                             error!(
-                                                "script stdin write thread flush erro {:?}; break",
+                                                "[{}] script stdin write thread flush erro {:?}; break",pid,
                                                 e
                                             );
                                             break;
@@ -95,7 +96,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                                         //buffer.clear();
                                     } else {
                                         debug!(
-                                            "script stdin thread tcpStream read data len 0; break"
+                                            "[{}] script stdin thread tcpStream read data len 0; break",pid
                                         );
                                         break;
                                     }
@@ -106,13 +107,13 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
 
                                 Err(e) => {
                                     // 读错误， 忽略并结束
-                                    error!("tcpStream read erro [{:?}]", e);
+                                    error!("[{}] tcpStream read erro [{:?}]",pid, e);
                                     break;
                                 }
                             }
                         }
                         //drop(stdin);
-                        debug!("tcpStream read func end");
+                        debug!("[{}] tcpStream read func end",pid);
                         }
                     });
                     //drop(script_stdin_thread);
@@ -125,56 +126,56 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                             match stdout.read(&mut buffer) {
                                 Ok(len) => {
                                     //debug!("script stdout read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
-                                    debug!("script stdout read len [{}]", len);
+                                    debug!("[{}] script stdout read len [{}]",pid, len);
                                     if len > 0 {
                                         if let Err(e) = req_write.write(&buffer[..len]) {
                                             error!(
-                                                "script stdout write tcpStream  erro; break [{:?}]",
+                                                "[{}] script stdout write tcpStream  erro; break [{:?}]",pid,
                                                 e
                                             );
                                             break;
                                         }
-                                        debug!("script stdout write tcpStream  [{}]", len);
+                                        debug!("[{}] script stdout write tcpStream  [{}]", pid, len);
                                     } else {
                                         // 正常退出， 脚本退出后读取不到
-                                        debug!("script stdout read data len 0; break");
+                                        debug!("[{}] script stdout read data len 0; break",pid);
                                         break;
                                     }
                                 }
                                 Err(e) => {
-                                    error!("script stdout read erro [{:?}]", e);
+                                    error!("[{}] script stdout read erro [{:?}]",pid, e);
                                     break;
                                 }
                             }
                         }
-                        debug!("script stdout read func end");
+                        debug!("[{}] script stdout read func end",pid);
                         }
                         // kill script
-                        debug!("script ready to kill {:?}", child.id());
+                        debug!("[{}] script ready to kill {:?}",pid, child.id());
                         if let Err(e) = child.kill() {
-                            error!("script kill erro {:?}", e)
+                            error!("[{}] script kill erro {:?}",pid, e)
                         }
-                        debug!("script kill done wait result");
+                        debug!("[{}] script kill done wait result",pid);
                         if let Ok(code) = child.wait() {
                             debug!(
-                                ">>> [{}] script kill done [{:?}]",
+                                "[{}] >>> [{}] script kill done [{:?}]",pid,
                                 _req.env().get("req_script_path").unwrap(),
                                 code
                             );
                             if !code.success() {
-                                error!("script exit erro [{:?}]", code);
+                                error!("[{}] script exit erro [{:?}]", pid,code);
                                 if _req.env().get("req_body_method").unwrap().eq("HTTP") {
                                     if let Err(e) = _req.write(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/text\r\n\r\nscript panic [ {:?} ]", code).as_bytes()) {
-                                        error!("script exit erro resp erro [{:?}]",e);
+                                        error!("[{}] script exit erro resp erro [{:?}]",pid,e);
                                     }
                                 }
                             }
                         }
 
                         if let Err(e) = _req.close() {
-                            error!("tcpStream close erro {:?}", e);
+                            error!("[{}] tcpStream close erro {:?}",pid, e);
                         } else {
-                            debug!("tcpStream closed");
+                            debug!("[{}] tcpStream closed",pid);
                         }
                     }
                     Err(e) => {
@@ -252,7 +253,6 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                     if ["GET","POST","PUT","DELETE","PATCH","HEAD","OPTIONS","CONNECT"].iter().find(|v| buffer.starts_with(v.as_bytes())).is_some()
                     {
                         debug!("Tcp Req Handled With HTTP");
-
                         call_script(http_func::parse_req(stream));
                     } else {
                         debug!("Tcp Req Handled With Tcp default");
