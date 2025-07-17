@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+
+import Q from '../_base_.js'
+
+Q.map(Q.Method.GET, /test\/test/).then(async (r) => {
+    console.error('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>', r)
+    await Q.ok_json({ a: 1 })
+})
