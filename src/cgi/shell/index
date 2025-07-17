@@ -52,7 +52,7 @@ Q.on(Q.Method.GET)
     if (Q.param('uid')) {
       let authcode = u().split('-')[3]
       fs.writeFileSync(`/tmp/webshell_${Q.param('uid')}`, authcode)
-      //      e.execSync(`echo 'AuthCode: ${authcode}' | mail -s 'Gentoo Shell' mi78108@foxmail.com -a 'Content-Type:text/plain; charset=utf-8; format=flowed' -a 'From: webshell <systemd@desktop.local>'`)
+      e.execSync(`echo 'AuthCode: ${authcode}' | mail -s 'Gentoo Shell' mi78108@foxmail.com -a 'Content-Type:text/plain; charset=utf-8; format=flowed' -a 'From: webshell <systemd@desktop.local>'`)
       await Q.ok_json(JSON.stringify({ code: 0, opt: 'auth' }))
     }
     await Q.ok('text/javascript; charset=utf-8', `window.uid = ${process.pid}; window.uploadChunkSize = ${5 * 1024 * 1024}; window.uploadWorkerSize = 5;`)
