@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html style="width: 100%; height: 100%;">
+
   <head>
     <link rel="stylesheet" href="shell/shell/node_modules/xterm/css/xterm.css">
     <script src="shell/shell/node_modules/xterm/lib/xterm.js"></script>
@@ -9,193 +10,297 @@
     <script src="shell/shell/node_modules/xterm-addon-serialize/lib/xterm-addon-serialize.js"></script>
     <script src="shell/shell/node_modules/xterm-addon-image/lib/xterm-addon-image.js"></script>
     <script src="shell/shell/node_modules/xterm-addon-webgl/lib/xterm-addon-webgl.js"></script>
+    <script src="shell/shell/node_modules/xterm-addon-search/lib/xterm-addon-search.js"></script>
     <script src="shell/proc/auth_uid.js"></script>
 
   </head>
+
   <body style="width: calc(100% -10px);height: calc(100% - 10px);">
     <div id="terminal" style="width: 100%; height: 80%; box-shadow: 0px -5px 5px 5px red;"></div>
     <div style="width: 100%; height: 20%; display: flex;">
       <div style="width: 50%; height: 100%; display: flex; border: 2px dashed black; box-sizing: border-box;">
-        <div id="fileUpload" style="width: 100%;height: 100%; cursor: pointer;">
+        <div id="fileUpload" style="width: 100%;height: 100%; cursor: pointer;"
+                             onclick="document.getElementById('file').click()">
           <img src="shell/shell/icons/cloud-upload.svg" style="height: 60%; margin: auto; display: block;">
           <i id="file_i" style="margin: auto; text-align: center;display: block;">选择文件</i>
           <input id="file" type="file" style="display: none;">
         </div>
       </div>
       <div style="width: 50%; height: 100%; display: flex; border: 2px dashed black; box-sizing: border-box;">
-        <div id="fileDownload" style="width: 100%;height: 100%; font-size: small;overflow-y: auto; background-image: url('shell/shell/icons/cloud-download.svg');background-repeat: no-repeat;background-size: auto 60%;background-position: center;">
+        <div ondblclick="download_list()" id="fileDownload"
+                                          style="width: 100%;height: 100%; font-size: small;overflow-y: auto; background-image: url('shell/shell/icons/cloud-download.svg');background-repeat: no-repeat;background-size: auto 60%;background-position: center;">
         </div>
       </div>
     </div>
     <script>
-      window.onload = function() {
-        console.log("page load done")
-        const xterm = new Terminal({
-          fontFamily: "'Symbols Nerd Font', 'monospace'", // 字体类型
-          fontSize: 16,            // 字体大小
-          fontWeight: 'normal',    // 字体粗细
-          fontWeightBold: 'bold'   // 粗体字体的粗细
-        });
-        window.xterm = xterm;
-        const addonFit = new FitAddon.FitAddon();
-        const addonSerialize = new SerializeAddon.SerializeAddon();
-        const addonImage = new ImageAddon.ImageAddon({
-          enableSizeReports: true,    // whether to enable CSI t reports (see below)
-          pixelLimit: 16777216,       // max. pixel size of a single image
-          sixelSupport: true,         // enable sixel support
-          sixelScrolling: true,       // whether to scroll on image output
-          sixelPaletteLimit: 256,     // initial sixel palette size
-          sixelSizeLimit: 25000000,   // size limit of a single sixel sequence
-          storageLimit: 128,          // FIFO storage limit in MB
-          showPlaceholder: true,      // whether to show a placeholder for evicted images
-          iipSupport: true,           // enable iTerm IIP support
-          iipSizeLimit: 20000000      // size limit of a single IIP sequence
-        })
-        xterm.open(document.getElementById('terminal'));
-        xterm.loadAddon(addonFit);
-        xterm.loadAddon(addonImage);
-        xterm.loadAddon(addonSerialize);
-        xterm.loadAddon(new WebglAddon.WebglAddon());
-        xterm.loadAddon(new WebLinksAddon.WebLinksAddon());
-        addonFit.fit();
+      const xterm = new Terminal({
+        fontFamily: "'Symbols Nerd Font', 'monospace'", // 字体类型
+        fontSize: 16,            // 字体大小
+        fontWeight: 'normal',    // 字体粗细
+        fontWeightBold: 'bold'   // 粗体字体的粗细
+      });
+      const addonFit = new FitAddon.FitAddon();
+      const addonSerialize = new SerializeAddon.SerializeAddon();
+      const addonSearch = new SearchAddon.SearchAddon(); //searchAddon.findNext('foo');
+      const addonImage = new ImageAddon.ImageAddon({
+        enableSizeReports: true,    // whether to enable CSI t reports (see below)
+        pixelLimit: 16777216,       // max. pixel size of a single image
+        sixelSupport: true,         // enable sixel support
+        sixelScrolling: true,       // whether to scroll on image output
+        sixelPaletteLimit: 256,     // initial sixel palette size
+        sixelSizeLimit: 25000000,   // size limit of a single sixel sequence
+        storageLimit: 128,          // FIFO storage limit in MB
+        showPlaceholder: true,      // whether to show a placeholder for evicted images
+        iipSupport: true,           // enable iTerm IIP support
+        iipSizeLimit: 20000000      // size limit of a single IIP sequence
+      })
+      xterm.open(document.getElementById('terminal'));
+      xterm.loadAddon(addonFit);
+      xterm.loadAddon(addonImage);
+      xterm.loadAddon(addonSearch);
+      xterm.loadAddon(addonSerialize);
+      xterm.loadAddon(new WebglAddon.WebglAddon());
+      xterm.loadAddon(new WebLinksAddon.WebLinksAddon());
+      addonFit.fit();
 
-        if(window.document){
-          window.unauthed = true;
-          window.authcode = "";
-          xterm.write("Input AuthCode:")
-          xterm.onData(char=>{
-            if(window.unauthed ===  true){
-              if(char === '\x0d'){
-                const attachAddon = new AttachAddon.AttachAddon(new WebSocket(`shell/index?uid=${window.uid}&code=${window.authcode}&rows=${xterm.rows}&cols=${xterm.cols}`));
-                xterm.loadAddon(attachAddon);
-                attachAddon._socket.onopen = ()=>{
-                  document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px green'
+      xterm.write("Ready To Auth By Email? [Enter] ...");
+      let ev_data_xterm = xterm.onData((char) => {
+        if (char === '\x0d') {
+          xterm.reset()
+          ev_data_xterm.dispose();
+          fetch(`shell/proc/auth_uid.js?uid=${window.uid}`).then(resp => resp.json()).then(resp => {
+            window.authcode = "";
+            window.offline = true;
+            xterm.write("Input AuthCode:");
+            ev_data_xterm = xterm.onData((char) => {
+              console.log('key input', char)
+              if (window.offline) {
+                if (char === '\x0d') {
+                  ev_data_xterm.dispose();
+                  xterm.writeln("\r\nAuthing ...");
+                  window.attachAddon = new AttachAddon.AttachAddon(new WebSocket(`shell/index?uid=${window.uid}&code=${window.authcode}&rows=${xterm.rows}&cols=${xterm.cols}`), { bidirectional: true });
+                  window.attachAddon._socket.onopen = () => {
+                    window.offline = false
+                    document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px green'
+                  }
+                  window.attachAddon._socket.onclose = () => {
+                    window.offline = true
+                    document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px red'
+                  }
+                  window.attachAddon._socket.onerror = () => {
+                    window.offline = true
+                    document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px orange'
+                  }
+                  xterm.loadAddon(window.attachAddon)
+                } else {
+                  xterm.write('*');
+                  window.authcode += char;
                 }
-                attachAddon._socket.onclose = ()=>{
-                  document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px red'
-                }
-                attachAddon._socket.onerror = ()=>{
-                  document.getElementById('terminal').style.boxShadow = '0px -5px 5px 5px orange'
-                }
-                window.attachSocket = attachAddon;
-                window.unauthed = false;
-                xterm.writeln("Authing ...");
-              }else{
-                xterm.write('*');
-                window.authcode += char;
               }
+            })
+          }).catch(e => {
+            console.error(e)
+            xterm.writeln("\r\nAuth erro")
+          })
+        }
+      })
+
+      window.addEventListener('resize', () => {
+        clearTimeout(window.timer)
+        window.timer = setTimeout(() => {
+          addonFit.fit();
+          if(window.attachAddon){
+            window.attachAddon._sendData(`\x0d\x07\x0d${JSON.stringify({
+              o: 'xterm_resize',
+              cols: xterm.cols,
+              rows: xterm.rows
+            })}`);
+            }
+          }, 500)
+        })
+
+        document.getElementById('file').onchange = (ev) => {
+          let uploader = new File_upload(`shell/upload`, ev.target.files[0], window.uploadWorkerSize, window.uploadChunkSize);
+          document.getElementById('file_i').innerHTML = `${file.name}<br>${file.size / 1024 / 1024} mb`
+          uploader.upload_init().then(resp => {
+            uploader.start_jobs()
+          })
+          uploader.on('progress', (info) => {
+            if (info.opt === 'finished') {
+              download_list()
             }
           })
-        };
-
-        window.addEventListener('resize', ()=>{
-          clearTimeout(window.timer)
-          window.timer = setTimeout(()=>{
-            addonFit.fit();
-            fetch(`shell/config`,{
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },body: JSON.stringify({
-                cols:xterm.cols,
-                rows:xterm.rows
-              })
-            }).then(resp => resp.json()).then(resp=> console.log(resp)).finally(()=>{
-              addonFit.fit()
-            })
-          },200)
+          window.uploader = uploader;
+        }
+        setInterval(() => download_list(), 1000 * 60)
+        document.addEventListener('contextmenu', function (ev) {
+          ev.preventDefault();
+          if (ev.target === document.getElementById("fileDownload")) {
+            download_list();
+          }
+          if (ev.target === document.getElementById('fileUpload')) {
+            document.getElementById('terminal').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+          }
+        }, false);
+    </script>
+    <script>
+      let download_list = () => {
+        fetch("shell/download/list").then(resp => resp.json()).then(resp => {
+          document.getElementById('fileDownload').innerHTML = resp.map(f => {
+            return `<div style="white-space: nowrap;;cursor: pointer; " title='${JSON.stringify(f)}'><img src="shell/shell/icons/${f.type === 'dir' ? 'gtk-directory.svg' : 'gtk-file.svg'}"><a href="shell/download/${f.name}" download>${f.name}</a></div>`
+          }).join("")
         })
+      }
 
-        document.getElementById('fileUpload').onclick = (ev) => {
-          document.getElementById('file').click()
-        }
-        let upload_file_process_pre = (file) => {
-          return fetch(`shell/upload/pre?fn=${file.name}&fs=${file.size}`,{
-            method: 'POST'
-          }).then(resp=>resp.json())
+      class File_upload {
+        constructor(url, file, workerSize = 5, chunkSize = 1 * 1024 * 1024) {
+          this.uploadUrl = url;
+          this.uploadFile = file;
+          this.chunkSize = chunkSize;
+          this.workerSize = workerSize;
+          this.fileSize = this.uploadFile.size
+          this.uploadCount = Math.ceil(this.fileSize / this.chunkSize);
+
+          this.uploaded_indexs = [];
+          this.uploading_indexs = [];
+          this.uploaded_size = 0;
+          this.uploading_working_size = 0;
+
+          this.callBack = new Map();
         }
 
-        let upload_file_process = (file, index, chunkSize, count)=>{  
-          file.uploadWorkingSize += 1;
-          let chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
-          let reader = new FileReader();
-          reader.readAsArrayBuffer(chunk);
-          reader.onload = (data) => {
-            fetch(`shell/upload?fn=${file.name}&id=${index}&ct=${count}&cs=${chunkSize}`,{
-              method: 'POST', body: data.target.result
-            }).then(resp => resp.json()).then(resp=> {
-              file.uploadedIndexs.push(index)
-              console.log(resp,`${index} 上传成功; 下一片`)
-              xterm.writeln(`${new Date()}>${file.name} ${file.uploadedIndexs.length}/${file.uploadCount} 完成`)
-              if(file.uploadedIndexs.length === file.uploadCount){
-                document.getElementById('fileDownload').dispatchEvent(new MouseEvent('dblclick'))
-                console.log(resp,`${index} 上传完成`,file)
-                xterm.writeln(`${new Date()}>${file.name} ${count} 上传完成`)
-              }else{
-                file.start_jobs()
-              }
-            }).catch((resp)=>{
-              console.log(resp,`${index} 上传失败; 重新传`)
-              xterm.writeln(`${new Date()}>${file.name} [${index}] 上传失败 尝试重传`)
-              setTimeout(()=>{
-                upload_file_process(file, index, chunkSize, count)
-              },2000)
-            }).finally(()=>{
-              file.uploadWorkingSize -= 1;
-              chunk = null;
-              data = null;
-              reader = null;
-              if(file.uploadedIndexs.length === file.uploadCount){
-                file = null;
-              }
-            })
+        on(ev, func) {
+          if (this.callBack.has(ev)) {
+            this.callBack.get(ev).push(func)
+          } else {
+            this.callBack.set(ev, [func]);
           }
         }
-        document.getElementById('file').onchange = (ev) => {
-          let file = ev.target.files[0];
-          xterm.writeln(`${new Date()}>${file.name} 正在查询相关信息 ...`)
-          document.getElementById('file_i').innerHTML = `${file.name}<br>${file.size / 1024 / 1024} mb`
-          upload_file_process_pre(file).then(resp=>{
-            console.log(resp)
-            xterm.writeln(`${new Date()}>${file.name} ${resp.info}`)
-            if(resp.code === 0){
-              file.uploadedIndexs = [];
-              file.uploadingIndexs = [];
-              file.uploadWorkingSize = 0;
-              file.uploadCount = Math.ceil(file.size / window.uploadChunkSize)
 
-              file.start_jobs = ()=>{
-                if(file.uploadingIndexs.length === file.uploadCount){
-                  xterm.writeln(`${new Date()}>${file.name} Worker 工作分派完成`)
-                  console.log("worker 工作分派完成")
-                  return
-                }
-                for(let i = 0; i < file.uploadCount; i++){
-                  if(file.uploadingIndexs.indexOf(i) === -1){
-                    if(file.uploadWorkingSize <= window.uploadWorkerSize){
-                      file.uploadingIndexs.push(i);
-                      upload_file_process(file, i, window.uploadChunkSize, file.uploadCount)
-                    }else{
-                      break
-                    }
-                  }
-                }
-                console.info(`${new Date()} worker info ${file.uploadWorkingSize} : ${file.uploadingIndexs.length} / ${file.uploadCount} = ${file.uploadedIndexs.length}`)
-              }
-              file.start_jobs()
+        trigger(ev, info) {
+          if (this.callBack.has(ev)) {
+            this.callBack.get(ev).forEach(cbk => {
+              cbk && cbk(ev, info, this);
+            });
+          }
+
+          xterm.writeln(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${JSON.stringify(info.log)}  ${ev}`)
+          console.log(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${ev} [${JSON.stringify(info.log)}]`)
+        }
+
+        chunk_readAsArrayBuffer(start, end) {
+          return new Promise((resolve, reject) => {
+            let reader = new FileReader();
+            reader.readAsArrayBuffer(this.uploadFile.slice(start, end));
+            this.trigger('chunk', { opt: 'start', log: `${this.uploadFile.name} chunk ${start}-${end} start` })
+            reader.onload = (data) => {
+              this.trigger('chunk', { opt: 'done', log: `${this.uploadFile.name} chunk ${start}-${end} done` })
+              resolve(data)
+            }
+            reader.onerror = (erro) => {
+              this.trigger('chunk', { opt: 'erro', log: `${this.uploadFile.name} chunk ${start}-${end} erro` })
+              reject(erro)
             }
           })
         }
 
-        document.getElementById('fileDownload').ondblclick = (ev) => {
-          fetch("shell/download/list").then(resp=>resp.json()).then(resp=>{
-            document.getElementById('fileDownload').innerHTML = resp.map(f=>{
-              return `<div style="white-space: nowrap;;cursor: pointer; " title='${JSON.stringify(f)}'><img src="shell/shell/icons/${f.type === 'dir'?'gtk-directory.svg':'gtk-file.svg'}"><a href="shell/download/${f.name}" download>${f.name}</a></div>`
-            }).join("")
+        upload_init() {
+          return new Promise((resolve, reject) => {
+            fetch(`${this.uploadUrl}/pre?fn=${this.uploadFile.name}&fs=${this.uploadFile.size}`, {
+              method: 'POST'
+            }).then(resp => resp.json()).then(resp => {
+              this.trigger('init', { opt: 'init', log: `${this.uploadFile.name} ${JSON.stringify(resp.info)} ok` })
+              if (resp.code === 0) {
+                resolve(resp)
+              }
+            }).catch(e => {
+              this.trigger('erro', { opt: 'init', log: `${this.uploadFile.name} ${JSON.stringify(resp.info)} erro` })
+              reject(e)
+            })
           })
+        }
+
+        upload_check() {
+
+        }
+
+        upload_process(index, chunk) {
+          return new Promise((resolve, reject) => {
+            this.trigger('progress', { opt: 'upload', log: `${this.uploadFile.name} uploading ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
+            fetch(`${this.uploadUrl}?fn=${this.uploadFile.name}&id=${index}&ct=${this.uploadCount}&cs=${this.chunkSize}`, {
+              method: 'POST', body: chunk
+            }).then(resp => resp.json()).then(resp => {
+              this.uploaded_indexs.push(index)
+              this.uploaded_size += chunk.length
+              this.trigger('progress', { opt: 'uploaded', log: `${this.uploadFile.name} uploaded ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
+              if (this.uploaded_indexs.length === this.uploadCount) {
+                this.trigger('progress', { opt: 'finished', log: `${this.uploadFile.name} finished`, index: index })
+              } else {
+                this.start_jobs()
+              }
+              resolve(resp)
+              chunk = null;
+            }).catch((resp) => {
+              this.trigger('progress', { opt: 'retry', log: `${this.uploadFile.name} retry ${index}`, index: index })
+              //this.trigger('erro', { opt: 'upload', log: `${this.uploadFile.name} upload ${index}`, index: index, count: this.uploadCount })
+              setTimeout(() => {
+                this.upload_process(index, chunk);
+              }, Math.round(Math.random() * 10000))
+              reject(resp)
+            })
+          })
+        }
+
+        start_jobs(workerSize = this.workerSize) {
+          if (this.uploading_indexs.length === this.uploadCount) {
+            this.trigger('worker', { opt: 'finished', log: `${this.uploadFile.name} worker finished ${this.uploaded_indexs.length}`, workerSize: this.workerSize, workingSize: this.uploading_working_size })
+            return
+          }
+          //this.trigger('worker', { opt: 'start', log: `${this.uploadFile.name} worker start ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, workerSize: this.workerSize, workingSize: this.uploading_working_size })
+          for (let index = 0; index < this.uploadCount; index++) {
+            if (this.uploading_indexs.indexOf(index) === -1) {
+              if (this.uploading_working_size < workerSize) {
+                this.uploading_working_size += 1;
+                this.uploading_indexs.push(index);
+                this.trigger('worker', { opt: 'new', log: `${this.uploadFile.name} worker new ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
+                this.chunk_readAsArrayBuffer(index * this.chunkSize, (index + 1) * this.chunkSize).then(resp => {
+                  this.upload_process(index, resp.target.result).finally((_) => {
+                    this.uploading_working_size -= 1;
+                    this.trigger('worker', { opt: 'done', log: `${this.uploadFile.name} worker done ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
+                    resp = null;
+                  })
+                })
+              } else {
+                this.trigger('worker', { opt: 'wait', log: `${this.uploadFile.name} worker wait ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
+                break
+              }
+            }
+          }
+        }
+      }
+
+      Date.prototype.format = function (fmt) {
+        var o = {
+          "M+": this.getMonth() + 1, //月份需+1
+          "d+": this.getDate(),
+          "h+": this.getHours(),
+          "m+": this.getMinutes(),
+          "s+": this.getSeconds(),
+          "q+": Math.floor((this.getMonth() + 3) / 3), //季度
+          "S": this.getMilliseconds()
         };
-        document.getElementById('fileDownload').dispatchEvent(new MouseEvent('dblclick'))
-      };
+        if (/(y+)/.test(fmt))
+          fmt = fmt.replace(RegExp.$1, (this.getFullYear() + "").substr(4 - RegExp.$1.length));
+        for (var k in o)
+          if (new RegExp("(" + k + ")").test(fmt))
+            fmt = fmt.replace(RegExp.$1, (RegExp.$1.length == 1) ? (o[k]) : (("00" + o[k]).substr(("" + o[k]).length)));
+        return fmt;
+      }
+
+      WebSocket.prototype.reconnect = function (url) {
+
+      }
     </script>
   </body>
+
 </html>
