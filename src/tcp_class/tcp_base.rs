@@ -79,7 +79,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                                 //debug!("tcpStream read len [{}] [{:?}]", len, String::from_utf8_lossy(&buffer[..len]));
                                 Ok(Some(len)) => {
                                     debug!("[{}] tcpStream read len [{}]", pid ,len);
-                                    if len > 0 {
+                                    //if len > 0 {
                                         if let Err(e) = stdin.write(&buffer[..len]) {
                                             error!("[{}] script stdin write thread {:?} break",pid, e);
                                             break;
@@ -94,12 +94,12 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                                         }
                                         // fix 会引起 read 读取不到数据
                                         //buffer.clear();
-                                    } else {
-                                        debug!(
-                                            "[{}] script stdin thread tcpStream read data len 0; break",pid
-                                        );
-                                        break;
-                                    }
+                                    // } else {
+                                    //     debug!(
+                                    //         "[{}] script stdin thread tcpStream read data len 0; break",pid
+                                    //     );
+                                    //     break;
+                                    // }
                                 }
                                 Ok(None) => {
                                     // 忽略None， 直接再次读取
@@ -107,6 +107,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
 
                                 Err(e) => {
                                     // 读错误， 忽略并结束
+                                    // 不同协议结束标志不一样， 把读取结束列为ERROR事件
                                     error!("[{}] tcpStream read erro [{:?}]",pid, e);
                                     break;
                                 }
