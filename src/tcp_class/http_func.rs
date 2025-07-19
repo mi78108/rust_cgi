@@ -313,6 +313,7 @@ impl From<Http> for Websocket {
             // switch resp
             let resp = format!("HTTP/1.1 101 SWITCH\r\nServer: Hawk web\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {}\r\n\r\n", sec_websocket_accept);
             if let Ok(_) = http.write(resp.as_bytes()) {
+                http.req_writer.write().unwrap().flush().unwrap();
                 debug!("Websocket handshake finished");
             }
         }
