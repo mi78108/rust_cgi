@@ -272,7 +272,6 @@ impl Websocket {
         let len = data.len();
         //B1= +fin+rsv1+rsv2+rsv3+opcode*4+
         //fin 1末尾包 0还有后续包
-        //opcode 4bit 0附加数据 1文本数据 2二进制数据 3-7保留为控制帧 8链接关闭 9ping 0xApong b-f同3-7保留
         resp.push(head_byte_1);
         //B2=  +mask+len*7
         //debug!("websocket ready to write len {}",data.len());
@@ -390,6 +389,15 @@ impl Req for Websocket {
         }
         // frame read done
         //byte 1 [+fin,+rsv1,+rsv2,+rsv3,++++opcode]
+        //opcode 4bit 0附加数据 1文本数据 2二进制数据 3-7保留为控制帧 8链接关闭 9ping 0xApong b-f同3-7保留
+        // 0x00 连续帧，浏览器的WebSocket API一般不会收到该类型的操作码
+        // 0x01 文本帧，最常用到的数据帧类别之一，表示该帧的负载是一段文本(UTF-8字符流)
+        // 0x02 二进制帧，较常用到的数据帧类别之一，表示该帧的负载是二进制数据
+        // 0x03-0x07 保留帧，留作未来非控制帧扩展使用 
+        // 0x08 关闭连接控制帧，表示要断开WebSocket连接，浏览器端调用close方法会发送0x08控制帧
+        // 0x09 ping帧，用于检测端点是否可用，暂未发现浏览器可以通过何种方法发送该帧
+        // 0x0A pong帧，用于回复ping帧，暂未发现浏览器可以发送此种类型的控制帧
+        // 0x0B-0x0F 保留帧，留作未来控制帧扩展使用
         match bytes[0] {
             // h  if h == 0b10000000 => {
             //     // con frame

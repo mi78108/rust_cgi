@@ -80,6 +80,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                                 Ok(Some(len)) => {
                                     debug!("[{}] tcpStream read len [{}]", pid ,len);
                                     //if len > 0 {
+                                    // ERRO 时候表示断开
                                         if let Err(e) = stdin.write(&buffer[..len]) {
                                             error!("[{}] script stdin write thread {:?} break",pid, e);
                                             break;
@@ -94,6 +95,7 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                                         }
                                         // fix 会引起 read 读取不到数据
                                         //buffer.clear();
+                                        // 结束标志
                                     // } else {
                                     //     debug!(
                                     //         "[{}] script stdin thread tcpStream read data len 0; break",pid
@@ -202,7 +204,11 @@ pub fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                     .write()
                     .unwrap()
                     .read(data)
-                    .and_then(|len| Ok(Some(len)))
+                    .and_then(|len| if len > 0 {Ok(Some(len))} else {
+                        Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "connection closed",
+                    ))})
                     .or_else(|e| Err(e))
             }
 
