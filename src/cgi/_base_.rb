@@ -118,11 +118,11 @@ module Q
 end
 
 BEGIN{
-  STDERR.puts ">>[#{Process.pid}]> *************Process BEGIN*************"
+  STDERR.puts ">>[#{Process.pid}]> *************Process #{$$} BEGIN*************"
 }
 
 END {
-  STDERR.puts ">>[#{Process.pid}]> **************Process END*************"
+  STDERR.puts ">>[#{Process.pid}]> **************Process #{$$} END*************"
   Q::CBK_ONCLOSE.each_with_index do |cbk, index|
     Q.log "CBK_ONCLOSE [#{index + 1}] called ..."
     cbk && cbk.call()

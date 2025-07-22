@@ -10,7 +10,7 @@ Q.map(:GET, lambda {|v| v == '/test/test'}) do |v1,v2|
 end
 
 Q.map(:POST,'/test/test') do |v1|
-    Q.recv do |body|
+    Q.on_data do |body|
         Q.log ">>> #{body}"
         Q.ok_html('done')
     end

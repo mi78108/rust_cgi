@@ -5,12 +5,11 @@ use crate::CGI_DIR;
 use std::collections::HashMap;
 use std::io::{Error, Read, Write};
 use std::process::{id, Command, Stdio};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::thread::{self, current};
 
 pub trait Req {
-    fn read(&self, data: &mut [u8]) -> Result<usize, Error>;
+    fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error>;
     fn write(&self, data: &[u8]) -> Result<usize, Error>;
     fn close(&self) -> Result<(), Error>;
     fn env(&self) -> &HashMap<String, String>;
@@ -57,17 +56,11 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                 let script_stdout_arc = script_arc.clone();
 
                 //
-                let script_stop = Arc::new(AtomicBool::new(false));
-                let script_stop_in = script_stop.clone();
-                let script_stop_out = script_stop.clone();
                 thread::spawn(move || {
                     // script -> tcp
                     let script_name = script_stdin_arc.get_program().to_str().unwrap();
                     let mut buffer = vec![0u8; BUFFER_SIZE];
                     while let Ok(len) = script_stdout.read(&mut buffer) {
-                        if script_stop_in.load(std::sync::atomic::Ordering::Acquire) {
-                            break;
-                        }                    
                         debug!(
                             "<{:?}:{}> on {} call script [{}] script stream read [{}]",
                             current().id(),
@@ -76,11 +69,11 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                             script_name,
                             len
                         );
-                         if len == 0 {
-                            break;
-                        }
                         if let Err(e) = req_writer.write(&buffer[..len]) {
                             error!("{:?}", e);
+                            break;
+                        }
+                        if len == 0 {
                             break;
                         }
                     }
@@ -96,27 +89,35 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                     // tcp -> script
                     let script_name = script_stdout_arc.get_program().to_str().unwrap();
                     let mut buffer = vec![0u8; BUFFER_SIZE];
-                    while let Ok(len) = req_reader.read(&mut buffer) {
-                        if script_stop_out.load(std::sync::atomic::Ordering::Acquire) {
+                    while let Ok(len_opt) = req_reader.read(&mut buffer) {
+                        if let Some(len) = len_opt {
+                            debug!(
+                                "<{:?}:{}> on {} call script [{}] req stream read [{}]",
+                                current().id(),
+                                script_id,
+                                id(),
+                                script_name,
+                                len
+                            );
+                            if let Err(e) = script_stdin.write(&buffer[..len]) {
+                                error!("{:?}", e);
+                                break;
+                            }
+                            if let Err(e) = script_stdin.flush() {
+                                error!("{:?}", e);
+                                break;
+                            }
+                        } else {
+                            //空数据 None 代表结束
+                            debug!(
+                                "<{:?}:{}> on {} call script [{}] req stream recv NONE mark; break",
+                                current().id(),
+                                script_id,
+                                id(),
+                                script_name
+                            );
                             break;
                         }
-                        debug!(
-                            "<{:?}:{}> on {} call script [{}] req stream read [{}]",
-                            current().id(),
-                            script_id,
-                            id(),
-                            script_name,
-                            len
-                        );
-                        if let Err(e) = script_stdin.write(&buffer[..len]) {
-                            error!("{:?}", e);
-                            break;
-                        }
-                        if let Err(e) = script_stdin.flush() {
-                            error!("{:?}", e);
-                            break;
-                        }
-                        error!("scrip wirte end")
                     }
                     debug!(
                         "<{:?}:{}> on {} call script [{}] req stream pipe end",
@@ -125,12 +126,9 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                         id(),
                         script_name
                     );
-                    // 远端断开 终止脚本
-                    script_stop_out.store(true, std::sync::atomic::Ordering::Release);
                 });
                 // block wait
                 let script_rst = child.wait();
-                script_stop.store(true, std::sync::atomic::Ordering::Release);
                 req_arc.close().unwrap();
                 if let Ok(code) = script_rst {
                     debug!(

@@ -17,12 +17,12 @@ pub struct Tcp {
 }
 
 impl Req for Tcp {
-    fn read(&self, data: &mut [u8]) -> Result<usize, Error> {
+    fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
         self.req_reader.write().unwrap().read(data).and_then(|len| {
             if len == 0 {
-                return Err(Error::from(ErrorKind::UnexpectedEof));
+                return Err(Error::from(ErrorKind::ConnectionAborted));
             }
-            Ok(len)
+            Ok(Some(len))
         })
     }
 
@@ -34,7 +34,7 @@ impl Req for Tcp {
     }
 
     fn close(&self) -> Result<(), Error> {
-        error!("<{:?}:{}> Tcp connect ready close", current().id(), id());
+        debug!("<{:?}:{}> Tcp connect ready close", current().id(), id());
         self.is_closed
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.req_writer.write().unwrap().flush().unwrap();
