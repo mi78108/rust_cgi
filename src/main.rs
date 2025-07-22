@@ -99,7 +99,7 @@ fn main() {
                 std::thread::spawn(move || {
                     debug!("<{:?}> tcp call start new Req thread started",thread::current().id());
                     tcp_class::tcp_base::handle(_stream.into());
-                    debug!("<{:?}>tcp call end handle Req thread   ended\n", thread::current().id());
+                    debug!("<{:?}>tcp call end handle Req thread   ended\n\n", thread::current().id());
                 });
             }
             Err(e) => {

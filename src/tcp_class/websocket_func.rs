@@ -21,7 +21,7 @@ pub struct Websocket {
 }
 
 impl Websocket {
-    fn read_head(&self) -> Result<(usize, [u8; 4]), Error> {
+    fn read_head(&self) -> Result<(Option<usize>, [u8; 4]), Error> {
         let trdid = std::thread::current().id();
         let pid = std::process::id();
         let mut bytes = [0u8; 2];
@@ -119,24 +119,25 @@ impl Websocket {
             // },
             h if h == 0b10000010 => {
                 // bin frame
-                Ok((length, plymask))
+                Ok((Some(length), plymask))
             }
             h if h == 0b10000001 => {
                 // text frame
-                Ok((length, plymask))
+                Ok((Some(length), plymask))
             }
             h if h == 0b10001000 => {
                 //0x88 0x80 4byte_masking
                 //ctrl close 0x8 0b10001000
                 debug!("<{:?}:{}> websocket ctrl close event", trdid, pid);
-                return Err(Error::from(ErrorKind::UnexpectedEof));
+                //return Err(Error::from(ErrorKind::UnexpectedEof));
+                Ok((None, plymask))
             }
             h if h == 0b10001001 => {
                 // ctrl ping 0x9 0b10001001
                 // ctrl pong 0xA 0b10001010
                 debug!("<{:?}:{}> websocket ctrl ping event", trdid, pid);
                 self.write_with_opcode(0b10001010, &[]).unwrap();
-                Ok((length, plymask))
+                Ok((Some(0), plymask))
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
@@ -215,38 +216,47 @@ impl Websocket {
 }
 
 impl Req for Websocket {
-    fn read(&self, data: &mut [u8]) -> Result<usize, std::io::Error> {
+    fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
         if *self.residue.read().unwrap() == 0 {
-            if let Err(e) = self.read_head().and_then(|(len, mask)| {
-                *self.readed.write().unwrap() = 0;
-                *self.residue.write().unwrap() = len;
-                *self.payload_mask.write().unwrap() = mask;
-                Ok(len)
+            if let Err(e) = self.read_head().and_then(|(len_opt, mask)| {
+                if let Some(len) = len_opt {
+                    *self.readed.write().unwrap() = 0;
+                    *self.residue.write().unwrap() = len;
+                    *self.payload_mask.write().unwrap() = mask;
+                } else {
+                    //None 收到 close 标志
+                    return Ok(None);
+                }
+                Ok(len_opt)
             }) {
                 return Err(e);
             }
         }
         if *self.residue.read().unwrap() > data.len() {
-            return self.base_on.read(data).and_then(|len| {
-                self.unmask(data, len);
-                *self.readed.write().unwrap() += len;
-                *self.residue.write().unwrap() -= len;
-                Ok(len)
+            return self.base_on.read(data).and_then(|len_opt| {
+                if let Some(len) = len_opt {
+                    self.unmask(data, len);
+                    *self.readed.write().unwrap() += len;
+                    *self.residue.write().unwrap() -= len;
+                }
+                Ok(len_opt)
             });
         } else {
             let residue = *self.residue.read().unwrap();
             if residue == 0 {
-                return Ok(0);
+                return Ok(Some(0));
             }
             let mut buffer = vec![0u8; residue];
-            return self.base_on.read(&mut buffer).and_then(|len| {
-                for i in 0..buffer.len() {
-                    data[i] = buffer[i];
+            return self.base_on.read(&mut buffer).and_then(|len_opt| {
+                if let Some(len) = len_opt {
+                    for i in 0..buffer.len() {
+                        data[i] = buffer[i];
+                    }
+                    self.unmask(data, len);
+                    *self.readed.write().unwrap() += len;
+                    *self.residue.write().unwrap() -= len;
                 }
-                self.unmask(data, len);
-                *self.readed.write().unwrap() += len;
-                *self.residue.write().unwrap() -= len;
-                Ok(len)
+                Ok(len_opt)
             });
         }
     }

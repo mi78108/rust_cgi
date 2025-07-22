@@ -3,8 +3,9 @@ use crate::tcp_class::tcp_func::Tcp;
 use crate::CGI_DIR;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::{BufRead };
+use std::io::{BufRead};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::thread::current;
 
 #[derive(Debug)]
@@ -14,6 +15,8 @@ pub struct Http {
     req_method: String,
     req_version: String,
     req_buffer_size: usize,
+    req_content_length: usize,
+    req_content_readed: AtomicUsize,
     req_header: HashMap<String, String>,
 }
 
@@ -66,9 +69,27 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
 }
 
 impl Req for Http {
-    fn read(&self, data: &mut [u8]) -> Result<usize, std::io::Error> {
-        self.base_on.read(data).and_then(|len|{
-            Ok(len)
+    fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
+        if self.req_content_length > 0
+            && self
+                .req_content_readed
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == self.req_content_length
+        {
+            //return Err(Error::from(ErrorKind::UnexpectedEof));
+            // 表示读取正常 但是数据结束
+            return Ok(None);
+        }
+        self.base_on.read(data).and_then(|len_opt| {
+            if let Some(len) = len_opt {
+                self.req_content_readed.store(
+                    self.req_content_readed
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        + len,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+            }
+            Ok(len_opt)
         })
     }
 
@@ -117,6 +138,8 @@ impl From<Tcp> for Http {
                     String::from(format!("{}", peer_addr.port())),
                 ),
             ]),
+            req_content_length: 0,
+            req_content_readed: AtomicUsize::new(0),
         };
 
         let mut buffer = String::new();
@@ -147,7 +170,7 @@ impl From<Tcp> for Http {
             buffer.clear();
         }
         // Header
-        while let Ok(size) = http
+        while let Ok(_) = http
             .base_on
             .req_reader
             .write()
@@ -163,6 +186,11 @@ impl From<Tcp> for Http {
                     .parse::<usize>()
                 {
                     http.req_buffer_size = len
+                }
+                if let Some(length) = http.req_header.get("Content-Length") {
+                    if let Ok(len) = length.parse::<usize>() {
+                        http.req_content_length = len;
+                    }
                 }
                 break;
             }
@@ -216,7 +244,8 @@ impl From<Tcp> for Http {
         http.req_header
             .insert("req_argv_params".into(), restful_argvs.join("/"));
         debug!("<{:?}> restful_argv = {:?}", current().id(), restful_argvs);
-        debug!("<{:?}> new http req create  {}", current().id(), http);
+        //debug!("<{:?}> new http req create  {}", current().id(), http);
+        debug!("<{:?}> new http req create", current().id());
         //Websocket
         if let Some(upgrade) = http.req_header.get("Upgrade") {
             if upgrade.to_lowercase() == "websocket" {

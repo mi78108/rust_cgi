@@ -87,7 +87,7 @@ const Q = {
     write: async (val) => {
         return new Promise((resolve, reject) => {
             process.stdout.write(val, 'utf8', (erro) => {
-                erro ? reject(errn) : resolve();
+                erro ? reject(erro) : resolve();
             });
         })
     },
@@ -135,13 +135,14 @@ const Q = {
     },
 
     recv: async (cbk) => {
+        process.stdin.resume();
         return new Promise((resolve, reject) => {
             let chunks = [];
             process.stdin.on('data', (chunk) => {
                 chunks.push(chunk)
             })
             process.stdin.on('end', () => {
-                let data = Buffer.concat(chunk);
+                let data = Buffer.concat(chunks);
                 cbk && cbk(data)
                 resolve(data)
             })
@@ -159,6 +160,9 @@ const Q = {
             cbk && cbk()
         }
         process.stdin.on('readable', call_back)
+    },
+    log :(info) =>{
+        console.error(`>> <${process.pid}> ${info}`)
     }
 
 }
