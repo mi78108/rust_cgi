@@ -84,7 +84,7 @@ const Q = {
         }
     },
 
-    write: (val) => {
+    write: async (val) => {
         return new Promise((resolve, reject) => {
             process.stdout.write(val, 'utf8', (erro) => {
                 erro ? reject(errn) : resolve();
@@ -128,7 +128,7 @@ const Q = {
         await Q.resp_body(200, 'OK', mime, body)
     },
     ok_html: async (body) => {
-        await Q.ok('text/html', body)
+        await Q.ok('text/html; charset=utf-8', body)
     },
     ok_json: async (body) => {
         await Q.ok('application/json; charset=utf-8', JSON.stringify(body))

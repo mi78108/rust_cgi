@@ -1,0 +1,9 @@
+#!/usr/bin/ruby
+require_relative '../_base_'
+require 'mime/types'
+
+Q.map(:GET, %r|^/static/.*| ) do |_|
+    file = Pathname.new "./static/#{File::extname(Q::REQ_PATH).delete('.')}/#{Q::REQ_ARGVS[-1]}"
+    Q.ok "#{MIME::Types.of(file.to_s).first.to_s}; charset=utf-8", file.read if file.exist? and file.file?
+    Q.resp_404 "Script Not found File #{file}"
+end

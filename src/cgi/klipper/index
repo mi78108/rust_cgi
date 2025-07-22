@@ -1,6 +1,0 @@
-#!/usr/bin/env zsh
-
-while ($(busctl --user wait org.kde.klipper /klipper org.kde.klipper.klipper clipboardHistoryUpdated)) {
-  #echo $(busctl --user call org.kde.klipper /klipper org.kde.klipper.klipper getClipboardContents)
-  echo $(qdbus6 org.kde.klipper /klipper org.kde.klipper.klipper.getClipboardContents)
-}

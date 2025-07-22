@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::thread::spawn;
 
-use crate::{udp_class, WDIR};
+use crate::{udp_class, CGI_DIR};
 
 pub static CLIENTS:LazyLock<RwLock<HashMap<String,Client>>> = LazyLock::new(||{
     RwLock::new(HashMap::new())
@@ -76,7 +76,7 @@ fn call_script(socket:UdpSocket){
         debug!("call_script read data [{}] from {}:{}",len,addr.ip().to_string(),addr.port());
         spawn(move ||{
             let mut script = Command::new("./udp_handle");
-            script.current_dir(WDIR.get().unwrap().as_str())
+            script.current_dir(CGI_DIR.get().unwrap().as_str())
                 .env_clear()
                 .envs(HashMap::from([   (
                             "Req_Peer_Addr".to_string(),
