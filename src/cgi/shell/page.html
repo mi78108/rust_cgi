@@ -120,8 +120,9 @@
         })
 
         document.getElementById('file').onchange = (ev) => {
-          let uploader = new File_upload(`shell/upload`, ev.target.files[0], window.uploadWorkerSize, window.uploadChunkSize);
+          let file = ev.target.files[0];
           document.getElementById('file_i').innerHTML = `${file.name}<br>${file.size / 1024 / 1024} mb`
+          let uploader = new File_upload(`shell/upload`, file, window.uploadWorkerSize, window.uploadChunkSize);
           uploader.upload_init().then(resp => {
             uploader.start_jobs()
           })

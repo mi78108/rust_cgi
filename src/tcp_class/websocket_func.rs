@@ -7,7 +7,6 @@ use std::{
     collections::HashMap,
     io::{Error, ErrorKind, Read, Write},
     ops::Add,
-    os::unix::process,
     process::id,
     sync::RwLock,
     thread::current,
