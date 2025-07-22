@@ -1,12 +1,14 @@
 #!/usr/bin/env ruby
 
 require 'json'
-require_relative '../_base'
+require_relative '../_base_'
 
-Q.on(:GET) do |r|
-  r.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{Q.param('m')}"`
+Q.map(:GET) do |v|
+  Q.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{v}"`
 end
  
-Q.on(:POST) do |r|
-  r.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{STDIN.read}"`
+Q.map(:POST) do |_|
+  Q.recv {|chunk|
+    Q.ok_html `XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 notify-send -a "From " -t 30000 -A OK "#{chunk}"`
+  }
 end

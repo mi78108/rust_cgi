@@ -3,7 +3,7 @@ use udp_class::udp_base::Client;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::str::FromStr;
 use std::sync::OnceLock;
-use std::thread::spawn;
+use std::thread::{self, spawn};
 
 #[macro_use]
 extern crate log;
@@ -12,7 +12,7 @@ mod tcp_class;
 mod udp_class;
 mod utils;
 
-static WDIR: OnceLock<String> = OnceLock::new();
+static CGI_DIR: OnceLock<String> = OnceLock::new();
 // todo
 fn main() {
     env_logger::init();
@@ -20,10 +20,10 @@ fn main() {
         .version("1.0")
         .author("mi78108@live.com>")
         .arg(
-            Arg::with_name("workdir")
+            Arg::with_name("cgidir")
             .short("f")
             .long("cgi")
-            .help("www cgi work dir")
+            .help("cgi dir")
             .takes_value(true).default_value("./"),
         )
         .arg(
@@ -63,11 +63,11 @@ fn main() {
         )
         .get_matches();
 
-    if let Some(wd) = matches.value_of("workdir") {
-        WDIR.get_or_init(||{
+    if let Some(wd) = matches.value_of("cgidir") {
+        CGI_DIR.get_or_init(||{
             wd.to_string()
         });
-        info!("set workdir [{}]", wd);
+        info!("set cgidir [{}]", wd);
     }
     if let Some(serv) = matches.values_of("serv"){
         serv.enumerate().for_each(|(i,v)|{
@@ -92,14 +92,14 @@ fn main() {
     }
 
     let tcp_listener = TcpListener::bind(addr).expect(format!("bind {} erro", addr).as_str());
-    info!("Listen on [{}] Work in [{}]", addr, WDIR.get().unwrap());
+    info!("Listen on [{}] CGI in [{}]", addr, CGI_DIR.get().unwrap());
     for stream in tcp_listener.incoming() {
         match stream {
             Ok(_stream) => {
                 std::thread::spawn(move || {
-                    debug!("tcp call start new Req thread started");
-                    tcp_class::tcp_base::handle(_stream);
-                    debug!("tcp call end handle Req thread ended\r\n\r\n");
+                    debug!("<{:?}> tcp call start new Req thread started",thread::current().id());
+                    tcp_class::tcp_base::handle(_stream.into());
+                    debug!("<{:?}>tcp call end handle Req thread   ended\n", thread::current().id());
                 });
             }
             Err(e) => {

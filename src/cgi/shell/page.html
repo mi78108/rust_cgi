@@ -132,7 +132,7 @@
           })
           window.uploader = uploader;
         }
-        setInterval(() => download_list(), 1000 * 60)
+        window.timer_download_list = setInterval(() => download_list(), 1000 * 60)
         document.addEventListener('contextmenu', function (ev) {
           ev.preventDefault();
           if (ev.target === document.getElementById("fileDownload")) {
@@ -295,10 +295,6 @@
           if (new RegExp("(" + k + ")").test(fmt))
             fmt = fmt.replace(RegExp.$1, (RegExp.$1.length == 1) ? (o[k]) : (("00" + o[k]).substr(("" + o[k]).length)));
         return fmt;
-      }
-
-      WebSocket.prototype.reconnect = function (url) {
-
       }
     </script>
   </body>
