@@ -3,7 +3,7 @@ use crate::tcp_class::tcp_func::Tcp;
 use crate::CGI_DIR;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::{BufRead};
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::thread::current;

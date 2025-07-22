@@ -1,9 +1,9 @@
 use clap::{App, Arg};
-use udp_class::udp_base::Client;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::str::FromStr;
 use std::sync::OnceLock;
 use std::thread::{self, spawn};
+use udp_class::udp_base::Client;
 
 #[macro_use]
 extern crate log;
@@ -21,71 +21,89 @@ fn main() {
         .author("mi78108@live.com>")
         .arg(
             Arg::with_name("cgidir")
-            .short("f")
-            .long("cgi")
-            .help("cgi dir")
-            .takes_value(true).default_value("./"),
+                .short("f")
+                .long("cgi")
+                .help("cgi dir")
+                .takes_value(true)
+                .default_value("./"),
         )
         .arg(
             Arg::with_name("addr")
-            .short("l")
-            .long("addr")
-            .help("bind address")
-            .takes_value(true),
+                .short("l")
+                .long("addr")
+                .help("bind address")
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("host")
-            .short("h")
-            .long("host")
-            .help("bind host address")
-            .takes_value(true).conflicts_with("addr").requires("port")
+                .short("h")
+                .long("host")
+                .help("bind host address")
+                .takes_value(true)
+                .conflicts_with("addr")
+                .requires("port"),
         )
         .arg(
             Arg::with_name("port")
-            .short("p")
-            .long("port")
-            .help("bind port address")
-            .takes_value(true).conflicts_with("addr").requires("host")
+                .short("p")
+                .long("port")
+                .help("bind port address")
+                .takes_value(true)
+                .conflicts_with("addr")
+                .requires("host"),
         )
         .arg(
             Arg::with_name("serv")
-            .short("s")
-            .long("serv")
-            .help("upstream client address")
-            .takes_value(true)
-            .value_delimiter(",")
+                .short("s")
+                .long("serv")
+                .help("upstream client address")
+                .takes_value(true)
+                .value_delimiter(","),
         )
         .arg(
             Arg::with_name("udp")
-            .short("u")
-            .long("udp")
-            .help("listen udp")
+                .short("u")
+                .long("udp")
+                .help("listen udp"),
         )
         .get_matches();
 
     if let Some(wd) = matches.value_of("cgidir") {
-        CGI_DIR.get_or_init(||{
-            wd.to_string()
-        });
+        CGI_DIR.get_or_init(|| wd.to_string());
         info!("set cgidir [{}]", wd);
     }
-    if let Some(serv) = matches.values_of("serv"){
-        serv.enumerate().for_each(|(i,v)|{
-            if let Ok(mut write) = udp_class::udp_base::CLIENTS.write(){
-                write.insert(format!("serv_{}",i), Client { from:"static".to_string(), addr: SocketAddr::from_str(v).unwrap(), name: format!("SERV_{}",i), via: None });
-            }  
+    if let Some(serv) = matches.values_of("serv") {
+        serv.enumerate().for_each(|(i, v)| {
+            if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {
+                write.insert(
+                    format!("serv_{}", i),
+                    Client {
+                        from: "static".to_string(),
+                        addr: SocketAddr::from_str(v).unwrap(),
+                        name: format!("SERV_{}", i),
+                        via: None,
+                    },
+                );
+            }
         });
     }
 
     let addr = match matches.is_present("addr") {
-        true =>  matches.value_of("addr").unwrap_or_else(|| "0.0.0.0:8080").to_string(),
-        false => format!("{}:{}",matches.value_of("host").unwrap_or("127.0.0.1"), matches.value_of("port").unwrap_or("8080"))
+        true => matches
+            .value_of("addr")
+            .unwrap_or_else(|| "0.0.0.0:8080")
+            .to_string(),
+        false => format!(
+            "{}:{}",
+            matches.value_of("host").unwrap_or("127.0.0.1"),
+            matches.value_of("port").unwrap_or("8080")
+        ),
     };
     let addr = addr.as_str();
 
-    if matches.is_present("udp"){
-        let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro",addr).as_str());
-        spawn(move ||{
+    if matches.is_present("udp") {
+        let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro", addr).as_str());
+        spawn(move || {
             udp_listener.set_broadcast(true).unwrap();
             udp_class::udp_base::handle(udp_listener);
         });
@@ -97,9 +115,15 @@ fn main() {
         match stream {
             Ok(_stream) => {
                 std::thread::spawn(move || {
-                    debug!("<{:?}> tcp call start new Req thread started",thread::current().id());
+                    debug!(
+                        "<{:?}> tcp call start new Req thread started",
+                        thread::current().id()
+                    );
                     tcp_class::tcp_base::handle(_stream.into());
-                    debug!("<{:?}>tcp call end handle Req thread   ended\n\n", thread::current().id());
+                    debug!(
+                        "<{:?}>tcp call end handle Req thread   ended\n\n",
+                        thread::current().id()
+                    );
                 });
             }
             Err(e) => {
@@ -107,6 +131,4 @@ fn main() {
             }
         };
     }
-
-
 }
