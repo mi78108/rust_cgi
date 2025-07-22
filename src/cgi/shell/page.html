@@ -127,7 +127,8 @@
             uploader.start_jobs()
           })
           uploader.on('progress', (info) => {
-            if (info.opt === 'finished') {
+            console.log(`>>>> process event ,<${info}>`)
+            if (info.opt == 'finished') {
               download_list()
             }
           })
@@ -181,7 +182,7 @@
         trigger(ev, info) {
           if (this.callBack.has(ev)) {
             this.callBack.get(ev).forEach(cbk => {
-              cbk && cbk(ev, info, this);
+              cbk && cbk(info, ev, this);
             });
           }
 
