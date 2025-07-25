@@ -1,49 +1,66 @@
 use std::collections::HashMap;
 
-pub trait Json<T> {
-    fn stringify(&self, func:fn(&T)->(String,String)) -> String;
+pub trait JsonStr {
+    fn stringify(&self) -> String;
 }
 
-struct extHashMap<K,V> {
-    hashmap :HashMap<K,V>
-}
-
-impl<K,V> extHashMap<K,V> {
-    fn new()->Self {
-        return extHashMap{
-            hashmap: HashMap::new(),
-        };
-    }
-}
-
-impl<K,V> Json<(K,V)> for HashMap<K,V> where K:Clone, V:Clone{
-    fn stringify(&self, func:fn(&(K,V))->(String,String)) -> String{
-        format!("{{{}}}", self.iter().map(|(k,v)|{
-            let (k,v) = func(&(k.clone(),v.clone()));
-            format!("\"{}\":\"{}\"",k,v)
+impl<T> JsonStr for Vec<T> where T: JsonStr{
+    fn stringify(&self) -> String {
+        format!("[{}]",self.iter().map(|v|{
+            v.stringify()
         }).collect::<Vec<String>>().join(","))
     }
 }
 
-impl<T> Json<T> for Vec<T> {
-    fn stringify(&self, func:fn(&T)->(String,String)) -> String {
-        format!("[{}]",self.iter().map(|v|{
-            func(v)
-        }).map(|v| v.1).collect::<Vec<String>>().join(","))
+impl<K,V> JsonStr for HashMap<K,V> where K: JsonStr, V:JsonStr{
+    fn stringify(&self) -> String {
+        format!("{{{}}}", self.iter().map(|(k,v)|{
+            format!("{}:{}",k.stringify(),v.stringify())
+        }).collect::<Vec<String>>().join(","))
     }
 }
 
-fn map_to_json<K,V>(map:&HashMap<K,V>,func:fn(&K,&V)->(String,String))->String{
-    let mut rst = String::from("{");
-    rst.push_str(map.iter().map(|(k,v)|{
-        let (k,v) = func(k,v);
-        format!("\"{}\":\"{}\"",k,v)
-    }).collect::<Vec<String>>().join(",").as_str());
-    rst.push_str("}");
-    return rst;
+impl JsonStr for bool {
+    fn stringify(&self) -> String {
+        format!("{}", self)
+    }
+}
+impl JsonStr for &str {
+    fn stringify(&self) -> String {
+        format!("\"{}\"", self)
+    }
+}
+impl JsonStr for String {
+    fn stringify(&self) -> String {
+        format!("\"{}\"", self)
+    }
+}
+impl JsonStr for usize {
+    fn stringify(&self) -> String {
+        format!("{}", self)
+    }
+}
+impl JsonStr for isize {
+    fn stringify(&self) -> String {
+        format!("{}", self)
+    }
+}
+impl JsonStr for u8 {
+    fn stringify(&self) -> String {
+        format!("{}", self)
+    }
+}
+impl JsonStr for i32 {
+    fn stringify(&self) -> String {
+        format!("{}", self)
+    }
 }
 
 #[test]
-fn test(){
-    
+fn utils_test(){
+    let mut vv:HashMap<String, HashMap<String,String>> = HashMap::new();
+    let mut v:HashMap<String, String> = HashMap::new();
+    v.insert("ab".into(), "cd".into());
+    vv.insert("a".into(), v);
+    println!("{}",vec![1,2,3,4].stringify());
 }

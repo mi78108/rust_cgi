@@ -98,7 +98,7 @@ Q.on(Q.Method.GET)
 
 
 Q.on(Q.Method.POST)
-  .map('/shell/upload/pre').do(async (v) => {
+  .map('/shell/upload/pre').do(async (_) => {
     if (!fs.existsSync(file_path)) {
       fs.mkdirSync(file_path)
     }
@@ -111,7 +111,7 @@ Q.on(Q.Method.POST)
   .map('/shell/upload').do(() => {
     let file = `${file_path}/${decodeURI(Q.param('fn'))}`
     let index = parseInt(Q.param('id'))
-    let count = parseInt(Q.param('ct'))
+    // let count = parseInt(Q.param('ct'))
     let chunkSize = parseInt(Q.param('cs'))
     Q.recv((data) => {
       //file = `${file}.uploading`
