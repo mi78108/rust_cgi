@@ -13,7 +13,10 @@ mod udp_class;
 mod utils;
 
 static CGI_DIR: OnceLock<String> = OnceLock::new();
-// todo
+
+/// # 简单的实现了CGI的小工具
+/// - 简单使用线程允许多访问 但并发受限制
+/// - 判断脚本结束的策略有待改进
 fn main() {
     env_logger::init();
     let matches = App::new("A WebService Program")

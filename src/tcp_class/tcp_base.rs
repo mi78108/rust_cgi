@@ -8,6 +8,8 @@ use std::process::{id, Command, Stdio};
 use std::sync::Arc;
 use std::thread::{self, current};
 
+/// # 说明
+/// - 为协议统一接口
 pub trait Req {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error>;
     fn write(&self, data: &[u8]) -> Result<usize, Error>;
@@ -15,8 +17,11 @@ pub trait Req {
     fn env(&self) -> &HashMap<String, String>;
 }
 
+/// # 说明
+/// - 为请求调用相应的脚本
+/// - 目前脚本tsdin stdout各使用一个线程
 fn call_script(req: Box<(dyn Req + Send + Sync)>) {
-    let BUFFER_SIZE = req
+    let buffer_size = req
         .env()
         .get("Req_Buffer_Size")
         .and_then(|v| v.parse::<usize>().ok())
@@ -59,7 +64,7 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                 thread::spawn(move || {
                     // script -> tcp
                     let script_name = script_stdin_arc.get_program().to_str().unwrap();
-                    let mut buffer = vec![0u8; BUFFER_SIZE];
+                    let mut buffer = vec![0u8; buffer_size];
                     while let Ok(len) = script_stdout.read(&mut buffer) {
                         debug!(
                             "<{:?}:{}> on {} call script [{}] script stream read [{}]",
@@ -74,6 +79,7 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                             break;
                         }
                         if len == 0 {
+                            // 脚本若返回空字节 则认为脚本结束
                             break;
                         }
                     }
@@ -88,7 +94,7 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                 thread::spawn(move || {
                     // tcp -> script
                     let script_name = script_stdout_arc.get_program().to_str().unwrap();
-                    let mut buffer = vec![0u8; BUFFER_SIZE];
+                    let mut buffer = vec![0u8; buffer_size];
                     while let Ok(len_opt) = req_reader.read(&mut buffer) {
                         if let Some(len) = len_opt {
                             debug!(
@@ -156,6 +162,8 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
     }
 }
 
+/// # 说明
+/// 接管分派请求到相应的协议
 pub fn handle(stream: Tcp) {
     let mut buffer = [0u8; 16];
     if let Ok(len) = stream.req_stream.peek(&mut buffer) {
