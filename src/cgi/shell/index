@@ -53,7 +53,7 @@ Q.on(Q.Method.GET)
       let authcode = u().split('-')[3]
       fs.writeFileSync(`/tmp/webshell_${Q.param('uid')}`, authcode)
       e.execSync(`echo 'AuthCode: ${authcode}' | mail -s 'Gentoo Shell' mi78108@foxmail.com -a 'Content-Type:text/plain; charset=utf-8; format=flowed' -a 'From: webshell <systemd@desktop.local>'`)
-      await Q.ok_json(JSON.stringify({ code: 0, opt: 'auth' }))
+      await Q.ok_json({ code: 0, opt: 'auth' })
     }
     await Q.ok('text/javascript; charset=utf-8', `window.uid = ${process.pid}; window.uploadChunkSize = ${5 * 1024 * 1024}; window.uploadWorkerSize = 5;`)
   })
@@ -104,7 +104,7 @@ Q.on(Q.Method.POST)
     }
     let file = `${file_path}/${decodeURI(Q.param('fn'))}`
     if (fs.existsSync(file)) {
-      await Q.ok_json(JSON.stringify({ code: 1, info: `[${file}] 文件已经存在` }))
+      await Q.ok_json({ code: 1, info: `[${file}] 文件已经存在` })
     }
     Q.ok_json({ code: 0, info: `[${file}:${Q.param('fs')}] 文件初始化成功` })
   })
@@ -121,7 +121,7 @@ Q.on(Q.Method.POST)
       let fd = fs.openSync(file, 'r+')
       fs.writeSync(fd, data, 0, data.length, index * chunkSize)
       fs.closeSync(fd);
-      Q.ok_json(JSON.stringify({ code: 0, index: index }))
+      Q.ok_json({ code: 0, index: index })
     })
   })
   .map('/shell/upload/chk').do(async () => {
@@ -144,15 +144,15 @@ Q.on(Q.Method.POST)
         //长传完成
         fs.truncateSync(file_src, size);
         fs.renameSync(file_src, file);
-        Q.ok_json(JSON.stringify({ code: 0, file_src: file_src, file_dsk: file, info: '文件上传完成' }))
+        Q.ok_json({ code: 0, file_src: file_src, file_dsk: file, info: '文件上传完成' })
       }
-      r.ok_json(JSON.stringify({
+      r.ok_json({
         code: 0, info: `[${file}] 文件已经存在`, value: body.map((v, i) => {
           return v ? v : i
         }).filter(v => v !== true)
-      }))
+      })
     } else {
-      r.ok_json(JSON.stringify({ code: 1, info: '文件不存在', uploaded_ids: [] }))
+      r.ok_json({ code: 1, info: '文件不存在', uploaded_ids: [] })
     }
   })
 
