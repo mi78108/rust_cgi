@@ -177,7 +177,7 @@ process.on('exit', async (ev) => {
 
 process.stdin.on('close', async (ev) => {
     console.error(`>>${process.pid}> Process On Stdin Close event trigger`, ev)
-    process.exit(0)
+    //process.exit(0)
 })
 
 //Array.from(["beforeExit","uncaughtException", "unhandledRejection","SIGTERM", "SIGINT", "SIGHUP", 'exit']).forEach(sig => {

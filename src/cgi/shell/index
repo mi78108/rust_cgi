@@ -97,6 +97,10 @@ Q.on(Q.Method.GET)
   })
 
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 Q.on(Q.Method.POST)
   .map('/shell/upload/pre').do(async (_) => {
     if (!fs.existsSync(file_path)) {
@@ -108,12 +112,12 @@ Q.on(Q.Method.POST)
     }
     Q.ok_json({ code: 0, info: `[${file}:${Q.param('fs')}] 文件初始化成功` })
   })
-  .map('/shell/upload').do(() => {
+  .map('/shell/upload').do(async () => {
     let file = `${file_path}/${decodeURI(Q.param('fn'))}`
     let index = parseInt(Q.param('id'))
     // let count = parseInt(Q.param('ct'))
     let chunkSize = parseInt(Q.param('cs'))
-    Q.recv((data) => {
+    Q.recv(async (data) => {
       //file = `${file}.uploading`
       if (!fs.existsSync(file)) {
         fs.writeFileSync(file, '');
@@ -121,6 +125,7 @@ Q.on(Q.Method.POST)
       let fd = fs.openSync(file, 'r+')
       fs.writeSync(fd, data, 0, data.length, index * chunkSize)
       fs.closeSync(fd);
+      await sleep(100);
       Q.ok_json({ code: 0, index: index })
     })
   })
