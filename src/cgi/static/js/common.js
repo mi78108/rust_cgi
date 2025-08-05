@@ -139,7 +139,7 @@ tools.dialog = class {
     //
       this.bt标题.title = document.getElementsByClassName('dialog').length + 1
     this.bt标题.innerHTML = this.cfg.title;
-    this.bt标题.style = 'color: white; marginLeft: 3px; height: 100%; line-height: 90%; max-width: 50%; display: inline-block; white-space: nowrap; overflow-x: hidden'
+    this.bt标题.style = 'color: white; marginLeft: 3px; height: 100%; line-height: 90%; max-width: 60%; display: inline-block; white-space: nowrap; overflow-x: hidden'
     //
       this.gb关闭.innerHTML = '[X]'
     this.gb关闭.title = '关闭'
@@ -380,7 +380,7 @@ tools.dialog_file_uploader = class extends tools.dialog {
 
     this.bt标题.innerHTML = this.uploader.uploadFile.name
     this.bar = document.createElement('div') ;
-    this.bar.style = 'width: 100%; height:60%; border: 1px dashed green; display: flex; flex-wrap:wrap; overflow-y:scroll';
+    this.bar.style = 'width: 100%; height:60%; border: 1px dashed green; display: flex; flex-wrap:wrap; overflow-y:scroll;background-position: center;background-repeat: no-repeat';
     this.bars = new Map();
     this.add_element(this.bar)
 
@@ -393,10 +393,16 @@ tools.dialog_file_uploader = class extends tools.dialog {
       tools.target_stillBottom_event(text)
     }
     this.uploader.on('progress', (info) => {
+      if (info.opt == 'upload') {
+        this.bars[info['index']].style.backgroundColor = 'blue';
+      }
       if (info.opt == 'uploaded') {
-        this.bt标题.innerHTML = this.uploader.uploadFile.name + `(${(this.uploader.uploaded_indexs.length / this.uploader.uploadCount).toFixed(4) * 100}%)`
+        this.bt标题.innerHTML = this.uploader.uploadFile.name + `(${(this.uploader.uploaded_indexs.length / this.uploader.uploadCount * 100).toFixed(2)}%)`
         this.bars[info['index']].style.borderColor = 'green';
         this.bars[info['index']].style.backgroundColor = 'green';
+        let rate = `${(this.uploader.uploaded_size / (new Date() - this.uploader.start_time) / 1024).toFixed(2)}mb/s`
+        this.bt标题.innerHTML = this.uploader.uploadFile.name + `(${(this.uploader.uploaded_indexs.length / this.uploader.uploadCount * 100).toFixed(2)}%|${rate})`
+        //this.bar.style.backgroundImage = `url(${tools.canvas_text(rate)})`
       }
       if (info.opt == 'finished') {
         this.bt标题.innerHTML = this.uploader.uploadFile.name + "(完成)"
@@ -409,6 +415,16 @@ tools.dialog_file_uploader = class extends tools.dialog {
           上传用时: ${(Math.round(this.uploader.end_time - this.uploader.start_time) / 1000)}s<br>
           平均速率: ${(this.uploader.uploadFile.size / (this.uploader.end_time - this.uploader.start_time) / 1024).toFixed(2)}mb/s
           `,0)
+      }
+    })
+    this.uploader.on('worker', (info) => {
+      if (info.opt == 'new') {
+        this.bars[info['index']].style.backgroundColor = 'orange';
+      }
+    })
+    this.uploader.on('chunk', (info) => {
+      if (info.opt == 'start') {
+        this.bars[info['index']].style.backgroundColor = 'red';
       }
     })
 
@@ -434,7 +450,7 @@ tools.dialog_file_uploader = class extends tools.dialog {
 }
 
 tools.file_uploader = class {
-  constructor(url, file, workerSize = 5, chunkSize = 1 * 1024 * 1024) {
+  constructor(url, file, workerSize = 8, chunkSize = 1 * 1024 * 1024) {
     this.uploadUrl = url;
     this.uploadFile = file;
     this.chunkSize = chunkSize;
@@ -472,19 +488,20 @@ tools.file_uploader = class {
     //console.log(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${ev} [${JSON.stringify(info.log)}]`)
   }
 
-  chunk_readAsArrayBuffer(start, end) {
+  chunk_readAsArrayBuffer(index,start, end) {
     return new Promise((resolve, reject) => {
-      let reader = new FileReader();
-      reader.readAsArrayBuffer(this.uploadFile.slice(start, end));
-      this.trigger('chunk', { opt: 'start', log: `${this.uploadFile.name} chunk ${start}-${end} start` })
-      reader.onload = (data) => {
-        this.trigger('chunk', { opt: 'done', log: `${this.uploadFile.name} chunk ${start}-${end} done` })
+      //let reader = new FileReader();
+      //reader.readAsArrayBuffer(this.uploadFile.slice(start, end));
+      this.trigger('chunk', { opt: 'start', index: index ,log: `${this.uploadFile.name} chunk ${start}-${end} start` })
+      //reader.onload = (data) => {
+        let data = this.uploadFile.slice(start, end)
+        this.trigger('chunk', { opt: 'done', index: index, log: `${this.uploadFile.name} chunk ${start}-${end} done` })
         resolve(data)
-      }
-      reader.onerror = (erro) => {
-        this.trigger('chunk', { opt: 'erro', log: `${this.uploadFile.name} chunk ${start}-${end} erro` })
-        reject(erro)
-      }
+        // }
+      // reader.onerror = (erro) => {
+        //  this.trigger('chunk', { opt: 'erro', log: `${this.uploadFile.name} chunk ${start}-${end} erro` })
+        //  reject(erro)
+        // }
     })
   }
 
@@ -504,37 +521,40 @@ tools.file_uploader = class {
     })
   }
 
-  upload_process(index, chunk) {
-    return new Promise((resolve, reject) => {
+  upload_process(index) {
+    return new Promise((resolve,reject)=>{
+      let start = index * this.chunkSize;
+      let end = (index + 1) * this.chunkSize;
+      this.trigger('chunk', { opt: 'start', index: index ,log: `${this.uploadFile.name} chunk ${start}-${end} start` })
+      let chunk = this.uploadFile.slice(start, end)
+      this.trigger('chunk', { opt: 'done', index: index, log: `${this.uploadFile.name} chunk ${start}-${end} done` })
       this.trigger('progress', { opt: 'upload', log: `${this.uploadFile.name} uploading ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
-      fetch(`${this.uploadUrl}?fn=${this.uploadFile.name}&id=${index}&ct=${this.uploadCount}&cs=${this.chunkSize}`, {
+      return fetch(`${this.uploadUrl}?fn=${this.uploadFile.name}&id=${index}&ct=${this.uploadCount}&cs=${this.chunkSize}`, {
         method: 'POST', body: chunk
       }).then(resp => resp.json()).then(resp => {
         this.uploaded_indexs.push(index)
-        this.uploaded_size += chunk.length
-        this.trigger('progress', { opt: 'uploaded', log: `${this.uploadFile.name} uploaded ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
+        this.uploaded_size += chunk.byteLength
+        resolve(resp)
+        this.trigger('progress', { opt: 'uploaded', log: `${this.uploadFile.name} uploaded ${index}/${this.uploadCount}`, index: index, count: this.uploadCount ,ext:resp })
         if (this.uploaded_indexs.length == this.uploadCount) {
           if(this.end_time == undefined) {
             this.end_time = new Date()
           }
           this.trigger('progress', { opt: 'finished', log: `${this.uploadFile.name} finished`, index: index })
-        } else {
-          this.start_jobs()
         }
-        resolve(resp)
         chunk = null;
-      }).catch((resp) => {
-        this.trigger('progress', { opt: 'retry', log: `${this.uploadFile.name} retry ${index}`, index: index })
+      }).catch((e) => {
+        this.trigger('progress', { opt: 'retry', log: `${this.uploadFile.name} retry ${index}`, index: index, ext: e })
         //this.trigger('erro', { opt: 'upload', log: `${this.uploadFile.name} upload ${index}`, index: index, count: this.uploadCount })
         setTimeout(() => {
           this.upload_process(index, chunk);
         }, Math.round(Math.random() * 10000))
-        reject(resp)
+        reject(e)
       })
     })
   }
 
-  start_jobs(workerSize = this.workerSize) {
+  start_jobs() {
     if(this.start_time == undefined) {
       this.start_time = new Date()
     }
@@ -544,16 +564,14 @@ tools.file_uploader = class {
     }
     for (let index = 0; index < this.uploadCount; index++) {
       if (this.uploading_indexs.indexOf(index) === -1) {
-        if (this.uploading_working_size < workerSize) {
+        if (this.uploading_working_size < this.workerSize) {
           this.uploading_working_size += 1;
           this.uploading_indexs.push(index);
           this.trigger('worker', { opt: 'new', log: `${this.uploadFile.name} worker new ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
-          this.chunk_readAsArrayBuffer(index * this.chunkSize, (index + 1) * this.chunkSize).then(resp => {
-            this.upload_process(index, resp.target.result).finally((_) => {
-              this.uploading_working_size -= 1;
-              this.trigger('worker', { opt: 'done', log: `${this.uploadFile.name} worker done ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
-              resp = null;
-            })
+          this.upload_process(index).finally(() => {
+            this.uploading_working_size -= 1;
+            this.trigger('worker', { opt: 'done', log: `${this.uploadFile.name} worker done ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
+            this.start_jobs()
           })
         } else {
           this.trigger('worker', { opt: 'wait', log: `${this.uploadFile.name} worker wait ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
