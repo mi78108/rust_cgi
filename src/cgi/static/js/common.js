@@ -354,7 +354,7 @@ tools.dialog_file_uploader = class extends tools.dialog {
           { title: '文件名称', type: 'text', default: this.uploader.uploadFile.name, readOnly: true},
           { title: '文件大小', type: 'text', default: this.uploader.uploadFile.size, readOnly: true},
           { title: '并行数量', type: 'number', min: 1, max: 64,defaultValue: this.uploader.workerSize, onchange: (ev,_)=>{this.uploader.workerSize = ev.target.value}},
-          { title: '切块大小', type: 'number', min: 1024, name: 'chunkSize', defaultValue: this.uploader.chunkSize, oninput: (ev,self)=>{
+          { title: '切块大小', type: 'number', min: 1024, name: 'chunkSize', defaultValue: this.uploader.chunkSize, onchange: (ev,self)=>{
             console.log("set chunkSize",ev.target.value)
             if(ev.target.value > 0){
               this.uploader.chunkSize = parseInt(ev.target.value)
@@ -435,7 +435,8 @@ tools.dialog_file_uploader = class extends tools.dialog {
     this.bar.innerHTML = '';
     for(let i = 0; i < this.uploader.uploadCount; i++){
       let item = document.createElement('div') ;
-      item.style = 'border: 1px solid red; flex: auto; margin:2px; width:10px; height:10px; flex-grow: 0'
+      item.style = 'border: 1px solid red; flex: auto; margin:2px; width:2%; height:3%; flex-grow: 0'
+      //item.style = 'border: 1px solid red; flex: auto; margin:2px; flex-grow: 0'
       item.id = `bar_${i}`
       this.bars[i] = item
       this.bar.appendChild(item)
@@ -533,7 +534,7 @@ tools.file_uploader = class {
         method: 'POST', body: chunk
       }).then(resp => resp.json()).then(resp => {
         this.uploaded_indexs.push(index)
-        this.uploaded_size += chunk.byteLength
+        this.uploaded_size += chunk.size
         resolve(resp)
         this.trigger('progress', { opt: 'uploaded', log: `${this.uploadFile.name} uploaded ${index}/${this.uploadCount}`, index: index, count: this.uploadCount ,ext:resp })
         if (this.uploaded_indexs.length == this.uploadCount) {
