@@ -20,7 +20,7 @@ pub trait Req {
 /// # 说明
 /// - 为请求调用相应的脚本
 /// - 目前脚本tsdin stdout各使用一个线程
-fn call_script(req: Box<(dyn Req + Send + Sync)>) {
+fn call_script<T: Req + Send + Sync + 'static>(req: T) {
     let buffer_size = req
         .env()
         .get("Req_Buffer_Size")
@@ -47,53 +47,27 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
 
         match script.spawn() {
             Ok(mut child) => {
+                let script_id = child.id();
                 let script_path = script_path.clone();
                 let req_arc = Arc::new(req);
                 let req_reader = req_arc.clone();
-                let req_writer = req_arc.clone();
+                //let req_writer = req_arc.clone();
 
                 let mut script_stdin = child.stdin.take().unwrap();
                 let mut script_stdout = child.stdout.take().unwrap();
-                let script_id = child.id();
                 //
-                let script_arc = Arc::new(script);
-                let script_stdin_arc = script_arc.clone();
-                let script_stdout_arc = script_arc.clone();
+                //let _script_name = script.get_program().to_str().unwrap().to_string();
+                //let script_name = _script_name.as_str();
+
+                //let script_arc = Arc::new(script);
+                //let script_stdin_arc = script_arc.clone();
+                //let script_stdout_arc = script_arc.clone();
 
                 //
-                thread::spawn(move || {
-                    // script -> tcp
-                    let script_name = script_stdin_arc.get_program().to_str().unwrap();
-                    let mut buffer = vec![0u8; buffer_size];
-                    while let Ok(len) = script_stdout.read(&mut buffer) {
-                        debug!(
-                            "<{:?}:{}> on {} call script [{}] script stream read [{}]",
-                            current().id(),
-                            script_id,
-                            id(),
-                            script_name,
-                            len
-                        );
-                        if let Err(e) = req_writer.write(&buffer[..len]) {
-                            error!("{:?}", e);
-                            break;
-                        }
-                        if len == 0 {
-                            // 脚本若返回空字节 则认为脚本结束
-                            break;
-                        }
-                    }
-                    debug!(
-                        "<{:?}:{}> on {} call script [{}] script stream pipe end",
-                        current().id(),
-                        script_id,
-                        id(),
-                        script_name
-                    );
-                });
-                thread::spawn(move || {
+                let script_name = script.get_program().to_str().unwrap().to_string();
+                let _reader_handle = thread::spawn(move || {
                     // tcp -> script
-                    let script_name = script_stdout_arc.get_program().to_str().unwrap();
+                    //let script_name = script_stdout_arc.get_program().to_str().unwrap();
                     let mut buffer = vec![0u8; buffer_size];
                     while let Ok(len_opt) = req_reader.read(&mut buffer) {
                         if let Some(len) = len_opt {
@@ -133,6 +107,35 @@ fn call_script(req: Box<(dyn Req + Send + Sync)>) {
                         script_name
                     );
                 });
+                // script -> tcp
+                let script_name = script.get_program().to_str().unwrap();
+                let mut buffer = vec![0u8; buffer_size];
+                while let Ok(len) = script_stdout.read(&mut buffer) {
+                    debug!(
+                        "<{:?}:{}> on {} call script [{}] script stream read [{}]",
+                        current().id(),
+                        script_id,
+                        id(),
+                        script_name,
+                        len
+                    );
+                    if let Err(e) = req_arc.write(&buffer[..len]) {
+                        error!("{:?}", e);
+                        break;
+                    }
+                    if len == 0 {
+                        // 脚本若返回空字节 则认为脚本结束
+                        break;
+                    }
+                }
+                debug!(
+                    "<{:?}:{}> on {} call script [{}] script stream pipe end",
+                    current().id(),
+                    script_id,
+                    id(),
+                    script_name
+                );
+                //reader_handle.join().unwrap();
                 // block wait
                 let script_rst = child.wait();
                 req_arc.close().unwrap();
@@ -172,34 +175,24 @@ pub fn handle(stream: Tcp) {
             &buffer[0..len],
             String::from_utf8_lossy(&buffer)
         );
-    }
-
-    call_script(match buffer {
-        ref h
-            if [
-                "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT",
-            ]
-            .iter()
-            .find(|v| h.starts_with(v.as_bytes()))
-            .is_some() =>
+        //
+        if [
+            "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT",
+        ]
+        .iter()
+        .find(|v| buffer.starts_with(v.as_bytes()))
+        .is_some()
         {
             debug!("Tcp Req Handled on HTTP");
             let http = Http::from(stream);
-            //Websocket
             if let Some(websocket) = http.env().get("req_body_method") {
                 if websocket == "WEBSOCKET" {
                     debug!("Tcp Req Handled on HTTP Upgrade Websocket");
-                    Box::new(Websocket::from(http))
-                } else {
-                    Box::new(http)
+                    return call_script(Websocket::from(http));
                 }
-            } else {
-                Box::new(http)
             }
+           return call_script(http);
         }
-        _ => {
-            debug!("Tcp Req Handled on tcp default");
-            Box::new(stream)
-        }
-    })
+        return call_script(Http::from(stream));
+    }
 }
