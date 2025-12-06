@@ -38,14 +38,14 @@ module Q
       for path in paths do                
         if (path == Q::REQ_PATH if path.instance_of? String) || (path =~ Q::REQ_PATH if path.instance_of? Regexp) || (path.call(Q::REQ_PATH) if path.instance_of? Proc)
           Q.log "Mapped #{method} on #{path}"
-           @unmap = true
+           @unmap = false
           (ENV['REQ_URI_MATCHED'] = path.match(Q::REQ_PATH).to_a.to_json) if path.instance_of? Regexp
           yield(Q::REQ_PARAMS) if block_given?
           break
         end
       end
       if paths.empty?
-        Q.log "Mapped on defaults"
+        Q.log "Mapped #{method} on defaults #{paths}"
         yield(Q::REQ_PARAMS) if block_given?
       end
     end
