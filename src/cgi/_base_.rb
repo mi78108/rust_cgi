@@ -37,7 +37,7 @@ module Q
     if method.to_s == Q::REQ_METHOD
       for path in paths do                
         if (path == Q::REQ_PATH if path.instance_of? String) || (path =~ Q::REQ_PATH if path.instance_of? Regexp) || (path.call(Q::REQ_PATH) if path.instance_of? Proc)
-          Q.log "Mapped on #{path}"
+          Q.log "Mapped #{method} on #{path}"
            @unmap = true
           (ENV['REQ_URI_MATCHED'] = path.match(Q::REQ_PATH).to_a.to_json) if path.instance_of? Regexp
           yield(Q::REQ_PARAMS) if block_given?
