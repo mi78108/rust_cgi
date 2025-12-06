@@ -33,23 +33,30 @@ module Q
     JSON.parse(ENV['REQ_URI_MATCHED'])
   end
 
-  def Q.map(method, *paths)
+  def Q.map(method=nil, *paths)
+    Q.log "Ready Map #{method} with #{paths}"
+    if method.nil? and paths.empty?
+      Q.log "Mapped on default"
+      yield(Q::REQ_PARAMS) if block_given?
+      return Q
+    end
     if method.to_s == Q::REQ_METHOD
       for path in paths do                
         if (path == Q::REQ_PATH if path.instance_of? String) || (path =~ Q::REQ_PATH if path.instance_of? Regexp) || (path.call(Q::REQ_PATH) if path.instance_of? Proc)
-          Q.log "Mapped #{method} on #{path}"
-           @unmap = false
           (ENV['REQ_URI_MATCHED'] = path.match(Q::REQ_PATH).to_a.to_json) if path.instance_of? Regexp
+          @unmap = false
+          Q.log "Mapped #{method} on #{path}"
           yield(Q::REQ_PARAMS) if block_given?
-          break
+          return Q
         end
       end
-      if paths.empty?
-        Q.log "Mapped #{method} on defaults #{paths}"
-        yield(Q::REQ_PARAMS) if block_given?
-      end
+      Q.log "Mapped #{method} on default"                                                                                                                                  
+      yield(Q::REQ_PARAMS) if block_given?
+      return Q
     end
-  end
+    return Q
+  end 
+
   def Q.log(*info)
     info.each do |v|
       STDERR.puts ">>[#{Process.pid}]> LOG <#{caller.first}> INFO: #{v}"
@@ -75,7 +82,6 @@ module Q
   def Q.ok(mime, body, header={})
     Q.resp 200, 'OK', mime, body, header
   end
-
   def Q.ok_json(body, header = {})
     Q.ok 'application/json; charset=utf-8', body, header
   end
@@ -115,6 +121,14 @@ module Q
   def Q.on_close(&cbk)
     Q::CBK_ONCLOSE.push(cbk)
   end
+end
+
+
+module R
+  CODE = 200
+  STATUS = 'OK'
+  HEADER = Hash.new
+
 end
 
 BEGIN{
