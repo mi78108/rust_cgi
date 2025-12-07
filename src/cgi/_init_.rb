@@ -22,10 +22,10 @@ class Req
     value.nil? ? val : value 
   end
   def argv(val)
-    return @argvs[va.to_i]
+    return @argvs[val.to_i]
   end
   def match(val)
-    return ENV['REQ_URI_MATCH'][val.to_i] 
+    return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i] 
   end
 
   def method_missing(method_name, *args, &block)
@@ -33,8 +33,8 @@ class Req
     if method_str.start_with?("argv_")
       return argv(method_str.split("_", 2)[1])
     end
-    if method_str.start_with?("matched_")
-      return matched(method_str.split("_", 2)[1])
+    if method_str.start_with?("match_")
+      return match(method_str.split("_", 2)[1])
     end
     if method_str.start_with?("param_")
       return param(method_str.split("_", 2)[1])
@@ -47,32 +47,30 @@ class Req
 end
 
 class Rsp
+  attr_accessor :header
+
   def initialize()
     @body
     @code = 200
     @status = 'OK'
     @version = 'HTTP/1.0'
     @header = {
-      'Connection' => 'close'
+      'Connection' => 'close',
       'Content-Type' => 'application/json; charset=uft-8',
-      'Content-Length' => 0,
+      'Content-Length' => 0
     }
   end
 
-  def set_header(name, value)
-    @header[name] = value
+  def type val
+    @header['Content-Type'] = val
     return self
   end
-  def set_type(mime)
-    set_header 'Content-Type', mime
+  def code(val)
+    @code = val
     return self
   end
-  def code code
-    @code = code
-    return self
-  end
-  def body body
-    @body = body
+  def body val
+    @body = val
     return self
   end
   def ok body
@@ -81,10 +79,12 @@ class Rsp
     return self
   end
   def ok_json body
+    type 'application/json; charset=utf-8'
     ok body.to_json
   end
   def fail_404 body
     @code = 404
+    @status = "Not Found"
     @body = body
     return self
   end
@@ -97,40 +97,47 @@ end
 
 
 module Q
-  UNMAP = true
   CBK_ONCLOSE = Array.new
   BUFFER_SIZE = 10 * 1024 * 1024
   REQ_PATH = URI::decode_uri_component(ENV['req_path'])
   REQ_METHOD = ENV['req_body_method'] == 'HTTP' ? ENV['req_method'] : ENV['req_body_method']
+  @@UNMAP = true
+  @RESP = Rsp.new
 
+  def self.handle_response
+    if @@UNMAP
+      resp_501 'unHandle'
+    else
+      @RESP.finally if not @RESP.header['send']
+    end
+  end
+  
   def Q.const_missing( name )
     STDERR.puts "const #{name} NOT EXIST; Find in ENV"
     URI::decode_uri_component(ENV[name.to_s] ? ENV[name.to_s] : ENV[name.to_s.downcase])
-  end
-
-  def Q.uri_matched?
-    ENV['REQ_URI_MATCH'].empty?
   end
 
   def Q.map(method=nil, *paths)
     Q.log "Ready Map #{method} with #{paths}"
     if method.nil? and paths.empty?
       Q.log "Mapped on default"
-      yield(Req.new, Rsp.new) if block_given?
+      @@UNMAP = false
+      yield(Req.new, @RESP) if block_given?
       return Q
     end
     if method.to_s == Q::REQ_METHOD
       for path in paths do                
         if (path == Q::REQ_PATH if path.instance_of? String) || (path =~ Q::REQ_PATH if path.instance_of? Regexp) || (path.call(Q::REQ_PATH) if path.instance_of? Proc)
-          (ENV['REQ_URI_MATCH'] = path.match(Q::REQ_PATH).to_a) if path.instance_of? Regexp
-          @unmap = false
+          (ENV['REQ_URI_MATCH'] = path.match(Q::REQ_PATH).to_a.to_json) if path.instance_of? Regexp
           Q.log "Mapped #{method} on #{path}"
-          yield(Req.new, Rsp.new) if block_given?
+          @@UNMAP = false
+          yield(Req.new, @RESP) if block_given?
           return Q
         end
       end
-      Q.log "Mapped #{method} on default"                                                                                                                                  
-      yield(Req.new, Rsp.new) if block_given?
+      Q.log "Mapped #{method} on default"
+      @@UNMAP = false
+      yield(Req.new, @RESP) if block_given?
       return Q
     end
     return Q
@@ -148,27 +155,28 @@ module Q
     return count
   end
   def Q.resp(code, status, header, content)
-    Q.write {
-      'Connection': 'close',
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Length': content.bytesize,
-    }.merge(header).reduce("HTTP/1.0 #{code} #{status}\r\n") {|a,(k,v)|
-      a + "#{k}: #{v}\r\n" 
-     } + "\r\n", false
+    Q.write ({
+      "Connection" => 'close',
+      "Content-Type" => 'text/html; charset=utf-8',
+      "Content-Length" => content.nil? ? 0 : content.bytesize
+    }.merge(header).reduce("HTTP/1.0 #{code} #{status}\r\n") {|a, (k,v)|
+        a + "#{k}: #{v}\r\n"
+    } + "\r\n"), false
 
     Q.write content, true
+    @RESP.header['send'] = true
     exit 0
   end
 
   def Q.ok(mime, body, header={})
     header['Content-Type'] = mime
-    Q.resp 200, 'OK', mime, body, header
+    Q.resp 200, 'OK', header, body
   end
   def Q.ok_json(body, header = {})
-    Q.ok 'application/json; charset=utf-8', header, body
+    Q.ok 'application/json; charset=utf-8', body, header
   end
   def Q.ok_html(body, header = {})
-    Q.ok 'text/html; charset=utf-8', header, body
+    Q.ok 'text/html; charset=utf-8', body, header
   end
   def Q.resp_404(body, header={})
     header['Content-Type'] = 'text/html'
@@ -209,13 +217,6 @@ module Q
 end
 
 
-module R
-  CODE = 200
-  STATUS = 'OK'
-  HEADER = Hash.new
-
-end
-
 BEGIN{
   STDERR.puts ">>[#{Process.pid}]> *************Process #{$$} BEGIN*************"
 }
@@ -226,7 +227,5 @@ END {
     Q.log "CBK_ONCLOSE [#{index + 1}] called ..."
     cbk && cbk.call()
   end
-  if Q::unmap
-    Q.resp_501 'unHandle'
-  end
+  Q.handle_response
 }

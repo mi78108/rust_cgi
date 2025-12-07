@@ -72,7 +72,7 @@ module Q
     Q.write header.merge({
       'Connection': 'close',
       'Content-Type': mime,
-      'Content-Length': content.bytesize,
+      'Content-Length': content.bytesize
     }).reduce("HTTP/1.0 #{code} #{status}\r\n") {|a,(k,v)| a + "#{k}: #{v}\r\n" } + "\r\n", false
 
     Q.write content, true
@@ -141,7 +141,7 @@ END {
     Q.log "CBK_ONCLOSE [#{index + 1}] called ..."
     cbk && cbk.call()
   end
-  if @unmap
+  if Q::UNMAP
     Q.resp_501 'unHandle'
   end
 }
