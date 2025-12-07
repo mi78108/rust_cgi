@@ -1,10 +1,10 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
 
 require_relative '../_init_'
 require 'mime/types'
 
-Q.map(:GET, %r|^/static/name/(.*)| ) do |r, resp|
-    file = Pathname.new "./static/#{r.match_1}"
-    resp.ok(file.read).type("#{MIME::Types.of(file.to_s).first.to_s}; charset=utf-8").finally if file.exist? and file.file?
-    Q.resp_404 "Script Not found File #{file}"
+Q.map(:GET, %r{^/static/name/(.*)$}) do |r, resp|
+  file = Pathname.new "./static/#{r.match_1}"
+  resp.ok(file.read).type("#{MIME::Types.type_for(file.to_s).first}; charset=utf-8").finally if file.exist? && file.file?
+  Q.resp_404 "Script Not found File #{file}"
 end
