@@ -25,6 +25,7 @@ class Req
     return @argvs[val.to_i]
   end
   def match(val)
+    return nil if ENV['REQ_URI_MATCH'].nil?
     return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i] 
   end
 
@@ -57,7 +58,6 @@ class Rsp
     @header = {
       'Connection' => 'close',
       'Content-Type' => 'application/json; charset=uft-8',
-      'Content-Length' => 0
     }
   end
 
@@ -88,7 +88,6 @@ class Rsp
     @body = body
     return self
   end
-
   def finally
     Q.resp @code, @status, @header, @body
   end
@@ -100,7 +99,8 @@ module Q
   CBK_ONCLOSE = Array.new
   BUFFER_SIZE = 10 * 1024 * 1024
   REQ_PATH = URI::decode_uri_component(ENV['req_path'])
-  REQ_METHOD = ENV['req_body_method'] == 'HTTP' ? ENV['req_method'] : ENV['req_body_method']
+  REQ_BODY_METHOD = ENV['req_body_method']
+  REQ_METHOD = REQ_BODY_METHOD == 'HTTP' ? ENV['req_method'] : ENV['req_body_method']
   @@UNMAP = true
   @RESP = Rsp.new
 
@@ -108,21 +108,30 @@ module Q
     if @@UNMAP
       resp_501 'unHandle'
     else
-      @RESP.finally if not @RESP.header['send']
+      @RESP.finally unless @RESP.header['send'] && REQ_BODY_METHOD == 'HTTP'
     end
   end
   
-  def Q.const_missing( name )
-    STDERR.puts "const #{name} NOT EXIST; Find in ENV"
-    URI::decode_uri_component(ENV[name.to_s] ? ENV[name.to_s] : ENV[name.to_s.downcase])
+#  def Q.const_missing( name )
+#    STDERR.puts "const #{name} NOT EXIST; Find in ENV"
+#    URI::decode_uri_component(ENV[name.to_s] ? ENV[name.to_s] : ENV[name.to_s.downcase])
+#  end
+
+
+  def Q.call_block
+      @@UNMAP = false
+      begin
+        yield(Req.new, @RESP) if block_given?
+      rescue StandardError => e
+        Q.resp_501 e.to_s
+      end
   end
 
-  def Q.map(method=nil, *paths)
+  def Q.map(method=nil, *paths, &block)
     Q.log "Ready Map #{method} with #{paths}"
     if method.nil? and paths.empty?
       Q.log "Mapped on default"
-      @@UNMAP = false
-      yield(Req.new, @RESP) if block_given?
+      Q.call_block(&block)
       return Q
     end
     if method.to_s == Q::REQ_METHOD
@@ -130,14 +139,12 @@ module Q
         if (path == Q::REQ_PATH if path.instance_of? String) || (path =~ Q::REQ_PATH if path.instance_of? Regexp) || (path.call(Q::REQ_PATH) if path.instance_of? Proc)
           (ENV['REQ_URI_MATCH'] = path.match(Q::REQ_PATH).to_a.to_json) if path.instance_of? Regexp
           Q.log "Mapped #{method} on #{path}"
-          @@UNMAP = false
-          yield(Req.new, @RESP) if block_given?
+          Q.call_block(&block)
           return Q
         end
       end
       Q.log "Mapped #{method} on default"
-      @@UNMAP = false
-      yield(Req.new, @RESP) if block_given?
+      Q.call_block(&block)
       return Q
     end
     return Q
