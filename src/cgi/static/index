@@ -3,8 +3,26 @@
 require_relative '../_init_'
 require 'mime/types'
 
-Q.map(:GET, %r{^/static/name/(.*)$}) do |r, resp|
-  file = Pathname.new "./static/#{r.match_1}"
-  resp.ok(file.read).type("#{MIME::Types.type_for(file.to_s).first}; charset=utf-8").finally if file.exist? && file.file?
-  Q.resp_404 "Script Not found File #{file}"
+Q.map(:GET, %r{^/path/(.*)$}) do |req, resp|
+  file_path = req.match_1
+  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
+  Q.fail_404 "File Not found File #{file_path}"
+end
+
+Q.map(:GET, %r{^/type/(.*?)/(.*)$}) do |req, resp|
+  file_path = req.match_2
+  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
+  Q.fail_404 "File Not found File #{file_path}"
+end
+
+Q.map(:GET, %r{^/(.*?)/(.*)$}) do |req, resp|
+  file_path = req.match_2
+  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
+  Q.fail_404 "File Not found File #{file_path}"
+end
+
+Q.map(:GET, %r{^/(.*)$}) do |req, resp|
+  file_path = req.match_1
+  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
+  Q.fail_404 "File Not found File #{file_path}"
 end

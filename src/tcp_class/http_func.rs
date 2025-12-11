@@ -58,11 +58,11 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
         );
         result.push(
             script_file_path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string(),
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string(),
         );
         script_file_path.pop();
     }
@@ -84,8 +84,8 @@ impl Req for Http {
             if let Some(len) = len_opt {
                 self.req_content_readed.store(
                     self.req_content_readed
-                        .load(std::sync::atomic::Ordering::Acquire)
-                        + len,
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    + len,
                     std::sync::atomic::Ordering::Relaxed,
                 )
             }
@@ -124,9 +124,9 @@ impl From<Tcp> for Http {
                 (
                     String::from("Req_Peer_Addr"),
                     String::from(format!(
-                        "{}:{}",
-                        peer_addr.ip().to_string(),
-                        peer_addr.port()
+                            "{}:{}",
+                            peer_addr.ip().to_string(),
+                            peer_addr.port()
                     )),
                 ),
                 (
@@ -137,18 +137,18 @@ impl From<Tcp> for Http {
                     String::from("Req_Peer_Port"),
                     String::from(format!("{}", peer_addr.port())),
                 ),
-            ]),
-            req_content_length: 0,
-            req_content_readed: AtomicUsize::new(0),
+                ]),
+                req_content_length: 0,
+                req_content_readed: AtomicUsize::new(0),
         };
 
         let mut buffer = String::new();
         if let Ok(_size) = http
             .base_on
-            .req_reader
-            .write()
-            .unwrap()
-            .read_line(&mut buffer)
+                .req_reader
+                .write()
+                .unwrap()
+                .read_line(&mut buffer)
         {
             let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
             let mut rst = line.splitn(3, " ");
@@ -172,37 +172,37 @@ impl From<Tcp> for Http {
         // Header
         while let Ok(_) = http
             .base_on
-            .req_reader
-            .write()
-            .unwrap()
-            .read_line(&mut buffer)
-        {
-            let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
-            if line.is_empty() {
-                if let Ok(len) = http
-                    .req_header
-                    .get("Req_Buffer_Size")
-                    .unwrap()
-                    .parse::<usize>()
+                .req_reader
+                .write()
+                .unwrap()
+                .read_line(&mut buffer)
                 {
-                    http.req_buffer_size = len
-                }
-                if let Some(length) = http.req_header.get("Content-Length") {
-                    if let Ok(len) = length.parse::<usize>() {
-                        http.req_content_length = len;
+                    let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
+                    if line.is_empty() {
+                        if let Ok(len) = http
+                            .req_header
+                                .get("Req_Buffer_Size")
+                                .unwrap()
+                                .parse::<usize>()
+                        {
+                            http.req_buffer_size = len
+                        }
+                        if let Some(length) = http.req_header.get("Content-Length") {
+                            if let Ok(len) = length.parse::<usize>() {
+                                http.req_content_length = len;
+                            }
+                        }
+                        break;
                     }
+                    let mut head = line.splitn(2, ":");
+                    if let Some(req_head_name) = head.next() {
+                        if let Some(req_head_value) = head.next() {
+                            http.req_header
+                                .insert(req_head_name.into(), req_head_value.trim_start().into());
+                        }
+                    }
+                    buffer.clear();
                 }
-                break;
-            }
-            let mut head = line.splitn(2, ":");
-            if let Some(req_head_name) = head.next() {
-                if let Some(req_head_value) = head.next() {
-                    http.req_header
-                        .insert(req_head_name.into(), req_head_value.trim_start().into());
-                }
-            }
-            buffer.clear();
-        }
         // parse_path_params
         let mut path = http.req_path.splitn(2, "?");
         if let Some(req_path) = path.next() {
@@ -232,13 +232,20 @@ impl From<Tcp> for Http {
             "req_script_path".into(),
             req_script_path.to_str().unwrap().to_string(),
         );
+        if let Some(script_name) = req_script_path.file_name() {
+            http.req_header.insert("req_script_basename".into(), script_name.to_str().unwrap().to_string());
+            http.req_header.insert("req_script_name".into(), req_script_path.to_str().unwrap().replace(CGI_DIR.get().unwrap(),"").to_string());
+        }
+        if let Some(script_dir) = req_script_path.parent() {
+            http.req_header.insert("req_script_dir".into(), script_dir.to_str().unwrap().to_string());
+        }
         restful_argvs.reverse();
         restful_argvs.iter().enumerate().for_each(|(i, v)| {
             http.req_header
                 .insert(format!("req_argv_{}", i + 1), v.to_owned());
             http.req_header
                 .insert(format!("req_param_argv_{}", i + 1), v.to_owned());
-        });
+            });
         http.req_header
             .insert("req_argv_count".into(), restful_argvs.len().to_string());
         http.req_header
@@ -265,9 +272,9 @@ impl Display for Http {
             self.req_method,
             self.req_path,
             self.req_header
-                .iter()
-                .map(|(k, v)| { return format!(" {} -> {}\n", k, v) })
-                .collect::<String>()
+            .iter()
+            .map(|(k, v)| { return format!(" {} -> {}\n", k, v) })
+            .collect::<String>()
         )
     }
 }
