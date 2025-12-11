@@ -151,11 +151,6 @@ module Q
     map_path = '/' if map_path.empty?
     Q.log "Ready Map #{map_path} on #{method} with #{path_matches}"
     Dir.chdir(map_dir) if Dir.exist? map_dir
-    if method.nil? and path_matches.empty?
-      Q.log "Mapped on default"
-      Q.call_block(&block)
-      return Q
-    end
     if method.to_s == Q::REQ_METHOD
       for match in path_matches do                
         match_result = case match
@@ -173,6 +168,7 @@ module Q
       end
       return Q
     end
+    Q.log "unHandle #{map_path}"
     return Q
   end 
 
@@ -249,7 +245,8 @@ module Q
       true
     end
     yield(v) if block_given?
-    return eval(%Q{"#{body}"})
+    escaped_body = body.gsub(/["\\]/) { |c| "\\#{c}" }
+    return eval(%Q{"#{escaped_body}"})
   end
 
   def Q.recv
