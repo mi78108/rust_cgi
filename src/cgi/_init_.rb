@@ -101,7 +101,11 @@ class Rsp
     return self
   end
   def finally
-    Q.resp @code, @status, @header, @body
+    if Q::REQ_BODY_METHOD == "HTTP"
+      Q.resp @code, @status, @header, @body
+    else
+      Q.write "", true
+    end
   end
 end
 
@@ -125,7 +129,7 @@ module Q
     if @@UNMAP
       Q.fail_501 'unHandle'
     else
-      @RESP.finally unless @RESP.header['send'] && REQ_BODY_METHOD == 'HTTP'
+      @RESP.finally unless @RESP.header['send']
     end
   end
 
