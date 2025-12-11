@@ -137,6 +137,7 @@ module Q
 
   def Q.call_block
     begin
+      @@UNMAP = false
       yield(Req.new, @RESP) if block_given?
   # rescue StandardError => e
     rescue Exception => e
@@ -151,7 +152,17 @@ module Q
     map_path = '/' if map_path.empty?
     Q.log "Ready Map #{map_path} on #{method} with #{path_matches}"
     Dir.chdir(map_dir) if Dir.exist? map_dir
+    if method.nil? and path_matches.empty?
+          Q.log "Mapped on default"
+          Q.call_block(&block)
+          return Q
+    end
     if method.to_s == Q::REQ_METHOD
+      if path_matches.empty?
+          Q.log "Mapped #{method} on default"
+          Q.call_block(&block)
+          return Q
+      end
       for match in path_matches do                
         match_result = case match
                        when String then match == map_path
@@ -160,7 +171,6 @@ module Q
                        else false
                        end
         if match_result
-          @@UNMAP = false
           Q.log "Mapped #{method} on #{match}"
           Q.call_block(&block)
           return Q
