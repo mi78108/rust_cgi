@@ -78,10 +78,6 @@ class Rsp
     @body = body
     return self
   end
-  def render(&block)
-    body(Q.render @body, &block)
-    return self
-  end
   def json
     type 'application/json; charset=utf-8'
     return self
@@ -100,6 +96,42 @@ class Rsp
     @body = body
     return self
   end
+  def render(v = {},  &block)
+    if block_given?
+      Q.make_hkv v
+      ctx = binding
+      instance_exec(v, &block)
+      block.parameters.map { |_, name| name }.compact.each do |name|
+        ctx.local_variable_set name, v
+      end
+      block.binding.local_variables.each do |name|
+        ctx.local_variable_set name, block.binding.local_variable_get(name)
+      end
+      Q.instance_variables.each do |name|
+        instance_variable_set name, Q.instance_variable_get(name)
+      end
+      
+      Q.log "instance_variables:", instance_variables
+      Q.log "instance_variables:", self.binding.instance_variables
+      Q.log "local_variables:", block.binding.local_variables
+      Q.log "local_variables:", Q.instance_variables
+      Q.log "local_variables:", instance_variables
+      Q.log "parameters:", block.parameters
+    end
+
+    body( @body.gsub(%r|[@#]{(?<code>.*?)}|) do |match|
+      Q.log "template matched #{match}"
+      begin
+        instance_eval do
+          eval($~[:code], ctx)
+        end
+      rescue => e
+        "[ERROR: #{e.message}]"
+      end
+    end )
+    return self
+  end
+
   def finally
     if Q::REQ_BODY_METHOD == "HTTP"
       Q.resp @code, @status, @header, @body
@@ -108,6 +140,7 @@ class Rsp
     end
   end
 end
+
 
 
 
@@ -139,11 +172,12 @@ module Q
   #  end
 
 
-  def Q.call_block
+  def Q.call_block &block
     begin
       @@UNMAP = false
-      yield(Req.new, @RESP) if block_given?
-  # rescue StandardError => e
+      #yield(Req.new, @RESP) if block_given?
+      instance_exec(Req.new, @RESP, &block) if block_given?
+      # rescue StandardError => e
     rescue Exception => e
       Q.log e
       Q.fail_500 e.to_s
@@ -157,15 +191,15 @@ module Q
     Q.log "Ready Map #{map_path} on #{method} with #{path_matches}"
     Dir.chdir(map_dir) if Dir.exist? map_dir
     if method.nil? and path_matches.empty?
-          Q.log "Mapped on default"
-          Q.call_block(&block)
-          return Q
+      Q.log "Mapped on default"
+      Q.call_block(&block)
+      return Q
     end
     if method.to_s == Q::REQ_METHOD
       if path_matches.empty?
-          Q.log "Mapped #{method} on default"
-          Q.call_block(&block)
-          return Q
+        Q.log "Mapped #{method} on default"
+        Q.call_block(&block)
+        return Q
       end
       for match in path_matches do                
         match_result = case match
@@ -245,8 +279,30 @@ module Q
     Q.resp 302, 'Found', header, body
   end
 
-  def Q.render(body, v={})
-    def v.method_missing(name, *args)
+  def Q.render_while(body, v={})
+    Q.make_hkv v
+    yield(v) if block_given?
+    escaped_body = body.gsub(/["\\]/) { |c| "\\#{c}" }
+    return eval(%Q{"#{escaped_body}"})
+  end
+
+  def Q.render_sub(body, v={}, &block)
+    if block_given?
+      Q.make_hkv v
+      block.call v
+      body.gsub(%r|[@#]{(?<code>.*?)}|) do |match|
+        Q.log "template matched #{match}"
+        begin
+          instance_eval($~[:code])
+        rescue => e
+          "[ERROR: #{e.message}]"
+        end
+      end
+    end
+  end
+
+  def Q.make_hkv hash
+    def hash.method_missing(name, *args)
       if name.to_s.end_with?("=")
         key = name.to_s.chomp("=").to_sym
         self[key] = args.first
@@ -255,13 +311,11 @@ module Q
       end
     end
 
-    def v.respond_to_missing?(name, include_private = false)
+    def hash.respond_to_missing?(name, include_private = false)
       true
     end
-    yield(v) if block_given?
-    escaped_body = body.gsub(/["\\]/) { |c| "\\#{c}" }
-    return eval(%Q{"#{escaped_body}"})
   end
+
 
   def Q.recv
     # 注意阻塞，会持续到EOF

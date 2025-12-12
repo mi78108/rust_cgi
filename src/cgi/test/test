@@ -3,9 +3,12 @@
 
 require_relative '../_init_'
 
-Q.map(:GET, ->(v){ v == '/'}) do |_, r|
-  r.body(File.read("page.html")).html.render do |ctx|
-    ctx.title = "test"
+Q.map(:GET, ->(v){ v == '/'}) do |req, r|
+  abc = 123
+  @title="The Test Page"
+  r.body(File.read("page.html")).html.render do |c|
+    #@title= "12344"
+    c.title = "The test"
   end
 end
 
