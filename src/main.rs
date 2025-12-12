@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 use std::thread::{self, spawn};
 use udp_class::udp_base::Client;
+use lib::ThreadPool;
 
 #[macro_use]
 extern crate log;
@@ -11,6 +12,7 @@ extern crate log;
 mod tcp_class;
 mod udp_class;
 mod utils;
+mod lib;
 
 static CGI_DIR: OnceLock<String> = OnceLock::new();
 
@@ -114,10 +116,11 @@ fn main() {
 
     let tcp_listener = TcpListener::bind(addr).expect(format!("bind {} erro", addr).as_str());
     info!("Listen on [{}] CGI in [{}]", addr, CGI_DIR.get().unwrap());
+    let mut thread_pool = ThreadPool::new(4);
     for stream in tcp_listener.incoming() {
         match stream {
             Ok(_stream) => {
-                std::thread::spawn(move || {
+                thread_pool.execute(move || {
                     debug!(
                         "<{:?}> tcp call start new Req thread started",
                         thread::current().id()
