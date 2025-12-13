@@ -2,6 +2,7 @@ use crate::tcp_class::tcp_base::Handle;
 use crate::tcp_class::tcp_base::Req;
 use crate::tcp_class::tcp_func::Tcp;
 use crate::CGI_DIR;
+use crate::tcp_class::websocket_func::Websocket;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::BufRead;
@@ -322,7 +323,15 @@ impl Handle for HttpHandle {
     }
 
     fn handle(&self, stream: Tcp) -> Box<dyn Req> {
-        Box::new(Http::from(stream))
+        let http = Http::from(stream);
+        //Websocket
+        if let Some(websocket) = http.env().get("req_body_method") {
+            if websocket == "WEBSOCKET" {
+                debug!("Tcp Req Handled on HTTP Upgrade Websocket");
+                return Box::new(Websocket::from(http));
+            }
+        }
+        return Box::new(http);
     }
 }
 
