@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 
+use log::debug;
+
 pub struct ThreadPool {
     workers: Vec<Worker>,
     sender: mpsc::Sender<Job>,
@@ -11,7 +13,7 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 
 impl ThreadPool {
     pub fn new(size: usize) -> ThreadPool {
-      let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
 
         let receiver = Arc::new(Mutex::new(receiver));
 
@@ -27,14 +29,14 @@ impl ThreadPool {
         }
     }
 
- pub fn execute<F>(&self, f: F)
-        where
-            F: FnOnce() + Send + 'static
-    {
-        let job = Box::new(f);
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static
+        {
+            let job = Box::new(f);
 
-        self.sender.send(job).unwrap();
-    }
+            self.sender.send(job).unwrap();
+        }
 }
 
 struct Worker {
@@ -48,9 +50,10 @@ impl Worker {
             loop {
                 let job = receiver.lock().unwrap().recv().unwrap();
 
-                println!("Worker {} got a job; executing.", id);
+                debug!("Worker {} got a job; executing.", id);
 
                 job();
+                debug!("Worker {} finished a job. release", id);
             }
         });
 
