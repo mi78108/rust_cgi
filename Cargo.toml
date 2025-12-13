@@ -9,5 +9,5 @@ log = "*"
 sha-1 = "*"
 base64 = "*"
 env_logger = "*"
-mio = { version = "*", features = ["os-poll"] }
+mio = { version = "*", features = ["os-poll", "net"] }
 clap = { version = "*", features = ["derive", "cargo"] }

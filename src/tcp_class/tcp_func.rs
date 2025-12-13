@@ -1,15 +1,16 @@
 use crate::tcp_class::tcp_base::Req;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::io::{BufReader, BufWriter, Error, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::id;
 use std::sync::atomic::AtomicBool;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::thread::current;
 
 #[derive(Debug)]
 pub struct Tcp {
-    pub req_stream: TcpStream,
+    pub req_stream: Arc<TcpStream>,
     req_header: HashMap<String, String>,
     pub req_reader: RwLock<BufReader<TcpStream>>,
     pub req_writer: RwLock<BufWriter<TcpStream>>,
@@ -44,6 +45,10 @@ impl Req for Tcp {
     fn env(&self) -> &HashMap<String, String> {
         &self.req_header
     }
+    
+    fn stream(&self) -> TcpStream {
+       self.req_stream.try_clone().unwrap()
+    }
 }
 
 impl From<TcpStream> for Tcp {
@@ -52,7 +57,7 @@ impl From<TcpStream> for Tcp {
             let writer = stream.try_clone().unwrap();
             let reader = stream.try_clone().unwrap();
             Tcp {
-                req_stream: stream,
+                req_stream: Arc::new(stream),
                 req_header: HashMap::new(),
                 req_reader: RwLock::new(BufReader::new(reader)),
                 req_writer: RwLock::new(BufWriter::new(writer)),

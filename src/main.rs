@@ -1,17 +1,11 @@
-<<<<<<< HEAD
-use clap::{App, Arg};
 use mio::Poll;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
-use std::str::FromStr;
-=======
 use clap::Parser;
-use lib::ThreadPool;
-use std::net::TcpListener;
 use std::path::PathBuf;
->>>>>>> origin/main
 use std::sync::OnceLock;
 use std::thread::{self};
 
+use crate::lib::thread_pool_mio::ThreadPool;
 use crate::tcp_class::tcp_base::default_register_protocol;
 
 #[macro_use]
@@ -56,7 +50,7 @@ fn main() {
         debug!("Set Cgi Dir Path: {}", cli.cgi);
         PathBuf::from(cli.cgi.clone())
     });
-    THREAD_POOL.get_or_init(|| ThreadPool::new(cli.threads as usize));
+    THREAD_POOL.get_or_init(|| ThreadPool::new(4));
     // if let Some(serv) = matches.values_of("serv") {
     //     serv.enumerate().for_each(|(i, v)| {
     //         if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {
@@ -93,7 +87,6 @@ fn main() {
     for stream in tcp_listener.incoming() {
         match stream {
             Ok(_stream) => {
-                THREAD_POOL.get().unwrap().execute(move || {
                     debug!(
                         "<{:?}> tcp call start new Req thread started",
                         thread::current().id()
@@ -103,7 +96,6 @@ fn main() {
                         "<{:?}>tcp call end handle Req thread   ended\n\n",
                         thread::current().id()
                     );
-                });
             }
             Err(e) => {
                 error!("Tcp handle erro {:?}", e)

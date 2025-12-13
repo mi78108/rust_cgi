@@ -1,3 +1,4 @@
+
 use crate::tcp_class::tcp_base::Handle;
 use crate::tcp_class::tcp_base::Req;
 use crate::tcp_class::tcp_func::Tcp;
@@ -6,6 +7,7 @@ use crate::tcp_class::websocket_func::Websocket;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::BufRead;
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::thread::current;
@@ -106,6 +108,10 @@ impl Req for Http {
 
     fn env(&self) -> &HashMap<String, String> {
         &self.req_header
+    }
+    
+    fn stream(&self) -> TcpStream {
+        self.stream()
     }
 }
 
