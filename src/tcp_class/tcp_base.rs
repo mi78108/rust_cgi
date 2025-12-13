@@ -66,7 +66,7 @@ fn call_script(req: Box<dyn Req>) {
         .to_string_lossy()
         .into_owned();
 
-    debug!(">>>>>>>>>>>>>>>cmd>>>>>>>>>> {}",script_cmd);
+    debug!(">>>>>>>>>>>>>>>cmd>>>>>>>>>> {}", script_cmd);
     let mut script = Command::new(script_cmd);
     script
         //.current_dir(PathBuf::from(script_path).parent().unwrap())
@@ -128,7 +128,7 @@ fn call_script(req: Box<dyn Req>) {
                     break;
                 }
             }
-            drop(script_stdin);
+            //drop(script_stdin);
             debug!(
                 "<{:?}:{}> on {} call script [{}] req stream pipe end",
                 current().id(),
@@ -161,7 +161,7 @@ fn call_script(req: Box<dyn Req>) {
                 break;
             }
         }
-        drop(script_stdout);
+        // drop(script_stdout);
         debug!(
             "<{:?}:{}> on {} call script [{}] script stream pipe end",
             current().id(),
@@ -173,7 +173,9 @@ fn call_script(req: Box<dyn Req>) {
 
     //reader_handle.join().unwrap();
     // block wait
-    req_arc.close().unwrap();
+    if let Err(e) = req_arc.close() {
+        error!("req close erro {}", e);
+    }
     let script_rst = child.wait();
     if let Ok(code) = script_rst {
         debug!(
@@ -209,9 +211,7 @@ pub fn register_protocol(handler: Arc<dyn Handle>) {
 }
 
 pub fn default_register_protocol() {
-    PROTOCOL_HANDLERS.get_or_init(|| {
-        RwLock::new(Vec::new())
-    });
+    PROTOCOL_HANDLERS.get_or_init(|| RwLock::new(Vec::new()));
     register_protocol(Arc::new(HttpHandle));
 }
 
