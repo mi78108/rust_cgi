@@ -32,13 +32,13 @@ impl Websocket {
             .unwrap()
             .read_exact(&mut bytes)
         {
-            if e.kind()  ==  ErrorKind::UnexpectedEof {
-                return Ok((None,  [0u8; 4]))
-            }
             error!(
                 "<{:?}:{}> websocket read package length fail read bytes part1 {:?}",
                 trdid, pid, e
             );
+            if e.kind() == ErrorKind::UnexpectedEof {
+                return Ok((None, [0u8; 4]));
+            }
             return Err(e);
         }
         debug!("<{:?}:{}> websocket read byte 1:{:b}", trdid, pid, bytes[0]);
@@ -221,7 +221,7 @@ impl Websocket {
 impl Req for Websocket {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
         if *self.residue.read().unwrap() == 0 {
-            let header_rst  = self.read_head().and_then(|(len_opt, mask)| {
+            let header_rst = self.read_head().and_then(|(len_opt, mask)| {
                 if let Some(len) = len_opt {
                     *self.readed.write().unwrap() = 0;
                     *self.residue.write().unwrap() = len;
