@@ -11,5 +11,12 @@
     <p> #{block.binding.local_variables} </p>
     <p> #{instance_variables} </p>
     <p> #{local_variables} </p>
+    <p id="websocket"></p>
   </body>
+  <script>
+    let ws = new WebSocket("/test/test")
+    ws.onopen = (ev)=>{
+      document.getElementById("websocket").innerHTML = "WebSocket OK"
+    }
+  </script>
 </html>

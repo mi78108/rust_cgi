@@ -1,12 +1,12 @@
 [package]
 name = "rust_cgi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2018"
 
 
 [dependencies]
-sha-1 = "0.9.6"
-base64 = "0.13.0"
-clap = { version = "4.4", features = ["derive", "cargo"] }
-log = "0.4.14"
-env_logger = "0.9"
+log = "*"
+sha-1 = "*"
+base64 = "*"
+env_logger = "*"
+clap = { version = "*", features = ["derive", "cargo"] }
