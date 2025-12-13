@@ -20,7 +20,9 @@ impl Req for Tcp {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
         self.req_reader.write().unwrap().read(data).and_then(|len| {
             if len == 0 {
-                return Err(Error::from(ErrorKind::ConnectionAborted));
+                self.is_closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                //return Err(Error::from(ErrorKind::ConnectionAborted));
+                return Ok(None)
             }
             Ok(Some(len))
         })
@@ -35,8 +37,11 @@ impl Req for Tcp {
 
     fn close(&self) -> Result<(), Error> {
         debug!("<{:?}:{}> Tcp connect ready close", current().id(), id());
+        if self.is_closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
         self.is_closed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.req_writer.write().unwrap().flush().unwrap();
         self.req_stream.shutdown(Shutdown::Both)
     }
