@@ -1,16 +1,14 @@
-use crate::tcp_class::http_func::{Http, HttpHandle};
+use crate::tcp_class::http_func::HttpHandle;
 use crate::tcp_class::tcp_func::Tcp;
-use crate::tcp_class::websocket_func::Websocket;
 use crate::{CGI_DIR, THREAD_POOL};
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io::{Error, Read, Write};
 use std::path::Path;
 use std::process::{id, Command, Stdio};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::RwLock;
-use std::thread::{self, current};
+use std::thread::current;
 
 /// # 说明
 /// - 为协议统一接口
