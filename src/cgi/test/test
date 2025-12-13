@@ -1,22 +1,25 @@
 #!/usr/bin/env ruby
 
 
-require_relative '../_base_'
-Q.log `pwd`
+require_relative '../_init_'
 
-Q.map(:GET, lambda {|v| v == '/test/test'}) do |v1,v2|
-    Q.log "recv args #{v1},#{v2}"
-    Q.ok_html 'ok la'
+Q.map(:GET, ->(v){ v == '/'}) do |req, r|
+  abc = 123
+  @title="The Test Page"
+  r.body(File.read("page.html")).html.render do |c|
+    #@title= "12344"
+    c.title = "The test"
+  end
 end
 
-Q.map(:POST,'/test/test') do |v1|
+Q.map :POST do |_, r|
     Q.on_data do |body|
         Q.log ">>> #{body}"
         Q.ok_html('done')
     end
 end
 
-Q.map :WEBSOCKET, '/test/test' do |v1|
+Q.map :WEBSOCKET do
     Q.on_data do |chunk|
         Q.log ">>>>>>>>>>>> socket recv #{chunk}"
         Q.write '', true

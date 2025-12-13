@@ -128,6 +128,7 @@ impl Websocket {
                 //0x88 0x80 4byte_masking
                 //ctrl close 0x8 0b10001000
                 debug!("<{:?}:{}> websocket ctrl close event", trdid, pid);
+                self.write_with_opcode(0b10001000, &[]).unwrap();
                 //return Err(Error::from(ErrorKind::UnexpectedEof));
                 Ok((None, plymask))
             }
@@ -217,18 +218,16 @@ impl Websocket {
 impl Req for Websocket {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
         if *self.residue.read().unwrap() == 0 {
-            if let Err(e) = self.read_head().and_then(|(len_opt, mask)| {
+            let header_rst  = self.read_head().and_then(|(len_opt, mask)| {
                 if let Some(len) = len_opt {
                     *self.readed.write().unwrap() = 0;
                     *self.residue.write().unwrap() = len;
                     *self.payload_mask.write().unwrap() = mask;
-                } else {
-                    //None 收到 close 标志
-                    return Ok(None);
                 }
                 Ok(len_opt)
-            }) {
-                return Err(e);
+            });
+            if let Err(_) | Ok(None) = header_rst {
+                return header_rst;
             }
         }
         if *self.residue.read().unwrap() > data.len() {
@@ -242,9 +241,6 @@ impl Req for Websocket {
             });
         } else {
             let residue = *self.residue.read().unwrap();
-            if residue == 0 {
-                return Ok(Some(0));
-            }
             let mut buffer = vec![0u8; residue];
             return self.base_on.read(&mut buffer).and_then(|len_opt| {
                 if let Some(len) = len_opt {

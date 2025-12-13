@@ -1,6 +1,8 @@
+use crate::tcp_class::tcp_base::Handle;
 use crate::tcp_class::tcp_base::Req;
 use crate::tcp_class::tcp_func::Tcp;
 use crate::CGI_DIR;
+use crate::tcp_class::websocket_func::Websocket;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::BufRead;
@@ -22,7 +24,8 @@ pub struct Http {
 
 fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     let mut result = Vec::new();
-    let mut script_file_path = PathBuf::from(format!("{}{}", CGI_DIR.get().unwrap(), req_path));
+    let mut script_file_path = PathBuf::from(CGI_DIR.get().unwrap())
+        .join(req_path.strip_prefix("/").unwrap_or(req_path.as_str()));
     debug!(
         "<{:?}> req_script_file_path {:?}",
         current().id(),
@@ -230,8 +233,36 @@ impl From<Tcp> for Http {
             parse_req_path(http.req_header.get("req_path").unwrap().into());
         http.req_header.insert(
             "req_script_path".into(),
-            req_script_path.to_str().unwrap().to_string(),
+            req_script_path
+                .to_string_lossy()
+                .replace(CGI_DIR.get().unwrap().to_str().unwrap(), "")
+                .strip_prefix("/")
+                .unwrap()
+                .to_string(),
         );
+        if let Some(script_name) = req_script_path.file_name() {
+            http.req_header.insert(
+                "req_script_basename".into(),
+                script_name.to_str().unwrap().to_string(),
+            );
+            http.req_header.insert(
+                "req_script_name".into(),
+                req_script_path
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+                    .replace(CGI_DIR.get().unwrap().to_str().unwrap(), "")
+                    .strip_prefix("/")
+                    .unwrap()
+                    .to_string(),
+            );
+        }
+        if let Some(script_dir) = req_script_path.parent() {
+            http.req_header.insert(
+                "req_script_dir".into(),
+                script_dir.to_str().unwrap().to_string(),
+            );
+        }
         restful_argvs.reverse();
         restful_argvs.iter().enumerate().for_each(|(i, v)| {
             http.req_header
@@ -254,6 +285,53 @@ impl From<Tcp> for Http {
             }
         }
         return http;
+    }
+}
+
+pub struct HttpHandle;
+
+impl Handle for HttpHandle {
+    fn name(&self) -> &'static str {
+        "HTTP"
+    }
+
+    fn matches(&self, stream: &Tcp) -> Option<bool> {
+        const HTTP_METHODS: &[&[u8]] = &[
+            b"GET ",
+            b"POST ",
+            b"PUT ",
+            b"DELETE ",
+            b"PATCH ",
+            b"HEAD ",
+            b"OPTIONS ",
+            b"CONNECT ",
+        ];
+        let mut buffer = [0u8; 16];
+        if let Ok(len) = stream.req_stream.peek(&mut buffer) {
+            debug!(
+                "Handled TcpStream {:?} [{:?}]",
+                &buffer[0..len],
+                String::from_utf8_lossy(&buffer)
+            );
+            //
+            if HTTP_METHODS.iter().any(|&v| buffer.starts_with(v)) {
+                debug!("Tcp Req Handled on HTTP");
+                return Some(true);
+            }
+        }
+        None
+    }
+
+    fn handle(&self, stream: Tcp) -> Box<dyn Req> {
+        let http = Http::from(stream);
+        //Websocket
+        if let Some(websocket) = http.env().get("req_body_method") {
+            if websocket == "WEBSOCKET" {
+                debug!("Tcp Req Handled on HTTP Upgrade Websocket");
+                return Box::new(Websocket::from(http));
+            }
+        }
+        return Box::new(http);
     }
 }
 

@@ -12,6 +12,7 @@
     <script src="shell/shell/node_modules/xterm-addon-webgl/lib/xterm-addon-webgl.js"></script>
     <script src="shell/shell/node_modules/xterm-addon-search/lib/xterm-addon-search.js"></script>
     <script src="shell/proc/auth_uid.js"></script>
+    <script src="static/common.js"></script>
 
   </head>
 
@@ -20,7 +21,7 @@
     <div style="width: 100%; height: 20%; display: flex;">
       <div style="width: 50%; height: 100%; display: flex; border: 2px dashed black; box-sizing: border-box;">
         <div id="fileUpload" style="width: 100%;height: 100%; cursor: pointer;"
-                             onclick="document.getElementById('file').click()">
+          onclick="document.getElementById('file').click()">
           <img src="shell/shell/icons/cloud-upload.svg" style="height: 60%; margin: auto; display: block;">
           <i id="file_i" style="margin: auto; text-align: center;display: block;">选择文件</i>
           <input id="file" type="file" style="display: none;">
@@ -28,7 +29,7 @@
       </div>
       <div style="width: 50%; height: 100%; display: flex; border: 2px dashed black; box-sizing: border-box;">
         <div ondblclick="download_list()" id="fileDownload"
-                                          style="width: 100%;height: 100%; font-size: small;overflow-y: auto; background-image: url('shell/shell/icons/cloud-download.svg');background-repeat: no-repeat;background-size: auto 60%;background-position: center;">
+          style="width: 100%;height: 100%; font-size: small;overflow-y: auto; background-image: url('shell/shell/icons/cloud-download.svg');background-repeat: no-repeat;background-size: auto 60%;background-position: center;">
         </div>
       </div>
     </div>
@@ -115,35 +116,35 @@
               cols: xterm.cols,
               rows: xterm.rows
             })}`);
-            }
-          }, 500)
-        })
+          }
+        }, 500)
+      })
 
-        document.getElementById('file').onchange = (ev) => {
-          let file = ev.target.files[0];
-          document.getElementById('file_i').innerHTML = `${file.name}<br>${file.size / 1024 / 1024} mb`
-          let uploader = new File_upload(`shell/upload`, file, window.uploadWorkerSize, window.uploadChunkSize);
-          uploader.upload_init().then(resp => {
-            uploader.start_jobs()
-          })
-          uploader.on('progress', (info) => {
-            console.log(`>>>> process event ,<${info}>`)
-            if (info.opt == 'finished') {
-              download_list()
-            }
-          })
-          window.uploader = uploader;
+      document.getElementById('file').onchange = (ev) => {
+        let file = ev.target.files[0];
+        document.getElementById('file_i').innerHTML = `${file.name}<br>${file.size / 1024 / 1024} mb`
+        let uploader = new tools.file_uploader(`shell/upload`, file, window.uploadWorkerSize, window.uploadChunkSize);
+        uploader.upload_init().then(resp => {
+          uploader.start_jobs()
+        })
+        uploader.triggerd = (ev, info)=>{
+          xterm.writeln(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${ev} ${JSON.stringify(info.log)}`)
         }
-        //window.timer_download_list = setInterval(() => download_list(), 1000 * 60)
-        document.addEventListener('contextmenu', function (ev) {
-          ev.preventDefault();
-          if (ev.target === document.getElementById("fileDownload")) {
-            download_list();
+        uploader.on('progress', (info) => {
+          console.log(`>>>> process event ,<${info}>`)
+          if (info.opt == 'finished') {
+            download_list()
           }
-          if (ev.target === document.getElementById('fileUpload')) {
-            document.getElementById('terminal').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
-          }
-        }, false);
+        })
+        window.uploader = uploader;
+      }
+
+      tools.target_drag_event(document.getElementById('fileUpload'),(files)=>{
+        tools.dialog_file_uploader.open('shell/upload', files[0], ()=>{
+          download_list()
+        })
+      })
+      //window.timer_download_list = setInterval(() => download_list(), 1000 * 60)
     </script>
     <script>
       let download_list = () => {
@@ -152,133 +153,6 @@
             return `<div style="white-space: nowrap;;cursor: pointer; " title='${JSON.stringify(f)}'><img src="shell/shell/icons/${f.type === 'dir' ? 'gtk-directory.svg' : 'gtk-file.svg'}"><a href="shell/download/${f.name}" download>${f.name}</a></div>`
           }).join("")
         })
-      }
-
-      class File_upload {
-        constructor(url, file, workerSize = 5, chunkSize = 1 * 1024 * 1024) {
-          this.uploadUrl = url;
-          this.uploadFile = file;
-          this.chunkSize = chunkSize;
-          this.workerSize = workerSize;
-          this.fileSize = this.uploadFile.size
-          this.uploadCount = Math.ceil(this.fileSize / this.chunkSize);
-
-          this.uploaded_indexs = [];
-          this.uploading_indexs = [];
-          this.uploaded_size = 0;
-          this.uploading_working_size = 0;
-
-          this.callBack = new Map();
-        }
-
-        on(ev, func) {
-          if (this.callBack.has(ev)) {
-            this.callBack.get(ev).push(func)
-          } else {
-            this.callBack.set(ev, [func]);
-          }
-        }
-
-        trigger(ev, info) {
-          if (this.callBack.has(ev)) {
-            this.callBack.get(ev).forEach(cbk => {
-              cbk && cbk(info, ev, this);
-            });
-          }
-
-          xterm.writeln(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${JSON.stringify(info.log)}  ${ev}`)
-          console.log(`${new Date().format("yyyy-MM-dd hh:mm:ss")} ${ev} [${JSON.stringify(info.log)}]`)
-        }
-
-        chunk_readAsArrayBuffer(start, end) {
-          return new Promise((resolve, reject) => {
-            let reader = new FileReader();
-            reader.readAsArrayBuffer(this.uploadFile.slice(start, end));
-            this.trigger('chunk', { opt: 'start', log: `${this.uploadFile.name} chunk ${start}-${end} start` })
-            reader.onload = (data) => {
-              this.trigger('chunk', { opt: 'done', log: `${this.uploadFile.name} chunk ${start}-${end} done` })
-              resolve(data)
-            }
-            reader.onerror = (erro) => {
-              this.trigger('chunk', { opt: 'erro', log: `${this.uploadFile.name} chunk ${start}-${end} erro` })
-              reject(erro)
-            }
-          })
-        }
-
-        upload_init() {
-          return new Promise((resolve, reject) => {
-            fetch(`${this.uploadUrl}/pre?fn=${this.uploadFile.name}&fs=${this.uploadFile.size}`, {
-              method: 'POST'
-            }).then(resp => resp.json()).then(resp => {
-              this.trigger('init', { opt: 'init', log: `${this.uploadFile.name} ${JSON.stringify(resp.info)} ok` })
-              if (resp.code === 0) {
-                resolve(resp)
-              }
-            }).catch(e => {
-              this.trigger('erro', { opt: 'init', log: `${this.uploadFile.name} ${JSON.stringify(resp.info)} erro` })
-              reject(e)
-            })
-          })
-        }
-
-        upload_check() {
-
-        }
-
-        upload_process(index, chunk) {
-          return new Promise((resolve, reject) => {
-            this.trigger('progress', { opt: 'upload', log: `${this.uploadFile.name} uploading ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
-            fetch(`${this.uploadUrl}?fn=${this.uploadFile.name}&id=${index}&ct=${this.uploadCount}&cs=${this.chunkSize}`, {
-              method: 'POST', body: chunk
-            }).then(resp => resp.json()).then(resp => {
-              this.uploaded_indexs.push(index)
-              this.uploaded_size += chunk.length
-              this.trigger('progress', { opt: 'uploaded', log: `${this.uploadFile.name} uploaded ${index}/${this.uploadCount}`, index: index, count: this.uploadCount })
-              if (this.uploaded_indexs.length === this.uploadCount) {
-                this.trigger('progress', { opt: 'finished', log: `${this.uploadFile.name} finished`, index: index })
-              } else {
-                this.start_jobs()
-              }
-              resolve(resp)
-              chunk = null;
-            }).catch((resp) => {
-              this.trigger('progress', { opt: 'retry', log: `${this.uploadFile.name} retry ${index}`, index: index })
-              //this.trigger('erro', { opt: 'upload', log: `${this.uploadFile.name} upload ${index}`, index: index, count: this.uploadCount })
-              setTimeout(() => {
-                this.upload_process(index, chunk);
-              }, Math.round(Math.random() * 10000))
-              reject(resp)
-            })
-          })
-        }
-
-        start_jobs(workerSize = this.workerSize) {
-          if (this.uploading_indexs.length === this.uploadCount) {
-            this.trigger('worker', { opt: 'finished', log: `${this.uploadFile.name} worker finished ${this.uploaded_indexs.length}`, workerSize: this.workerSize, workingSize: this.uploading_working_size })
-            return
-          }
-          //this.trigger('worker', { opt: 'start', log: `${this.uploadFile.name} worker start ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, workerSize: this.workerSize, workingSize: this.uploading_working_size })
-          for (let index = 0; index < this.uploadCount; index++) {
-            if (this.uploading_indexs.indexOf(index) === -1) {
-              if (this.uploading_working_size < workerSize) {
-                this.uploading_working_size += 1;
-                this.uploading_indexs.push(index);
-                this.trigger('worker', { opt: 'new', log: `${this.uploadFile.name} worker new ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
-                this.chunk_readAsArrayBuffer(index * this.chunkSize, (index + 1) * this.chunkSize).then(resp => {
-                  this.upload_process(index, resp.target.result).finally((_) => {
-                    this.uploading_working_size -= 1;
-                    this.trigger('worker', { opt: 'done', log: `${this.uploadFile.name} worker done ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
-                    resp = null;
-                  })
-                })
-              } else {
-                this.trigger('worker', { opt: 'wait', log: `${this.uploadFile.name} worker wait ${index} ${this.uploading_working_size}/${this.workerSize}=${this.uploaded_indexs.length}`, index: index, count: this.uploadCount })
-                break
-              }
-            }
-          }
-        }
       }
 
       Date.prototype.format = function (fmt) {
