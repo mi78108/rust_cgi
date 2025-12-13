@@ -1,124 +1,99 @@
+<<<<<<< HEAD
 use clap::{App, Arg};
 use mio::Poll;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::str::FromStr;
+=======
+use clap::Parser;
+use lib::ThreadPool;
+use std::net::TcpListener;
+use std::path::PathBuf;
+>>>>>>> origin/main
 use std::sync::OnceLock;
-use std::thread::{self, spawn};
-use udp_class::udp_base::Client;
+use std::thread::{self};
+
+use crate::tcp_class::tcp_base::default_register_protocol;
 
 #[macro_use]
 extern crate log;
 
+mod lib;
 mod tcp_class;
 mod udp_class;
 mod utils;
 
-static CGI_DIR: OnceLock<String> = OnceLock::new();
+static CGI_DIR: OnceLock<PathBuf> = OnceLock::new();
+static THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
+
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Cli {
+    #[arg(short = 'p', long = "port", default_value = "3000")]
+    port: u16,
+
+    #[arg(short = 't', long = "thread", default_value = "4")]
+    threads: u16,
+    /// 数据存储目录（默认：./data）
+    #[arg(short = 'f', long = "cgi", default_value = "./src/cgi")]
+    cgi: String,
+
+    #[arg(short = 'h', long = "host", default_value = "127.0.0.1")]
+    host: String,
+
+    /// 最大连接数（默认：100）
+    #[arg(long = "max-conn", default_value_t = 100)]
+    max_conn: usize,
+}
 
 /// # 简单的实现了CGI的小工具
 /// - 简单使用线程允许多访问 但并发受限制
 /// - 判断脚本结束的策略有待改进
 fn main() {
     env_logger::init();
-    let matches = App::new("A WebService Program")
-        .version("1.0")
-        .author("mi78108@live.com>")
-        .arg(
-            Arg::with_name("cgidir")
-                .short("f")
-                .long("cgi")
-                .help("cgi dir")
-                .takes_value(true)
-                .default_value("./"),
-        )
-        .arg(
-            Arg::with_name("addr")
-                .short("l")
-                .long("addr")
-                .help("bind address")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("host")
-                .short("h")
-                .long("host")
-                .help("bind host address")
-                .takes_value(true)
-                .conflicts_with("addr")
-                .requires("port"),
-        )
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .long("port")
-                .help("bind port address")
-                .takes_value(true)
-                .conflicts_with("addr")
-                .requires("host"),
-        )
-        .arg(
-            Arg::with_name("serv")
-                .short("s")
-                .long("serv")
-                .help("upstream client address")
-                .takes_value(true)
-                .value_delimiter(","),
-        )
-        .arg(
-            Arg::with_name("udp")
-                .short("u")
-                .long("udp")
-                .help("listen udp"),
-        )
-        .get_matches();
+    let cli = Cli::parse();
 
-    if let Some(wd) = matches.value_of("cgidir") {
-        CGI_DIR.get_or_init(|| wd.to_string());
-        info!("set cgidir [{}]", wd);
-    }
-    if let Some(serv) = matches.values_of("serv") {
-        serv.enumerate().for_each(|(i, v)| {
-            if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {
-                write.insert(
-                    format!("serv_{}", i),
-                    Client {
-                        from: "static".to_string(),
-                        addr: SocketAddr::from_str(v).unwrap(),
-                        name: format!("SERV_{}", i),
-                        via: None,
-                    },
-                );
-            }
-        });
-    }
+    CGI_DIR.get_or_init(|| {
+        debug!("Set Cgi Dir Path: {}", cli.cgi);
+        PathBuf::from(cli.cgi.clone())
+    });
+    THREAD_POOL.get_or_init(|| ThreadPool::new(cli.threads as usize));
+    // if let Some(serv) = matches.values_of("serv") {
+    //     serv.enumerate().for_each(|(i, v)| {
+    //         if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {
+    //             write.insert(
+    //                 format!("serv_{}", i),
+    //                 Client {
+    //                     from: "static".to_string(),
+    //                     addr: SocketAddr::from_str(v).unwrap(),
+    //                     name: format!("SERV_{}", i),
+    //                     via: None,
+    //                 },
+    //             );
+    //         }
+    //     });
+    // }
 
-    let addr = match matches.is_present("addr") {
-        true => matches
-            .value_of("addr")
-            .unwrap_or_else(|| "0.0.0.0:8080")
-            .to_string(),
-        false => format!(
-            "{}:{}",
-            matches.value_of("host").unwrap_or("127.0.0.1"),
-            matches.value_of("port").unwrap_or("8080")
-        ),
-    };
-    let addr = addr.as_str();
 
-    if matches.is_present("udp") {
-        let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro", addr).as_str());
-        spawn(move || {
-            udp_listener.set_broadcast(true).unwrap();
-            udp_class::udp_base::handle(udp_listener);
-        });
-    }
+    let addr_basic = format!("{}:{}", cli.host, cli.port);
+    // if matches.is_present("udp") {
+    //     let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro", addr).as_str());
+    //     spawn(move || {
+    //         udp_listener.set_broadcast(true).unwrap();
+    //         udp_class::udp_base::handle(udp_listener);
+    //     });
+    // }
 
-    let tcp_listener = TcpListener::bind(addr).expect(format!("bind {} erro", addr).as_str());
-    info!("Listen on [{}] CGI in [{}]", addr, CGI_DIR.get().unwrap());
+    let tcp_listener = TcpListener::bind(&addr_basic).expect(format!("bind {} erro", addr_basic).as_str());
+    default_register_protocol();
+    info!(
+        "Listen on [{}] CGI in [{}]",
+        addr_basic,
+        CGI_DIR.get().unwrap().to_string_lossy()
+    );
     for stream in tcp_listener.incoming() {
         match stream {
             Ok(_stream) => {
-                std::thread::spawn(move || {
+                THREAD_POOL.get().unwrap().execute(move || {
                     debug!(
                         "<{:?}> tcp call start new Req thread started",
                         thread::current().id()
