@@ -1,10 +1,9 @@
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use lib::ThreadPool;
-use std::net::{SocketAddr, TcpListener, UdpSocket};
-use std::path::{Path, PathBuf};
+use std::net::TcpListener;
+use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::thread::{self, spawn};
-use udp_class::udp_base::Client;
+use std::thread::{self};
 
 use crate::tcp_class::tcp_base::default_register_protocol;
 
