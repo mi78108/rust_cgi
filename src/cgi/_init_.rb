@@ -185,6 +185,7 @@ module Q
   end
 
   def Q.map(method=nil, *path_matches, &block)
+    return unless @@UNMAP
     map_dir = "./#{Q::SCRIPT_NAME.sub("/#{Q::SCRIPT_BASENAME}","")}"
     map_path = Q::REQ_PATH.sub(Q::REQ_PATH.sub("/#{Q::REQ_ARGV_PARAMS}",""), "")
     map_path = '/' if map_path.empty?
