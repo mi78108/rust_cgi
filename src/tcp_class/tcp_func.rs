@@ -1,5 +1,6 @@
 use crate::tcp_class::tcp_base::Req;
 use std::collections::HashMap;
+use std::f32::consts::E;
 use std::io::{BufReader, BufWriter, Error, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::id;
@@ -20,9 +21,8 @@ impl Req for Tcp {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
         self.req_reader.write().unwrap().read(data).and_then(|len| {
             if len == 0 {
-                self.is_closed.store(true, std::sync::atomic::Ordering::SeqCst);
                 //return Err(Error::from(ErrorKind::ConnectionAborted));
-                return Ok(None)
+                return Ok(None);
             }
             Ok(Some(len))
         })
@@ -30,20 +30,53 @@ impl Req for Tcp {
 
     fn write(&self, data: &[u8]) -> Result<usize, Error> {
         if self.is_closed.load(std::sync::atomic::Ordering::Acquire) {
+            debug!(
+                "<{:?}:{}> Tcp connection  has been closed",
+                current().id(),
+                id()
+            );
             return Err(Error::from(ErrorKind::ConnectionAborted));
         }
         self.req_writer.write().unwrap().write(data)
     }
 
     fn close(&self) -> Result<(), Error> {
-        debug!("<{:?}:{}> Tcp connect ready close", current().id(), id());
-        if self.is_closed.load(std::sync::atomic::Ordering::SeqCst) {
+        debug!("<{:?}:{}> Tcp connection  closeing", current().id(), id());
+        if self.is_closed.load(std::sync::atomic::Ordering::Relaxed) {
+            debug!(
+                "<{:?}:{}> Tcp connection erro  has been closed",
+                current().id(),
+                id()
+            );
             return Ok(());
         }
         self.is_closed
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        self.req_writer.write().unwrap().flush().unwrap();
-        self.req_stream.shutdown(Shutdown::Both)
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = self
+            .req_writer
+            .write()
+            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+            .and_then(|mut s| s.flush())
+        {
+            debug!("<{:?}:{}> Tcp connection flush erro {}", current().id(), id(),e);
+            return Err(e);
+        }
+
+        if let Err(e) = self.req_stream.shutdown(Shutdown::Both) {
+            return match e.kind() {
+                ErrorKind::NotConnected => {
+                    debug!(
+                        "<{:?}:{}> Tcp connection erro  has been closed {}",
+                        current().id(),
+                        id(),
+                        e
+                    );
+                    Ok(())
+                }
+                _ => Err(e),
+            };
+        }
+        Ok(())
     }
 
     fn env(&self) -> &HashMap<String, String> {

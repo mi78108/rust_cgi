@@ -32,6 +32,9 @@ impl Websocket {
             .unwrap()
             .read_exact(&mut bytes)
         {
+            if e.kind()  ==  ErrorKind::UnexpectedEof {
+                return Ok((None,  [0u8; 4]))
+            }
             error!(
                 "<{:?}:{}> websocket read package length fail read bytes part1 {:?}",
                 trdid, pid, e
