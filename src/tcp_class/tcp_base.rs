@@ -1,8 +1,11 @@
+
+use crate::lib::thread_pool_mio::WorkerCommand;
 use crate::tcp_class::http_func::HttpHandle;
 use crate::tcp_class::tcp_func::Tcp;
 use crate::{CGI_DIR, THREAD_POOL};
 use std::collections::HashMap;
 use std::io::{Error, Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
 use std::process::{id, Command, Stdio};
 use std::sync::Arc;
@@ -17,6 +20,7 @@ pub trait Req: Send + Sync + 'static {
     fn write(&self, data: &[u8]) -> Result<usize, Error>;
     fn close(&self) -> Result<(), Error>;
     fn env(&self) -> &HashMap<String, String>;
+    fn stream(&self) -> TcpStream;
 }
 
 pub trait Handle: Sync + Send + 'static {
@@ -66,7 +70,7 @@ fn call_script(req: Box<dyn Req>) {
         .to_string_lossy()
         .into_owned();
 
-    debug!(">>>>>>>>>>>>>>>cmd>>>>>>>>>> {}",script_cmd);
+    debug!(">>>>>>>>>>>>>>>cmd>>>>>>>>>> {}", script_cmd);
     let mut script = Command::new(script_cmd);
     script
         //.current_dir(PathBuf::from(script_path).parent().unwrap())
@@ -88,110 +92,12 @@ fn call_script(req: Box<dyn Req>) {
 
     let script_id = child.id();
     let script_path = script_path.clone();
-
+debug!("3333333333333333333");
     //
-    let req_arc = Arc::new(req);
-    let req_reader = req_arc.clone();
-    let script_name = script.get_program().to_str().unwrap().to_string();
-
-    if let Some(mut script_stdin) = child.stdin.take() {
-        // tcp -> script
-        THREAD_POOL.get().unwrap().execute(move || {
-            let mut buffer = vec![0u8; buffer_size];
-            while let Ok(len_opt) = req_reader.read(&mut buffer) {
-                if let Some(len) = len_opt {
-                    debug!(
-                        "<{:?}:{}> on {} call script [{}] req stream read [{}]",
-                        current().id(),
-                        script_id,
-                        id(),
-                        script_name,
-                        len
-                    );
-                    if let Err(e) = script_stdin.write(&buffer[..len]) {
-                        error!("{:?}", e);
-                        break;
-                    }
-                    if let Err(e) = script_stdin.flush() {
-                        error!("{:?}", e);
-                        break;
-                    }
-                } else {
-                    //空数据 None 代表结束
-                    debug!(
-                        "<{:?}:{}> on {} call script [{}] req stream recv NONE mark; break",
-                        current().id(),
-                        script_id,
-                        id(),
-                        script_name
-                    );
-                    break;
-                }
-            }
-            drop(script_stdin);
-            debug!(
-                "<{:?}:{}> on {} call script [{}] req stream pipe end",
-                current().id(),
-                script_id,
-                id(),
-                script_name
-            );
-        });
-    }
-
-    if let Some(mut script_stdout) = child.stdout.take() {
-        // script -> tcp
-        let mut buffer = vec![0u8; buffer_size];
-        let script_name = script.get_program().to_str().unwrap();
-        while let Ok(len) = script_stdout.read(&mut buffer) {
-            debug!(
-                "<{:?}:{}> on {} call script [{}] script stream read [{}]",
-                current().id(),
-                script_id,
-                id(),
-                script_name,
-                len
-            );
-            if let Err(e) = req_arc.write(&buffer[..len]) {
-                error!("{:?}", e);
-                break;
-            }
-            if len == 0 {
-                // 脚本若返回空字节 则认为脚本结束
-                break;
-            }
-        }
-        drop(script_stdout);
-        debug!(
-            "<{:?}:{}> on {} call script [{}] script stream pipe end",
-            current().id(),
-            script_id,
-            id(),
-            script_name
-        );
-    }
-
-    //reader_handle.join().unwrap();
-    // block wait
-    req_arc.close().unwrap();
-    let script_rst = child.wait();
-    if let Ok(code) = script_rst {
-        debug!(
-            "<{:?}> on {} call script [{}] exited [{:?}]",
-            current().id(),
-            id(),
-            script_path,
-            code
-        );
-    } else {
-        error!(
-            "<{:?}> on {} call script [{}] exits erro [{:?}]",
-            current().id(),
-            id(),
-            script_path,
-            script_rst.unwrap_err()
-        );
-    }
+    let task = WorkerCommand::CreateGroup(req.stream(), child.stdin.unwrap());
+    debug!("111111111111111111111111111111111111");
+    THREAD_POOL.get().unwrap().execute(task);
+    debug!("222222222222222222222222222222222");
 }
 
 static PROTOCOL_HANDLERS: OnceLock<RwLock<Vec<Arc<dyn Handle>>>> = OnceLock::new();
@@ -209,9 +115,7 @@ pub fn register_protocol(handler: Arc<dyn Handle>) {
 }
 
 pub fn default_register_protocol() {
-    PROTOCOL_HANDLERS.get_or_init(|| {
-        RwLock::new(Vec::new())
-    });
+    PROTOCOL_HANDLERS.get_or_init(|| RwLock::new(Vec::new()));
     register_protocol(Arc::new(HttpHandle));
 }
 

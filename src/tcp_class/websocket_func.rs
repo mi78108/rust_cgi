@@ -4,12 +4,7 @@ use sha1::{Digest, Sha1};
 use crate::tcp_class::http_func::Http;
 use crate::tcp_class::tcp_base::Req;
 use std::{
-    collections::HashMap,
-    io::{Error, ErrorKind, Read, Write},
-    ops::Add,
-    process::id,
-    sync::RwLock,
-    thread::current,
+    collections::HashMap, io::{Error, ErrorKind, Read, Write}, net::TcpStream, ops::Add, process::id, sync::RwLock, thread::current
 };
 
 pub struct Websocket {
@@ -267,6 +262,10 @@ impl Req for Websocket {
 
     fn env(&self) -> &HashMap<String, String> {
         self.base_on.env()
+    }
+    
+    fn stream(&self) -> TcpStream {
+        self.base_on.stream()
     }
 }
 
