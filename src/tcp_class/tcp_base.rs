@@ -203,7 +203,7 @@ pub fn register_protocol(handler: Arc<dyn Handle>) {
     if !handlers.iter().any(|h| h.name() == handler.name()) {
         handlers.push(handler.clone());
         info!(
-            "注册协议：{}，当前协议总数：{}",
+            "Enabled Module：{}， current count：{}",
             handler.name(),
             handlers.len()
         );
