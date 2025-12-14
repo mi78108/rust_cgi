@@ -12,11 +12,19 @@
     <p> #{instance_variables} </p>
     <p> #{local_variables} </p>
     <p id="websocket"></p>
+    <p id="post"></p>
   </body>
   <script>
     let ws = new WebSocket("/test/test")
     ws.onopen = (ev)=>{
       document.getElementById("websocket").innerHTML = "WebSocket OK"
     }
+
+    fetch('/test/ruby',{
+      method: 'POST',
+      body: 'post ok'
+    }).then(v=>v.text()).then(v=>{
+      document.getElementById("post").innerHTML = v
+    })
   </script>
 </html>

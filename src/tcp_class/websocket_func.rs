@@ -265,6 +265,7 @@ impl Req for Websocket {
     }
 
     fn close(&self) -> Result<(), std::io::Error> {
+        self.write_with_opcode(0b10001000, &[]).unwrap();
         self.base_on.close()
     }
 
