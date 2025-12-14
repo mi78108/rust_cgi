@@ -43,7 +43,7 @@ fn call_script(req: Box<dyn Req>) {
             "<{:?}> on {} call script [{}]",
             current().id(),
             id(),
-            "unkown"
+            "unknown"
         );
         return;
     };
@@ -83,6 +83,8 @@ fn call_script(req: Box<dyn Req>) {
             current().id(),
             script_opt.unwrap_err()
         );
+        if let Err(e) =  req.close(){
+        }
         return;
     };
 
@@ -128,7 +130,7 @@ fn call_script(req: Box<dyn Req>) {
                     break;
                 }
             }
-            //drop(script_stdin);
+           drop(script_stdin);
             debug!(
                 "<{:?}:{}> on {} call script [{}] req stream pipe end",
                 current().id(),
@@ -161,7 +163,7 @@ fn call_script(req: Box<dyn Req>) {
                 break;
             }
         }
-        // drop(script_stdout);
+        drop(script_stdout);
         debug!(
             "<{:?}:{}> on {} call script [{}] script stream pipe end",
             current().id(),
@@ -222,7 +224,7 @@ pub fn handle(stream: Tcp) {
     let handlers = match handlers_lock.read() {
         Ok(lock) => lock,
         Err(poisoned) => {
-            debug!("协议选择器锁异常，恢复数据");
+            debug!("handles lock erro {:?}", poisoned);
             poisoned.into_inner()
         }
     };
