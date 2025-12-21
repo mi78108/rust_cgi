@@ -49,7 +49,7 @@ fn main() {
         debug!("Set Cgi Dir Path: {}", cli.cgi);
         PathBuf::from(cli.cgi.clone())
     });
-    THREAD_POOL.get_or_init(|| ThreadPool::new(cli.threads as usize));
+    THREAD_POOL.get_or_init(|| ThreadPool::new(2, cli.threads as usize));
     // if let Some(serv) = matches.values_of("serv") {
     //     serv.enumerate().for_each(|(i, v)| {
     //         if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {

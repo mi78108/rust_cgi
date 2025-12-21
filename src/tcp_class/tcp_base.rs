@@ -3,6 +3,7 @@ use crate::tcp_class::tcp_func::Tcp;
 use crate::{CGI_DIR, THREAD_POOL};
 use std::collections::HashMap;
 use std::io::{Error, Read, Write};
+use std::os::unix::thread;
 use std::path::Path;
 use std::process::{id, Command, Stdio};
 use std::sync::Arc;
@@ -98,7 +99,8 @@ fn call_script(req: Box<dyn Req>) {
 
     if let Some(mut script_stdin) = child.stdin.take() {
         // tcp -> script
-        THREAD_POOL.get().unwrap().execute(move || {
+        //THREAD_POOL.get().unwrap().execute(move || {
+        std::thread::spawn(move || {
             let mut buffer = vec![0u8; buffer_size];
             while let Ok(len_opt) = req_reader.read(&mut buffer) {
                 if let Some(len) = len_opt {
