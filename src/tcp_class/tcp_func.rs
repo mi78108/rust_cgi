@@ -37,7 +37,17 @@ impl Req for Tcp {
             );
             return Err(Error::from(ErrorKind::ConnectionAborted));
         }
-        self.req_writer.write().unwrap().write(data)
+        let rst = self.req_writer.write();
+        if let Ok(mut writer) = rst {
+            let rst = writer.write(data);
+            if let Ok(_) = rst {
+                if let Err(e) = writer.flush() {
+                    return Err(e);
+                }
+            }
+            return rst;
+        }
+        return Err(Error::from(ErrorKind::ResourceBusy));
     }
 
     fn close(&self) -> Result<(), Error> {
@@ -89,9 +99,11 @@ impl From<TcpStream> for Tcp {
         {
             let writer = stream.try_clone().unwrap();
             let reader = stream.try_clone().unwrap();
+            let mut header = HashMap::new();
+            header.insert("req_script_path".to_string(), "tcp_handle".to_string());
             Tcp {
                 req_stream: stream,
-                req_header: HashMap::new(),
+                req_header: header,
                 req_reader: RwLock::new(BufReader::new(reader)),
                 req_writer: RwLock::new(BufWriter::new(writer)),
                 is_closed: AtomicBool::new(false),

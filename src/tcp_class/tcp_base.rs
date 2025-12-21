@@ -3,7 +3,6 @@ use crate::tcp_class::tcp_func::Tcp;
 use crate::{CGI_DIR, THREAD_POOL};
 use std::collections::HashMap;
 use std::io::{Error, Read, Write};
-use std::os::unix::thread;
 use std::path::Path;
 use std::process::{id, Command, Stdio};
 use std::sync::Arc;
@@ -30,7 +29,7 @@ pub trait Handle: Sync + Send + 'static {
 
 /// # 说明
 /// - 为请求调用相应的脚本
-/// - 目前脚本tsdin stdout各使用一个线程
+/// - 目前脚本stdin stdout各使用一个线程
 fn call_script(req: Box<dyn Req>) {
     let cgi_dir = CGI_DIR.get().unwrap().to_str().unwrap();
     let buffer_size = req
