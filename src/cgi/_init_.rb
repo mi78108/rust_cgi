@@ -6,7 +6,7 @@ class Req
   def initialize(path = Q::REQ_PATH)
     @path = path
     @method = Q::REQ_METHOD
-    @argvs = ENV.keys.filter {|k| k =~ /req_argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
+    @args = ENV.keys.filter {|k| k =~ /req_argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
     @params = ENV['req_params'] ? URI::decode_uri_component(ENV['req_params']).split('&').map {|v| v.split('=')[1]} : Array.new 
   end
 
@@ -22,7 +22,7 @@ class Req
     value.nil? ? val : value 
   end
   def argv(val)
-    return @argvs[val.to_i]
+    return @args[val.to_i]
   end
   def match(val)
     return nil if ENV['REQ_URI_MATCH'].nil?
