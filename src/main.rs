@@ -24,14 +24,13 @@ struct Cli {
 
     #[arg(short = 't', long = "thread", default_value = "4")]
     threads: u16,
-    /// 数据存储目录（默认：./data）
+
     #[arg(short = 'f', long = "cgi", default_value = "./src/cgi")]
     cgi: String,
 
     #[arg(short = 'h', long = "host", default_value = "127.0.0.1")]
     host: String,
 
-    /// 最大连接数（默认：100）
     #[arg(long = "max-conn", default_value_t = 100)]
     max_conn: usize,
 }
