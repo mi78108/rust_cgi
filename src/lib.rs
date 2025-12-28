@@ -1,4 +1,4 @@
-pub mod LocalTreadPoll {
+pub mod LocalThreadPoll {
     use std::sync::mpsc;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU8;

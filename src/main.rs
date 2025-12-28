@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::thread::{self};
-use rust_cgi::LocalTreadPoll::ThreadPool;
+use rust_cgi::LocalThreadPoll::ThreadPool;
 use crate::tcp_class::tcp_base::default_register_protocol;
 
 #[macro_use]
