@@ -14,7 +14,7 @@ use std::{
 
 pub struct Websocket {
     base_on: Http,
-    readed: RwLock<usize>,
+    read: RwLock<usize>,
     residue: RwLock<usize>,
     payload_mask: RwLock<[u8; 4]>,
 }
@@ -209,7 +209,7 @@ impl Websocket {
 
     fn unmask(&self, data: &mut [u8], len: usize) {
         if let Ok(mask) = self.payload_mask.read() {
-            if let Ok(readed) = self.readed.read() {
+            if let Ok(readed) = self.read.read() {
                 for i in 0..len {
                     data[i] = data[i] ^ mask[readed.add(i) % 4];
                 }
@@ -223,7 +223,7 @@ impl Req for Websocket {
         if *self.residue.read().unwrap() == 0 {
             let header_rst = self.read_head().and_then(|(len_opt, mask)| {
                 if let Some(len) = len_opt {
-                    *self.readed.write().unwrap() = 0;
+                    *self.read.write().unwrap() = 0;
                     *self.residue.write().unwrap() = len;
                     *self.payload_mask.write().unwrap() = mask;
                 }
@@ -237,7 +237,7 @@ impl Req for Websocket {
             return self.base_on.read(data).and_then(|len_opt| {
                 if let Some(len) = len_opt {
                     self.unmask(data, len);
-                    *self.readed.write().unwrap() += len;
+                    *self.read.write().unwrap() += len;
                     *self.residue.write().unwrap() -= len;
                 }
                 Ok(len_opt)
@@ -251,7 +251,7 @@ impl Req for Websocket {
                         data[i] = buffer[i];
                     }
                     self.unmask(data, len);
-                    *self.readed.write().unwrap() += len;
+                    *self.read.write().unwrap() += len;
                     *self.residue.write().unwrap() -= len;
                 }
                 Ok(len_opt)
@@ -294,7 +294,7 @@ impl From<Http> for Websocket {
         }
         Websocket {
             base_on: value,
-            readed: RwLock::new(0),
+            read: RwLock::new(0),
             residue: RwLock::new(0),
             payload_mask: RwLock::new([0u8; 4]),
         }

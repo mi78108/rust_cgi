@@ -18,7 +18,7 @@ pub struct Http {
     req_version: String,
     req_buffer_size: usize,
     req_content_length: usize,
-    req_content_readed: AtomicUsize,
+    req_content_read: AtomicUsize,
     req_header: HashMap<String, String>,
 }
 
@@ -75,7 +75,7 @@ impl Req for Http {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
         if self.req_content_length > 0
             && self
-                .req_content_readed
+                .req_content_read
                 .load(std::sync::atomic::Ordering::Relaxed)
                 == self.req_content_length
         {
@@ -85,8 +85,8 @@ impl Req for Http {
         }
         self.base_on.read(data).and_then(|len_opt| {
             if let Some(len) = len_opt {
-                self.req_content_readed.store(
-                    self.req_content_readed
+                self.req_content_read.store(
+                    self.req_content_read
                         .load(std::sync::atomic::Ordering::Acquire)
                         + len,
                     std::sync::atomic::Ordering::Relaxed,
@@ -142,7 +142,7 @@ impl From<Tcp> for Http {
                 ),
             ]),
             req_content_length: 0,
-            req_content_readed: AtomicUsize::new(0),
+            req_content_read: AtomicUsize::new(0),
         };
 
         let mut buffer = String::new();

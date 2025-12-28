@@ -1,6 +1,5 @@
 use crate::tcp_class::tcp_base::Req;
 use std::collections::HashMap;
-use std::f32::consts::E;
 use std::io::{BufReader, BufWriter, Error, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::id;

@@ -1,6 +1,6 @@
 use crate::tcp_class::http_func::HttpHandle;
 use crate::tcp_class::tcp_func::Tcp;
-use crate::{CGI_DIR, THREAD_POOL};
+use crate::{CGI_DIR};
 use std::collections::HashMap;
 use std::io::{Error, Read, Write};
 use std::path::Path;
