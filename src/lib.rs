@@ -44,7 +44,7 @@ pub mod LocalTreadPoll {
             let running_count = self.workers.read().unwrap().iter().filter(|v| v.running.load(std::sync::atomic::Ordering::Acquire) > 1).count();
             debug!("new task comming current available threads count {}", count);
             if count == 0 && self.max > running_count {
-                let recovery: Vec<usize> = self.workers.read().unwrap().iter().enumerate().filter(|(i, v)| v.running.load(std::sync::atomic::Ordering::Acquire) == 0).map(|(i, _)| i).collect();
+                let recovery: Vec<usize> = self.workers.read().unwrap().iter().enumerate().filter(|(_, v)| v.running.load(std::sync::atomic::Ordering::Acquire) == 0).map(|(i, _)| i).collect();
                 recovery.iter().rev().for_each(|v| {
                     self.workers.write().unwrap().remove(*v);
                 });
