@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 log = "*"
-sha-1 = "*"
 base64 = "*"
+ring = "*"
 env_logger = "*"
 clap = { version = "*", features = ["derive", "cargo"] }

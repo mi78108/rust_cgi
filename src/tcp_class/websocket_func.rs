@@ -1,6 +1,5 @@
-use base64::encode;
-use sha1::{Digest, Sha1};
-
+use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
+use base64::engine::general_purpose::STANDARD;
 use crate::tcp_class::http_func::Http;
 use crate::tcp_class::tcp_base::Req;
 use std::{
@@ -11,6 +10,7 @@ use std::{
     sync::RwLock,
     thread::current,
 };
+use base64::Engine;
 
 pub struct Websocket {
     base_on: Http,
@@ -209,9 +209,9 @@ impl Websocket {
 
     fn unmask(&self, data: &mut [u8], len: usize) {
         if let Ok(mask) = self.payload_mask.read() {
-            if let Ok(readed) = self.read.read() {
+            if let Ok(read) = self.read.read() {
                 for i in 0..len {
-                    data[i] = data[i] ^ mask[readed.add(i) % 4];
+                    data[i] = data[i] ^ mask[read.add(i) % 4];
                 }
             }
         }
@@ -278,13 +278,12 @@ impl From<Http> for Websocket {
     fn from(value: Http) -> Self {
         debug!("Req upgrade to Websocket init");
         if let Some(sec_websocket_key) = value.env().get("Sec-WebSocket-Key") {
-            let mut hasher = Sha1::new();
-            hasher.update(format!(
+            let hash = digest(&SHA1_FOR_LEGACY_USE_ONLY, format!(
                 "{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
                 sec_websocket_key
-            ));
-            let sha1_key = hasher.finalize();
-            let sec_websocket_accept = encode(sha1_key);
+            ).as_bytes());
+
+            let sec_websocket_accept = STANDARD.encode(&hash.as_ref());
             // switch resp
             let resp = format!("HTTP/1.1 101 SWITCH\r\nServer: Rust Cgi\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {}\r\n\r\n", sec_websocket_accept);
             if let Ok(_) = value.write(resp.as_bytes()) {
