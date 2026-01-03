@@ -25,7 +25,7 @@ jobs:
       with:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
-        files: ./target/release/rust_cgi
+        files: ./target/release/spider
         draft: false
         prerelease: false
         overwrite: true
