@@ -15,8 +15,30 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose --release
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: |
+          x86_64-unknown-linux-musl
+          x86_64-pc-windows-gnu
+      run: |
+        sudo apt update && sudo apt install -y --no-install-recommends \
+            mingw-w64 gcc-mingw-w64-x86-64 \
+            musl-tools \
+            upx
+            sudo rm -rf /var/lib/apt/lists/*
+
+    - name: Build Linux x86_64 (Static)
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl
+          upx --best target/x86_64-unknown-linux-musl/release/spider -o spider-linux-musl-amd64
+
+    - name: Build Windows x86_64 (Static)
+        run: |
+          cargo build --release --target x86_64-pc-windows-gnu
+          upx --best target/x86_64-pc-windows-gnu/release/spider.exe -o spider-windows-amd64.exe
+
     - name: Upload Release Asset
       id: upload-release-asset
       uses: softprops/action-gh-release@v2
@@ -25,7 +47,9 @@ jobs:
       with:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
-        files: ./target/release/spider
+        files: |
+          ./spider-linux-musl-amd64:spider-${{ github.ref_name }}-linux-musl-amd64
+          ./spider-windows-amd64.exe:spider-${{ github.ref_name }}-windows-static-amd64.exe
         draft: false
         prerelease: false
         overwrite: true
