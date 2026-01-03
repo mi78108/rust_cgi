@@ -6,7 +6,7 @@ class Req
   def initialize(path = Q::REQ_PATH)
     @path = path
     @method = Q::REQ_METHOD
-    @argvs = ENV.keys.filter {|k| k =~ /req_argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
+    @args = ENV.keys.filter {|k| k =~ /req_argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
     @params = ENV['req_params'] ? URI::decode_uri_component(ENV['req_params']).split('&').map {|v| v.split('=')[1]} : Array.new 
   end
 
@@ -22,7 +22,7 @@ class Req
     value.nil? ? val : value 
   end
   def argv(val)
-    return @argvs[val.to_i]
+    return @args[val.to_i]
   end
   def match(val)
     return nil if ENV['REQ_URI_MATCH'].nil?
@@ -147,14 +147,14 @@ end
 module Q
   CBK_ONCLOSE = Array.new
   BUFFER_SIZE = 10 * 1024 * 1024
-  REQ_PATH = URI::decode_uri_component(ENV['req_path'])
-  REQ_BODY_METHOD = ENV['req_body_method']
-  REQ_ARGV_PARAMS = URI::decode_uri_component(ENV['req_argv_params'])
-  REQ_METHOD = REQ_BODY_METHOD == 'HTTP' ? ENV['req_method'] : ENV['req_body_method']
-  SCRIPT_DIR = ENV['req_script_dir']
-  SCRIPT_NAME = ENV['req_script_name'] 
-  SCRIPT_PATH = ENV['req_script_path']
-  SCRIPT_BASENAME = ENV['req_script_basename'] 
+  REQ_PATH = URI::decode_uri_component(ENV['Req_Path'])
+  REQ_BODY_METHOD = ENV['Req_Body_Method']
+  REQ_ARGV_PARAMS = URI::decode_uri_component(ENV['Req_Argv_Params'])
+  REQ_METHOD = REQ_BODY_METHOD == 'HTTP' ? ENV['Req_Method'] : ENV['Req_Body_Method']
+  SCRIPT_DIR = ENV['Req_Script_Dir']
+  SCRIPT_NAME = ENV['Req_Script_Name']
+  SCRIPT_PATH = ENV['Req_Script_Path']
+  SCRIPT_BASENAME = ENV['Req_Script_Basename']
   @@UNMAP = true
   @RESP = Rsp.new
 

@@ -1,16 +1,10 @@
-
-use crate::tcp_class::tcp_base::Handle;
-use crate::tcp_class::tcp_base::Req;
-use crate::tcp_class::tcp_func::Tcp;
-use crate::CGI_DIR;
-use crate::tcp_class::websocket_func::Websocket;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::io::BufRead;
-use std::net::TcpStream;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
-use std::thread::current;
+use crate::{Handle, Req, SCRIPT_DIR, tcp_class::Tcp, info, debug};
+use std::borrow::Cow;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::{collections::HashMap, io::Error, sync::atomic::AtomicUsize};
+use tokio::io::AsyncBufReadExt;
+use urlencoding::decode;
 
 #[derive(Debug)]
 pub struct Http {
@@ -20,15 +14,54 @@ pub struct Http {
     req_version: String,
     req_buffer_size: usize,
     req_content_length: usize,
-    req_content_readed: AtomicUsize,
+    req_content_read: AtomicUsize,
     req_header: HashMap<String, String>,
+}
+
+impl Req for Http {
+    async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
+        if self.req_content_length > 0
+            && self
+                .req_content_read
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == self.req_content_length
+        {
+            // 表示读取正常 但是数据结束
+            return Ok(None);
+        }
+        self.base_on.read(data).await.and_then(|len_opt| {
+            if let Some(len) = len_opt {
+                self.req_content_read.store(
+                    self.req_content_read
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        + len,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+            }
+            Ok(len_opt)
+        })
+    }
+
+    async fn write(&self, data: &[u8]) -> Result<usize, Error> {
+        self.base_on.write(data).await
+    }
+
+    async fn close(&self) -> Result<(), Error> {
+        self.base_on.close().await
+    }
+
+    fn env(&self) -> &HashMap<String, String> {
+        &self.req_header
+    }
 }
 
 fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     let mut result = Vec::new();
-    let mut script_file_path = PathBuf::from(CGI_DIR.get().unwrap())
-        .join(req_path.strip_prefix("/").unwrap_or(req_path.as_str()));
-    debug!(
+    let req_script = Path::new(req_path.as_str());
+    let mut script_file_path = PathBuf::from(SCRIPT_DIR.get().unwrap())
+        .join(req_script.strip_prefix("/").unwrap_or(req_script));
+
+    info!(
         "<{:?}> req_script_file_path {:?}",
         current().id(),
         script_file_path
@@ -37,7 +70,7 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
         if script_file_path.exists() {
             if script_file_path.is_file() {
                 //文件存在 并且是文件 ok return
-                debug!(
+                info!(
                     "<{:?}> script_file_path file while= {:?}",
                     current().id(),
                     script_file_path
@@ -47,7 +80,7 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
             if script_file_path.is_dir() {
                 //文件存在 是文件夹 指向当下的 index ok return
                 script_file_path.push("index");
-                debug!(
+                info!(
                     "<{:?}> script_file_path dir while= {:?}",
                     current().id(),
                     script_file_path
@@ -55,7 +88,7 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
                 return (script_file_path, result);
             }
         }
-        debug!(
+        info!(
             "<{:?}> script_file_path {:?} {:?} as restful param",
             current().id(),
             script_file_path,
@@ -73,235 +106,12 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     }
 }
 
-impl Req for Http {
-    fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
-        if self.req_content_length > 0
-            && self
-                .req_content_readed
-                .load(std::sync::atomic::Ordering::Relaxed)
-                == self.req_content_length
-        {
-            //return Err(Error::from(ErrorKind::UnexpectedEof));
-            // 表示读取正常 但是数据结束
-            return Ok(None);
-        }
-        self.base_on.read(data).and_then(|len_opt| {
-            if let Some(len) = len_opt {
-                self.req_content_readed.store(
-                    self.req_content_readed
-                        .load(std::sync::atomic::Ordering::Acquire)
-                        + len,
-                    std::sync::atomic::Ordering::Relaxed,
-                )
-            }
-            Ok(len_opt)
-        })
-    }
-
-    fn write(&self, data: &[u8]) -> Result<usize, std::io::Error> {
-        self.base_on.write(data)
-    }
-
-    fn close(&self) -> Result<(), std::io::Error> {
-        self.base_on.close()
-    }
-
-    fn env(&self) -> &HashMap<String, String> {
-        &self.req_header
-    }
-    
-    fn stream(&self) -> TcpStream {
-        self.stream()
-    }
-}
-
-impl From<Tcp> for Http {
-    fn from(stream: Tcp) -> Self {
-        let peer_addr = stream.req_stream.peer_addr().unwrap();
-        let mut http = Http {
-            base_on: stream,
-            req_path: String::from("/"),
-            req_method: String::from("GET"),
-            req_version: String::from("1"),
-            req_buffer_size: 1024 * 128,
-            req_header: HashMap::from([
-                (String::from("req_body_method"), String::from("HTTP")),
-                (
-                    String::from("Req_Buffer_Size"),
-                    String::from(format!("{}", 1024 * 128)),
-                ),
-                (
-                    String::from("Req_Peer_Addr"),
-                    String::from(format!(
-                        "{}:{}",
-                        peer_addr.ip().to_string(),
-                        peer_addr.port()
-                    )),
-                ),
-                (
-                    String::from("Req_Peer_Ip"),
-                    String::from(format!("{}", peer_addr.ip().to_string())),
-                ),
-                (
-                    String::from("Req_Peer_Port"),
-                    String::from(format!("{}", peer_addr.port())),
-                ),
-            ]),
-            req_content_length: 0,
-            req_content_readed: AtomicUsize::new(0),
-        };
-
-        let mut buffer = String::new();
-        if let Ok(_size) = http
-            .base_on
-            .req_reader
-            .write()
-            .unwrap()
-            .read_line(&mut buffer)
-        {
-            let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
-            let mut rst = line.splitn(3, " ");
-            if let Some(method) = rst.next() {
-                http.req_method.clear();
-                http.req_method.push_str(method);
-                http.req_header.insert("req_method".into(), method.into());
-            }
-            if let Some(path) = rst.next() {
-                http.req_path.clear();
-                http.req_path.push_str(path);
-                http.req_header.insert("req_path".into(), path.into());
-            };
-            if let Some(version) = rst.next() {
-                http.req_version.clear();
-                http.req_version.push_str(version);
-                http.req_header.insert("req_version".into(), version.into());
-            };
-            buffer.clear();
-        }
-        // Header
-        while let Ok(_) = http
-            .base_on
-            .req_reader
-            .write()
-            .unwrap()
-            .read_line(&mut buffer)
-        {
-            let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
-            if line.is_empty() {
-                if let Ok(len) = http
-                    .req_header
-                    .get("Req_Buffer_Size")
-                    .unwrap()
-                    .parse::<usize>()
-                {
-                    http.req_buffer_size = len
-                }
-                if let Some(length) = http.req_header.get("Content-Length") {
-                    if let Ok(len) = length.parse::<usize>() {
-                        http.req_content_length = len;
-                    }
-                }
-                break;
-            }
-            let mut head = line.splitn(2, ":");
-            if let Some(req_head_name) = head.next() {
-                if let Some(req_head_value) = head.next() {
-                    http.req_header
-                        .insert(req_head_name.into(), req_head_value.trim_start().into());
-                }
-            }
-            buffer.clear();
-        }
-        // parse_path_params
-        let mut path = http.req_path.splitn(2, "?");
-        if let Some(req_path) = path.next() {
-            http.req_header.insert("req_path".into(), req_path.into());
-        }
-        if let Some(req_params) = path.next() {
-            http.req_header
-                .insert("req_params".into(), req_params.into());
-            // get param
-            let mut params = req_params.split("&");
-            while let Some(req_param_item) = params.next() {
-                let mut req_item_kv = req_param_item.splitn(2, "=");
-                if let Some(req_param_name) = req_item_kv.next() {
-                    if let Some(req_param_value) = req_item_kv.next() {
-                        http.req_header.insert(
-                            format!("req_param_{}", req_param_name),
-                            req_param_value.into(),
-                        );
-                    }
-                }
-            }
-        }
-        // parse restful argv
-        let (req_script_path, mut restful_argvs) =
-            parse_req_path(http.req_header.get("req_path").unwrap().into());
-        http.req_header.insert(
-            "req_script_path".into(),
-            req_script_path
-                .to_string_lossy()
-                .replace(CGI_DIR.get().unwrap().to_str().unwrap(), "")
-                .strip_prefix("/")
-                .unwrap()
-                .to_string(),
-        );
-        if let Some(script_name) = req_script_path.file_name() {
-            http.req_header.insert(
-                "req_script_basename".into(),
-                script_name.to_str().unwrap().to_string(),
-            );
-            http.req_header.insert(
-                "req_script_name".into(),
-                req_script_path
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-                    .replace(CGI_DIR.get().unwrap().to_str().unwrap(), "")
-                    .strip_prefix("/")
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-        if let Some(script_dir) = req_script_path.parent() {
-            http.req_header.insert(
-                "req_script_dir".into(),
-                script_dir.to_str().unwrap().to_string(),
-            );
-        }
-        restful_argvs.reverse();
-        restful_argvs.iter().enumerate().for_each(|(i, v)| {
-            http.req_header
-                .insert(format!("req_argv_{}", i + 1), v.to_owned());
-            http.req_header
-                .insert(format!("req_param_argv_{}", i + 1), v.to_owned());
-        });
-        http.req_header
-            .insert("req_argv_count".into(), restful_argvs.len().to_string());
-        http.req_header
-            .insert("req_argv_params".into(), restful_argvs.join("/"));
-        debug!("<{:?}> restful_argv = {:?}", current().id(), restful_argvs);
-        //debug!("<{:?}> new http req create  {}", current().id(), http);
-        debug!("<{:?}> new http req create", current().id());
-        //Websocket
-        if let Some(upgrade) = http.req_header.get("Upgrade") {
-            if upgrade.to_lowercase() == "websocket" {
-                http.req_header
-                    .insert(String::from("req_body_method"), "WEBSOCKET".to_string());
-            }
-        }
-        return http;
-    }
-}
-
-pub struct HttpHandle;
-
-impl Handle for HttpHandle {
-    fn name(&self) -> &'static str {
+impl Handle<Tcp> for Http {
+    fn name() -> &'static str {
         "HTTP"
     }
 
-    fn matches(&self, stream: &Tcp) -> Option<bool> {
+    async fn matches(stream: &Tcp) -> bool {
         const HTTP_METHODS: &[&[u8]] = &[
             b"GET ",
             b"POST ",
@@ -312,46 +122,168 @@ impl Handle for HttpHandle {
             b"OPTIONS ",
             b"CONNECT ",
         ];
-        let mut buffer = [0u8; 16];
-        if let Ok(len) = stream.req_stream.peek(&mut buffer) {
-            debug!(
-                "Handled TcpStream {:?} [{:?}]",
-                &buffer[0..len],
-                String::from_utf8_lossy(&buffer)
+        if {
+            let mut buffer = [0u8; 16];
+            if let Ok(len) = stream
+                .req_reader
+                .lock()
+                .await
+                .get_mut()
+                .peek(&mut buffer)
+                .await
+            {
+                len > 0 && HTTP_METHODS.iter().any(|&v| buffer.starts_with(v))
+            } else {
+                false
+            }
+        } {
+            return true;
+        }
+        return false;
+    }
+
+    async fn handle(stream: Tcp) -> Result<Self, Error> {
+        let peer_ip = stream.req_header.get("Req_Peer_Ip").unwrap().clone();
+        let peer_port = stream.req_header.get("Req_Peer_Port").unwrap().clone();
+        let mut buffer = String::new();
+        stream
+            .req_reader
+            .lock()
+            .await
+            .read_line(&mut buffer)
+            .await?;
+
+        let mut req_headers = stream.req_header.clone();
+        req_headers.insert(
+            String::from("Req_Peer_Addr"),
+            format!("{}:{}", &peer_ip, &peer_port),
+        );
+        req_headers.insert(String::from("Req_Peer_Ip"), peer_ip);
+        req_headers.insert(String::from("Req_Peer_Port"), peer_port);
+        req_headers.insert(String::from("Req_Body_Method"), String::from("HTTP"));
+        // Pro
+        let line = buffer.trim_matches(|c| c == '\n' || c == '\r').to_string();
+        let mut rst = line.splitn(3, " ");
+        let req_method = rst
+            .next()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Format Error: missing method"))?;
+
+        let req_path = rst
+            .next()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Format Error: missing path"))?;
+
+        let req_version = rst
+            .next()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Format Error: missing version"))?;
+        req_headers.insert("Req_Method".into(), req_method.into());
+        req_headers.insert("Req_Path".into(), req_path.into());
+        req_headers.insert("Req_Version".into(), req_version.into());
+        buffer.clear();
+
+        // Header
+        while let Ok(len) = stream.req_reader.lock().await.read_line(&mut buffer).await {
+            if len == 0 {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "Read Error"));
+            }
+            let line = buffer.trim_matches(|c| c == '\n' || c == '\r');
+            if line.is_empty() {
+                break;
+            }
+            let mut header = line.splitn(2, ":");
+            if let (Some(key), Some(value)) = (header.next(), header.next()) {
+                let key = key.trim().to_lowercase();
+                let value = value.trim_start().to_string();
+                req_headers.insert(key, value);
+            } else {
+                eprintln!("Invalid HTTP Header: {}", line);
+            }
+            buffer.clear();
+        }
+        let req_buffer_size = stream
+            .req_header
+            .get("Req_Buffer_Size")
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1024 * 128);
+        let req_content_length = req_headers
+            .get("content-length")
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+
+        // Parse Path Params
+        let mut req_params = req_path.splitn(2, "?");
+        if let (Some(req_path), Some(params)) = (req_params.next(), req_params.next()) {
+            req_headers.insert("Req_Path".to_string(), req_path.to_string());
+            req_headers.insert("Req_Params".to_string(), params.to_string());
+            let mut param_kvs = params.split("&");
+            while let Some(req_param_item) = param_kvs.next() {
+                let mut req_item_kv = req_param_item.splitn(2, "=");
+                if let (Some(key), Some(val)) = (req_item_kv.next(), req_item_kv.next()) {
+                    let decoded_key = decode(key).unwrap_or_else(|_| Cow::from(key));
+                    let decoded_val = decode(val).unwrap_or_else(|_| Cow::from(val));
+                    req_headers.insert(
+                        format!("Req_Param_{}", decoded_key),
+                        decoded_val.to_string(),
+                    );
+                }
+            }
+        } else {
+            debug!("Have Not Params: {} ignore", req_path);
+        }
+
+        // Parse Restful Argv
+        let (req_script_path, mut restful_argvs) =
+            parse_req_path(req_headers.get("Req_Path").unwrap().to_string());
+
+        req_headers.insert(
+            "Req_Script_Path".to_string(),
+            req_script_path.to_string_lossy().to_string(),
+        );
+        if let Some(script_name) = req_script_path.file_name() {
+            req_headers.insert(
+                "Req_Script_Basename".to_string(),
+                script_name.to_str().unwrap().to_string(),
             );
-            //
-            if HTTP_METHODS.iter().any(|&v| buffer.starts_with(v)) {
-                debug!("Tcp Req Handled on HTTP");
-                return Some(true);
-            }
+            req_headers.insert(
+                "Req_Script_Name".to_string(),
+                req_script_path.strip_prefix(SCRIPT_DIR.get().unwrap()).unwrap().to_string_lossy().to_string(),
+            );
         }
-        None
-    }
-
-    fn handle(&self, stream: Tcp) -> Box<dyn Req> {
-        let http = Http::from(stream);
+        if let Some(script_dir) = req_script_path.parent() {
+            req_headers.insert(
+                "Req_Script_Dir".to_string(),
+                script_dir.to_string_lossy().to_string(),
+            );
+        }
+        restful_argvs.reverse();
+        restful_argvs.iter().enumerate().for_each(|(i, v)| {
+            req_headers.insert(format!("Req_Argv_{}", i + 1), v.to_owned());
+            req_headers.insert(format!("Req_Param_Argv_{}", i + 1), v.to_owned());
+        });
+        req_headers.insert(
+            "Req_Argv_Count".to_string(),
+            restful_argvs.len().to_string(),
+        );
+        req_headers.insert("Req_Argv_Params".to_string(), restful_argvs.join("/"));
+        info!("<{:?}> restful_argv = {:?}", current().id(), restful_argvs);
+        //debug!("<{:?}> new http req create  {}", current().id(), http);
+        info!("<{:?}> new http req create", current().id());
         //Websocket
-        if let Some(websocket) = http.env().get("req_body_method") {
-            if websocket == "WEBSOCKET" {
-                debug!("Tcp Req Handled on HTTP Upgrade Websocket");
-                return Box::new(Websocket::from(http));
+        if let Some(upgrade) = req_headers.get("upgrade") {
+            if upgrade.to_lowercase() == "websocket" {
+                req_headers.insert(String::from("Req_Body_Method"), "WEBSOCKET".to_string());
             }
         }
-        return Box::new(http);
-    }
-}
+        debug!("header: {:?}", req_headers);
 
-impl Display for Http {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "\nreq_method {}\nreq_path {}\nreq_headers:\n{}",
-            self.req_method,
-            self.req_path,
-            self.req_header
-                .iter()
-                .map(|(k, v)| { return format!(" {} -> {}\n", k, v) })
-                .collect::<String>()
-        )
+        Ok(Http {
+            base_on: stream,
+            req_path: req_path.to_string(),
+            req_method: req_method.to_string(),
+            req_version: req_version.to_string(),
+            req_buffer_size,
+            req_header: req_headers,
+            req_content_length,
+            req_content_read: AtomicUsize::new(0),
+        })
     }
 }

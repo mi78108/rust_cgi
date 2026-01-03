@@ -1,105 +1,73 @@
-use mio::Poll;
-use std::net::{SocketAddr, TcpListener, UdpSocket};
 use clap::Parser;
-use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::thread::{self};
-
-use crate::lib::thread_pool_mio::ThreadPool;
-use crate::tcp_class::tcp_base::default_register_protocol;
-
-#[macro_use]
-extern crate log;
-
-mod lib;
+use std::env;
+use std::{collections::HashMap, io::Error, path::PathBuf, sync::OnceLock};
+use std::sync::atomic::AtomicU8;
+use tokio::net::TcpListener;
 mod tcp_class;
-mod udp_class;
 mod utils;
 
-static CGI_DIR: OnceLock<PathBuf> = OnceLock::new();
-static THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
+use crate::tcp_class::handle;
+use crate::utils::local_log::LOG_LEVEL;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
-struct Cli {
-    #[arg(short = 'p', long = "port", default_value = "3000")]
-    port: u16,
-
-    #[arg(short = 't', long = "thread", default_value = "4")]
-    threads: u16,
-    /// 数据存储目录（默认：./data）
-    #[arg(short = 'f', long = "cgi", default_value = "./src/cgi")]
-    cgi: String,
-
-    #[arg(short = 'h', long = "host", default_value = "127.0.0.1")]
-    host: String,
-
-    /// 最大连接数（默认：100）
-    #[arg(long = "max-conn", default_value_t = 100)]
-    max_conn: usize,
+struct Opt {
+    #[arg(short = 'f', long, required = false, default_value = "")]
+    path: String,
+    #[arg(short = 'b', long, required = false, default_value = "127.0.0.1")]
+    bind: String,
+    #[arg(short = 'p', long, required = false, default_value = "3000")]
+    port: u32,
+    #[arg(short = 'v', long, action = clap::ArgAction::Count)]
+    verbose: u8,
+    #[arg(short = 't', long, required = false, default_value = "2")]
+    thread: u32,
 }
 
-/// # 简单的实现了CGI的小工具
-/// - 简单使用线程允许多访问 但并发受限制
-/// - 判断脚本结束的策略有待改进
-fn main() {
-    env_logger::init();
-    let cli = Cli::parse();
+pub trait Req: Sync + Send + 'static {
+    fn read(&self, data: &mut [u8]) -> impl Future<Output = Result<Option<usize>, Error>> + Send;
+    fn write(&self, data: &[u8]) -> impl Future<Output = Result<usize, Error>> + Send;
+    fn close(&self) -> impl Future<Output = Result<(), Error>> + Send;
+    fn env(&self) -> &HashMap<String, String>;
+}
 
-    CGI_DIR.get_or_init(|| {
-        debug!("Set Cgi Dir Path: {}", cli.cgi);
-        PathBuf::from(cli.cgi.clone())
+pub trait Handle<T: Req>: Sync + Send + 'static {
+    fn name() -> &'static str;
+    fn matches(stream: &T) -> impl Future<Output = bool> + Send;
+    //fn match_from(stream: Tcp) -> impl Future<Output = (Option<Self>, Option<Tcp>)> + Send where Self: Sized;
+    fn handle(stream: T) -> impl Future<Output = Result<Self, Error>> + Send
+    where
+        Self: Sized;
+}
+
+pub static SCRIPT_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let opt = Opt::parse();
+    let addr_basic = format!("{}:{}", opt.bind, opt.port);
+    SCRIPT_DIR.get_or_init(|| {
+        if (&opt).path.is_empty() {
+            env::current_dir().unwrap()
+        } else {
+            env::current_dir().unwrap().join(&opt.path)
+        }
     });
-    THREAD_POOL.get_or_init(|| ThreadPool::new(4));
-    // if let Some(serv) = matches.values_of("serv") {
-    //     serv.enumerate().for_each(|(i, v)| {
-    //         if let Ok(mut write) = udp_class::udp_base::CLIENTS.write() {
-    //             write.insert(
-    //                 format!("serv_{}", i),
-    //                 Client {
-    //                     from: "static".to_string(),
-    //                     addr: SocketAddr::from_str(v).unwrap(),
-    //                     name: format!("SERV_{}", i),
-    //                     via: None,
-    //                 },
-    //             );
-    //         }
-    //     });
-    // }
+    LOG_LEVEL.get_or_init(|| {
+        AtomicU8::new(opt.verbose)
+    });
 
+    info!("Starting server on {} script in {}", addr_basic, SCRIPT_DIR.get().unwrap().display());
 
-    let addr_basic = format!("{}:{}", cli.host, cli.port);
-    // if matches.is_present("udp") {
-    //     let udp_listener = UdpSocket::bind(addr).expect(format!("udp bind {} erro", addr).as_str());
-    //     spawn(move || {
-    //         udp_listener.set_broadcast(true).unwrap();
-    //         udp_class::udp_base::handle(udp_listener);
-    //     });
-    // }
-
-    let tcp_listener = TcpListener::bind(&addr_basic).expect(format!("bind {} erro", addr_basic).as_str());
-    default_register_protocol();
-    info!(
-        "Listen on [{}] CGI in [{}]",
-        addr_basic,
-        CGI_DIR.get().unwrap().to_string_lossy()
-    );
-    for stream in tcp_listener.incoming() {
-        match stream {
-            Ok(_stream) => {
-                    debug!(
-                        "<{:?}> tcp call start new Req thread started",
-                        thread::current().id()
-                    );
-                    tcp_class::tcp_base::handle(_stream.into());
-                    debug!(
-                        "<{:?}>tcp call end handle Req thread   ended\n\n",
-                        thread::current().id()
-                    );
-            }
-            Err(e) => {
-                error!("Tcp handle erro {:?}", e)
-            }
-        };
+    let tcp_listener = TcpListener::bind(&addr_basic)
+        .await
+        .expect(&format!("bind {} erro", addr_basic));
+    while let Ok((stream, addr)) = tcp_listener.accept().await {
+        info!("Connection Incomin from {}", addr);
+        tokio::spawn(async move {
+            let rst = handle(stream, addr).await;
+            info!("Connection terminated {} status {:?}\n\n", addr, rst);
+        });
     }
+    info!("Server terminated");
 }

@@ -1,13 +1,11 @@
 [package]
-name = "rust_cgi"
-version = "0.2.0"
-edition = "2018"
-
+name = "spider"
+version = "0.1.0"
+edition = "2024"
 
 [dependencies]
-log = "*"
-sha-1 = "*"
-base64 = "*"
-env_logger = "*"
-mio = { version = "*", features = ["os-poll", "net"] }
-clap = { version = "*", features = ["derive", "cargo"] }
+base64 = "0.22.1"
+clap = { version = "4.5.53", features = ["derive"] }
+ring = "0.17.14"
+tokio = { version = "1.48.0", features = ["full"] }
+urlencoding = "2.1.3"
