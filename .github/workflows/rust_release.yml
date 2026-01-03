@@ -37,6 +37,8 @@ jobs:
       with:
         asset_path: ./target/release/rust_cgi # 要上传文件
         name: Release ${{ github.ref_name }}
+        overwrite: true
+        tag_name: v1.0.0 
         files: |
           ./target/release/rust_cgi
 
