@@ -50,9 +50,7 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
         files: |
-          ./spider-linux-musl-amd64:spider-${{ github.ref_name }}-linux-musl-amd64
-          ./spider-windows-amd64.exe:spider-${{ github.ref_name }}-windows-static-amd64.exe
+          ./spider-linux-musl-amd64
+          ./spider-windows-amd64.exe
         draft: false
         prerelease: false
-        overwrite: true
-
