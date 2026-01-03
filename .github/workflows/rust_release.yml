@@ -50,8 +50,7 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
         files: |
-          ./rust_cgi-linux-musl-amd64:rust_cgi-${{ github.ref_name }}-linux-musl-amd64
-          ./rust_cgi-windows-amd64.exe:rust_cgi-${{ github.ref_name }}-windows-static-amd64.exe
+          ./rust_cgi-linux-musl-amd64
+          ./rust_cgi-windows-amd64.exe
         draft: false
         prerelease: false
-        overwrite: true
