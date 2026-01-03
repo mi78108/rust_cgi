@@ -11,32 +11,47 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose --release
-    - name: Create Release # 创建Release，可以在仓库看到一个个版本
-      id: create_release
-      uses: actions/create-release@master
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 之前GitHub添加的Token
-      with:
-        tag_name: ${{ github.ref_name }} # (tag)标签名称
-        release_name: Release ${{ github.ref_name }}
-        draft: false # 是否是草稿
-        prerelease: false # 是否是预发布
+    - name: Checkout
+      uses: actions/checkout@v4
 
-    # 第四步：上传构建结果到 Release（把打包的tgz上传到Release）
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: |
+          x86_64-unknown-linux-musl
+          x86_64-pc-windows-gnu
+          
+    - name: Install Cross Compile Dependencies
+      run: |
+        sudo apt update && sudo apt install -y --no-install-recommends \
+            mingw-w64 gcc-mingw-w64-x86-64 \
+            musl-tools \
+            upx
+        sudo rm -rf /var/lib/apt/lists/*
+
+    - name: Build Linux x86_64 (Static)
+      run: |
+        cargo build --release --target x86_64-unknown-linux-musl
+        upx --best target/x86_64-unknown-linux-musl/release/rust_cgi -o rust_cgi-linux-musl-amd64
+
+    - name: Build Windows x86_64 (Static)
+      run: |
+        cargo build --release --target x86_64-pc-windows-gnu
+        upx --best target/x86_64-pc-windows-gnu/release/rust_cgi.exe -o rust_cgi-windows-amd64.exe
+
     - name: Upload Release Asset
       id: upload-release-asset
-      uses: actions/upload-release-asset@master
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} # 上传地址，通过创建Release获取到的
-        asset_path: ./target/release/rust_cgi # 要上传文件
-        asset_name: cgi_release # 上传后的文件名
-        asset_content_type: application/x-zip
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        files: |
+          ./rust_cgi-linux-musl-amd64:rust_cgi-${{ github.ref_name }}-linux-musl-amd64
+          ./rust_cgi-windows-amd64.exe:rust_cgi-${{ github.ref_name }}-windows-static-amd64.exe
+        draft: false
+        prerelease: false
+        overwrite: true
