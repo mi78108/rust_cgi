@@ -2,9 +2,9 @@ name: Release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "mio" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "mio" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,30 +13,30 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose --release
-    - name: Create Release # 创建Release，可以在仓库看到一个个版本
+    - name: Create Release
       id: create_release
       uses: actions/create-release@master
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 之前GitHub添加的Token
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref_name }} # (tag)标签名称
+        tag_name: ${{ github.ref_name }}
         release_name: Release ${{ github.ref_name }}
-        draft: false # 是否是草稿
-        prerelease: false # 是否是预发布
+        draft: false 
+        prerelease: false
 
-    # 第四步：上传构建结果到 Release（把打包的tgz上传到Release）
     - name: Upload Release Asset
       id: upload-release-asset
-      uses: actions/upload-release-asset@master
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} # 上传地址，通过创建Release获取到的
         asset_path: ./target/release/rust_cgi # 要上传文件
-        asset_name: cgi_release # 上传后的文件名
-        asset_content_type: application/x-zip
+        name: Release ${{ github.ref_name }}
+        files: |
+          ./target/release/rust_cgi
+
