@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require_relative './_init_'
+
+Q.map(:GET) do |_, r|
+  Q.ok_json ENV.to_a.to_json
+end
+
+Q.map :WEBSOCKET do
+    Q.on_data do |chunk|
+        Q.log ">>>>>>>>>>>> socket recv #{chunk}"
+        Q.write chunk, true
+    end
+end

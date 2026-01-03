@@ -1,3 +1,0 @@
-#!/usr/bin/env zsh
-
-echo "HTTP/1.0 200 OK\r\nContent-Lenght: 2\r\n\r\nok"
