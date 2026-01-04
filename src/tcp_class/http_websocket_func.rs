@@ -7,9 +7,7 @@ use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::thread::current;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::task::id;
 
 const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 pub struct Websocket {
@@ -31,17 +29,20 @@ impl Websocket {
             .read_exact(&mut bytes)
             .await
         {
-            error!("websocket read package length fail read bytes part1 {:?}", e);
+            error!(
+                "websocket read package length fail read bytes part1 {:?}",
+                e
+            );
             if e.kind() == ErrorKind::UnexpectedEof {
                 return Ok((None, [0u8; 4]));
             }
             return Err(e);
         }
-        debug!("websocket read byte 1:{:b}",bytes[0]);
+        debug!("websocket read byte 1:{:b}", bytes[0]);
         debug!("websocket read byte 2:{:b}", bytes[1]);
         let count_bytes = |bytes: &[u8]| -> usize {
             bytes.iter().enumerate().fold(0usize, |a, (i, v)| {
-                //debug!(" websocket read byte 8 * {} - {}  - 1",bytes.len(),i);
+                debug!(" websocket read byte 8 * {} - {}  - 1", bytes.len(), i);
                 a + ((*v as usize) << (8 * (bytes.len() - 1 - i)))
             })
         };
@@ -75,13 +76,15 @@ impl Websocket {
             _ => Err(Error::new(ErrorKind::InvalidData, "invalid data")),
         };
         if let Err(e) = length_rst {
-            error!("websocket read package length fail read bytes part2  {:?}",e);
+            error!(
+                "websocket read package length fail read bytes part2  {:?}",
+                e
+            );
             return Err(e);
         }
         let length: usize = length_rst?;
-        error!("websocket read package length {}", length);
+        debug!("websocket read package length {}", length);
         //debug!(" websocket read pack len {}", length);
-        //println!("play load  len {}", length);
         //part3 mask 4byte
         let mut plymask = [0u8; 4];
         if let Err(e) = self
@@ -93,10 +96,13 @@ impl Websocket {
             .read_exact(&mut plymask)
             .await
         {
-            error!("websocket read package payload fail read bytes mask {:?}", e);
+            error!(
+                "websocket read package payload fail read bytes mask {:?}",
+                e
+            );
             return Err(e);
         }
-            debug!("websocket read package mask {:?}", plymask);
+        debug!("websocket read package mask {:?}", plymask);
         // frame read done
         match bytes[0] {
             // h  if h == 0b10000000 => {
@@ -150,12 +156,7 @@ impl Websocket {
         if let Ok(_) = self.base_on.write(&[opcode]).await {
             //B2=  +mask+len*7
             let len = data.len();
-            println!(
-                "<{:?}:{}> websocket ready to write len {}",
-                current().id(),
-                id(),
-                data.len()
-            );
+            debug!("websocket ready to write len {}", data.len());
             match len {
                 n if n < 126 => {
                     self.base_on.write(&[len as u8]).await?;
@@ -262,9 +263,7 @@ impl Req for Websocket {
         // 默认 文本末包
         let rst = self.write_with_opcode(0b10000001, data).await;
         if rst.is_ok() {
-            if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {
-
-            }
+            if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {}
         };
         rst
     }
@@ -295,12 +294,11 @@ impl Handle<Http> for Websocket {
         false
     }
 
-
-    async fn handle(stream: Http) -> Result<Self,Error> {
+    async fn handle(stream: Http) -> Result<Self, Error> {
         if let Some(sec_websocket_key) = stream.env().get("sec-websocket-key") {
             let hash = digest(
                 &SHA1_FOR_LEGACY_USE_ONLY,
-                format!("{}{}", sec_websocket_key,WEBSOCKET_MAGIC_KEY).as_bytes(),
+                format!("{}{}", sec_websocket_key, WEBSOCKET_MAGIC_KEY).as_bytes(),
             );
 
             let sec_websocket_accept = STANDARD.encode(&hash.as_ref());
@@ -311,13 +309,7 @@ impl Handle<Http> for Websocket {
             );
             debug!("flush aa");
             if stream.write(resp.as_bytes()).await.is_ok() {
-                stream
-                    .base_on
-                    .req_writer
-                    .lock()
-                    .await
-                    .flush()
-                    .await?;
+                stream.base_on.req_writer.lock().await.flush().await?;
                 debug!("flush ");
             }
         }

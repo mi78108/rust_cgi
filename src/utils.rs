@@ -13,7 +13,7 @@ pub mod local_log {
                     use colored::Colorize;
                     use chrono::Local;  
 
-                    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let now = Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string();
 
                     let task_id = try_id().map(|id| id.to_string()).unwrap_or_else(|| "_".to_string());
 

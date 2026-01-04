@@ -1,5 +1,6 @@
+use crate::error;
 use crate::utils::core::{Handle, Req};
-use crate::{SCRIPT_DIR, tcp_class::Tcp, info, debug};
+use crate::{SCRIPT_DIR, debug, tcp_class::Tcp};
 use std::borrow::Cow;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -62,36 +63,23 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     let mut script_file_path = PathBuf::from(SCRIPT_DIR.get().unwrap())
         .join(req_script.strip_prefix("/").unwrap_or(req_script));
 
-    info!(
-        "<{:?}> req_script_file_path {:?}",
-        current().id(),
-        script_file_path
-    );
+    debug!("req_script_file_path {:?}", script_file_path);
     loop {
         if script_file_path.exists() {
             if script_file_path.is_file() {
                 //文件存在 并且是文件 ok return
-                info!(
-                    "<{:?}> script_file_path file while= {:?}",
-                    current().id(),
-                    script_file_path
-                );
+                debug!("script_file_path file while= {:?}", script_file_path);
                 return (script_file_path, result);
             }
             if script_file_path.is_dir() {
                 //文件存在 是文件夹 指向当下的 index ok return
                 script_file_path.push("index");
-                info!(
-                    "<{:?}> script_file_path dir while= {:?}",
-                    current().id(),
-                    script_file_path
-                );
+                debug!("script_file_path dir while= {:?}", script_file_path);
                 return (script_file_path, result);
             }
         }
-        info!(
-            "<{:?}> script_file_path {:?} {:?} as restful param",
-            current().id(),
+        debug!(
+            "script_file_path {:?} {:?} as restful param",
             script_file_path,
             script_file_path.file_name().unwrap()
         );
@@ -196,7 +184,7 @@ impl Handle<Tcp> for Http {
                 let value = value.trim_start().to_string();
                 req_headers.insert(key, value);
             } else {
-                eprintln!("Invalid HTTP Header: {}", line);
+                error!("Invalid HTTP Header: {}", line);
             }
             buffer.clear();
         }
@@ -246,7 +234,11 @@ impl Handle<Tcp> for Http {
             );
             req_headers.insert(
                 "Req_Script_Name".to_string(),
-                req_script_path.strip_prefix(SCRIPT_DIR.get().unwrap()).unwrap().to_string_lossy().to_string(),
+                req_script_path
+                    .strip_prefix(SCRIPT_DIR.get().unwrap())
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             );
         }
         if let Some(script_dir) = req_script_path.parent() {
@@ -265,9 +257,8 @@ impl Handle<Tcp> for Http {
             restful_argvs.len().to_string(),
         );
         req_headers.insert("Req_Argv_Params".to_string(), restful_argvs.join("/"));
-        info!("<{:?}> restful_argv = {:?}", current().id(), restful_argvs);
-        //debug!("<{:?}> new http req create  {}", current().id(), http);
-        info!("<{:?}> new http req create", current().id());
+        debug!("restful_argv = {:?}", restful_argvs);
+        debug!("new http req create");
         //Websocket
         if let Some(upgrade) = req_headers.get("upgrade") {
             if upgrade.to_lowercase() == "websocket" {
