@@ -1,71 +1,60 @@
 pub mod local_log {
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicU8;
-
     pub static LOG_LEVEL: OnceLock<AtomicU8> = OnceLock::new();
 
     #[macro_export]
+    macro_rules! _log_common {
+        ($level:expr, $color:expr, $threshold:expr, $fmt:literal $(, $args:expr)*) => {{
+            if let Some(log_level) = $crate::LOG_LEVEL.get() {
+                if $threshold <= log_level.load(std::sync::atomic::Ordering::Relaxed) {
+                    use std::thread::current;
+                    use tokio::task::try_id;
+                    use colored::Colorize;
+                    use chrono::Local;  
+
+                    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+                    let task_id = try_id().map(|id| id.to_string()).unwrap_or_else(|| "_".to_string());
+
+                    let log_content = format!($fmt $(, $args)*);
+
+                    eprintln!(
+                        "[{}] [{}] [{}:{}] <{:?}:{}-> {}",
+                        now,
+                        $level.color($color),
+                        module_path!(),
+                        line!(),
+                        current().id(),
+                        task_id,
+                        log_content
+                    )
+                }
+            };
+        }}
+    }
+
+    #[macro_export]
     macro_rules! info {
-        // 匹配：log!(级别, 格式化字符串, 参数...)
-        ($fmt:literal $(, $args:expr)*) => {{
-            if $crate::LOG_LEVEL.get().unwrap().load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                use std::thread::current;
-                use tokio::task::try_id;
-                // 1. 格式化时间（Rust 1.8+ 需引入 `time` 包，或用标准库 `SystemTime`）
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                // 2. 拼接日志内容
-                let log_content = format!($fmt $(, $args)*);
-                let task_id = try_id().and_then(|v| Some(v.to_string())).unwrap_or("_".to_string());
-                // 3. 输出到控制台（可替换为文件/网络等）
-                eprintln!("[{}] [INFO] [{}:{}] <{:?}:{}> {}", now, module_path!(), line!(), current().id(), task_id, log_content);
-            }
-        }};
+        ($fmt:literal $(, $args:expr)*) => {
+            $crate::_log_common!("INFO", colored::Color::Green, 3, $fmt $(, $args)*)
+        };
     }
 
     #[macro_export]
     macro_rules! debug {
-        // 匹配：log!(级别, 格式化字符串, 参数...)
-        ($fmt:literal $(, $args:expr)*) => {{
-            if $crate::LOG_LEVEL.get().unwrap().load(std::sync::atomic::Ordering::Relaxed) > 1 {
-                use std::thread::current;
-                use tokio::task::try_id;
-                // 1. 格式化时间（Rust 1.8+ 需引入 `time` 包，或用标准库 `SystemTime`）
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                // 2. 拼接日志内容
-                let log_content = format!($fmt $(, $args)*);
-                let task_id = try_id().and_then(|v| Some(v.to_string())).unwrap_or("_".to_string());
-                // 3. 输出到控制台（可替换为文件/网络等）
-                eprintln!("[{}] [DEBUG] [{}:{}] <{:?}:{}> {}", now, module_path!(), line!(), current().id(), task_id, log_content);
-            }
-        }};
+        ($fmt:literal $(, $args:expr)*) => {
+            $crate::_log_common!("DEBUG", colored::Color::Yellow, 2, $fmt $(, $args)*)
+        };
     }
 
     #[macro_export]
     macro_rules! error {
-        // 匹配：log!(级别, 格式化字符串, 参数...)
-        ($fmt:literal $(, $args:expr)*) => {{
-            if $crate::LOG_LEVEL.get().unwrap().load(std::sync::atomic::Ordering::Relaxed) > 1 {
-                use std::thread::current;
-                use tokio::task::try_id;
-                // 1. 格式化时间（Rust 1.8+ 需引入 `time` 包，或用标准库 `SystemTime`）
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                // 2. 拼接日志内容
-                let log_content = format!($fmt $(, $args)*);
-                let task_id = try_id().and_then(|v| Some(v.to_string())).unwrap_or("_".to_string());
-                // 3. 输出到控制台（可替换为文件/网络等）
-                eprintln!("[{}] [ERROR] [{}:{}] <{:?}:{}> {}", now, module_path!(), line!(), current().id(), task_id, log_content);
-            }
-        }};
+        ($fmt:literal $(, $args:expr)*) => {
+            $crate::_log_common!("ERROR", colored::Color::Red, 1, $fmt $(, $args)*)
+        };
     }
+
 }
 
 pub mod core {
@@ -149,7 +138,7 @@ pub mod core {
     }
 
     impl Script {
-        pub fn new(req_env: &HashMap<String,String>) -> Result<Self, Error>{
+        pub fn new(req_env: &HashMap<String, String>) -> Result<Self, Error> {
             let req_script = Path::new(req_env.get("Req_Script_Name").unwrap());
             let script_file = PathBuf::from(SCRIPT_DIR.get().unwrap())
                 .join(req_script.strip_prefix("/").unwrap_or(req_script));
@@ -175,7 +164,10 @@ pub mod core {
                 .spawn()?;
 
             Ok(Script {
-                script_header: HashMap::from([("Req_Buffer_Size".to_string(),(1024 * 128).to_string())]),
+                script_header: HashMap::from([(
+                    "Req_Buffer_Size".to_string(),
+                    (1024 * 128).to_string(),
+                )]),
                 script_stdin: Mutex::new(cmd.stdin.take().unwrap()),
                 script_stdout: Mutex::new(cmd.stdout.take().unwrap()),
                 script_stderr: Mutex::new(cmd.stderr.take().unwrap()),
@@ -185,12 +177,11 @@ pub mod core {
     }
 
     pub async fn call_script<T: Req>(req: T) -> bool {
-        if let Ok(script)  = Script::new(req.env()) {
-            return call_bridge(req, script).await
+        if let Ok(script) = Script::new(req.env()) {
+            return call_bridge(req, script).await;
         }
         false
     }
-
 
     pub async fn call_bridge<A: Req, B: Req>(req_src: A, req_dst: B) -> bool {
         let req_src = Arc::new(req_src);

@@ -2,12 +2,11 @@ use clap::Parser;
 use std::env;
 use std::sync::atomic::AtomicU8;
 use std::{path::PathBuf, sync::OnceLock};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 mod tcp_class;
 mod utils;
 
-use crate::tcp_class::{FileSync, Tcp, handle};
-use crate::utils::core::call_bridge;
+use crate::tcp_class::handle;
 use crate::utils::local_log::LOG_LEVEL;
 
 #[derive(Parser, Debug)]
@@ -34,7 +33,7 @@ struct Opt {
 }
 
 pub static SCRIPT_DIR: OnceLock<PathBuf> = OnceLock::new();
-pub static OPT: OnceLock<Opt> = OnceLock::new();
+static OPT: OnceLock<Opt> = OnceLock::new();
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -64,8 +63,9 @@ async fn main() {
     while let Ok((stream, addr)) = tcp_listener.accept().await {
         info!("Connection Incoming from {}", addr);
         tokio::spawn(async move {
-            let rst = handle(stream, addr).await;
-            info!("Connection terminated {} status {:?}\n\n", addr, rst);
+            handle(stream, addr).await
+                .map(|status| info!("Connection terminated {} status {:?}\n\n", addr, status))
+                .map_err(|e| error!("Connection terminated {} status {:?}\n\n", addr, e))
         });
     }
     info!("Server terminated");

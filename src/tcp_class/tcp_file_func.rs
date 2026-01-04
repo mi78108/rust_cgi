@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     io::{Error, ErrorKind},
     path::PathBuf,
-    sync::atomic::AtomicUsize,
 };
 
 use tokio::{
@@ -11,16 +10,16 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::{OPT, debug, error, tcp_class::Tcp, utils::core::Req};
+use crate::{OPT, error, tcp_class::Tcp, utils::core::Req};
 
 #[derive(Debug)]
 pub struct FileSync {
     file_reader: Mutex<BufReader<File>>,
     file_writer: Mutex<BufWriter<File>>,
-    file_path: PathBuf,
-    file_key: Option<String>,
-    file_lenght: u64,
-    file_processed: AtomicUsize,
+    // file_path: PathBuf,
+    // file_key: Option<String>,
+    // file_lenght: u64,
+    // file_processed: AtomicUsize,
     file_header: HashMap<String, String>,
 }
 
@@ -58,48 +57,87 @@ impl Req for FileSync {
 
 impl FileSync {
     pub async fn matches() -> bool {
-        OPT.get().unwrap().input.is_some() && OPT.get().unwrap().key.is_some()
+        OPT.get().unwrap().input.is_some()
     }
 
-    pub async fn handle() -> Result<Self, Error> {
-        todo!()
-    }
+    // pub async fn handle() -> Result<Self, Error> {
+    //     todo!()
+    // }
 
     pub async fn reader(req: &Tcp) -> Result<Self, Error> {
         let mut file_key = String::new();
         req.req_reader.lock().await.read_line(&mut file_key).await?;
-        let key_file: HashMap<String, String> = OPT
+        let file_path = OPT
             .get()
             .map(|cfg| {
-                let keys = cfg.key.clone().unwrap_or_default();
-                let values = cfg.input.clone().unwrap_or_default();
-                keys.into_iter().zip(values.into_iter()).collect()
+                let mut keys = cfg.key.clone().unwrap_or_default();
+                let mut values = cfg.input.clone().unwrap_or_default();
+                if keys.is_empty() {
+                    values.iter_mut().for_each(|v| {
+                        let mut kv = v.splitn(2, ":");
+                        if let (Some(val), Some(key)) = (kv.next(), kv.next()) {
+                            keys.push(key.to_string());
+                            *(v) = val.to_string()
+                        }
+                    })
+                }
+                if keys.is_empty() && values.len() > 0 {
+                    return HashMap::from([
+                        ("default".to_string(), values.get(0).unwrap().to_string())
+                    ]);
+                }
+                keys.into_iter()
+                    .zip(values.into_iter())
+                    .collect::<HashMap<String, String>>()
             })
-            .unwrap_or_default();
-        if key_file.is_empty() {
-            return Err(Error::new(ErrorKind::InvalidInput, "File Key Invalid"));
-        }
+            .map_or(Ok(HashMap::new()), Ok)
+            .and_then(|map| {
+                if map.is_empty() {
+                    Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "File Key Invalid Config Nil",
+                    ))
+                } else {
+                    Ok(map)
+                }
+            })
+            .and_then(|map| {
+                map.get(file_key.trim())
+                .or_else(|| map.get("default"))
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("File Key '{}' Not Exist", file_key),
+                    )
+                })
+            })
+            .and_then(|file_path| {
+                if !file_path.exists() {
+                    Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("File '{}' Not Exists", file_path.display()),
+                    ))
+                } else if !file_path.is_file() {
+                    Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("'{}' Is Not A File", file_path.display()),
+                    ))
+                } else {
+                    Ok(file_path)
+                }
+            })?;
 
-        let file_rst = key_file
-            .iter()
-            .find(|v| (file_key.trim()).eq_ignore_ascii_case(v.0.trim()));
-        if file_rst.is_none() {
-            return Err(Error::new(ErrorKind::InvalidInput, "File Key Not Exist"));
-        }
-        let file_path = PathBuf::from(file_rst.unwrap().1);
-        if !file_path.exists() || !file_path.is_file() {
-            return Err(Error::new(ErrorKind::InvalidInput, "File Not Exists"));
-        }
         let file = File::open(&file_path).await?;
         let reader = file.try_clone().await?;
         let writer = file.try_clone().await?;
         Ok(FileSync {
             file_reader: Mutex::new(BufReader::new(reader)),
             file_writer: Mutex::new(BufWriter::new(writer)),
-            file_path: file_path,
-            file_key: Some(String::from(&file_key)),
-            file_lenght: file.metadata().await?.len(),
-            file_processed: AtomicUsize::new(0),
+            // file_path: file_path,
+            // file_key: Some(String::from(&file_key)),
+            // file_lenght: file.metadata().await?.len(),
+            // file_processed: AtomicUsize::new(0),
             file_header: HashMap::from([
                 ("Req_Buffer_Size".to_string(), (1024 * 128).to_string()),
                 ("Req_File_Key".to_string(), file_key.to_string()),

@@ -10,10 +10,10 @@ use urlencoding::decode;
 #[derive(Debug)]
 pub struct Http {
     pub base_on: Tcp,
-    req_path: String,
-    req_method: String,
-    req_version: String,
-    req_buffer_size: usize,
+    // req_path: String,
+    // req_method: String,
+    // req_version: String,
+    // req_buffer_size: usize,
     req_content_length: usize,
     req_content_read: AtomicUsize,
     req_header: HashMap<String, String>,
@@ -278,10 +278,10 @@ impl Handle<Tcp> for Http {
 
         Ok(Http {
             base_on: stream,
-            req_path: req_path.to_string(),
-            req_method: req_method.to_string(),
-            req_version: req_version.to_string(),
-            req_buffer_size,
+            // req_path: req_path.to_string(),
+            // req_method: req_method.to_string(),
+            // req_version: req_version.to_string(),
+            // req_buffer_size,
             req_header: req_headers,
             req_content_length,
             req_content_read: AtomicUsize::new(0),
