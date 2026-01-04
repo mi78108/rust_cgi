@@ -1,5 +1,6 @@
 use crate::tcp_class::http_func::Http;
-use crate::{debug, error, Handle, Req};
+use crate::utils::core::{Handle, Req};
+use crate::{debug, error};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
