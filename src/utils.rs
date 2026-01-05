@@ -20,7 +20,7 @@ pub mod local_log {
                     let log_content = format!($fmt $(, $args)*);
 
                     eprintln!(
-                        "[{}] [{}] [{}:{}] <{:?}:{}-> {}",
+                        "[{}] [{}] [{}:{:3}] <{:?}:{}-> {}",
                         now,
                         $level.color($color),
                         module_path!(),
@@ -37,7 +37,7 @@ pub mod local_log {
     #[macro_export]
     macro_rules! info {
         ($fmt:literal $(, $args:expr)*) => {
-            $crate::_log_common!("INFO", colored::Color::Green, 3, $fmt $(, $args)*)
+            $crate::_log_common!("INFO ", colored::Color::Green, 3, $fmt $(, $args)*)
         };
     }
 
@@ -59,10 +59,7 @@ pub mod local_log {
 
 pub mod core {
     use std::{
-        collections::HashMap,
-        io::{Error, ErrorKind},
-        path::{Path, PathBuf},
-        sync::Arc,
+        collections::HashMap, default, io::{Error, ErrorKind}, path::{Path, PathBuf}, sync::Arc
     };
 
     use tokio::{
@@ -96,7 +93,7 @@ pub mod core {
         script: Mutex<Child>,
         script_stdin: Mutex<ChildStdin>,
         script_stdout: Mutex<ChildStdout>,
-        script_stderr: Mutex<ChildStderr>,
+        //script_stderr: Mutex<ChildStderr>,
         script_header: HashMap<String, String>,
     }
 
@@ -120,6 +117,8 @@ pub mod core {
         }
 
         async fn close(&self) -> Result<(), Error> {
+            self.write(&[]).await?;
+            self.script_stdin.lock().await.flush().await?;
             match self.script.lock().await.wait().await {
                 Ok(status) => {
                     debug!("Script finished ok exited with {:?}", status);
@@ -160,18 +159,18 @@ pub mod core {
                 .current_dir(SCRIPT_DIR.get().unwrap())
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
+                //                .stderr(std::process::Stdio::piped())
                 .spawn()?;
 
             Ok(Script {
                 script_header: HashMap::from([(
-                    "Req_Buffer_Size".to_string(),
-                    (1024 * 128).to_string(),
-                )]),
-                script_stdin: Mutex::new(cmd.stdin.take().unwrap()),
-                script_stdout: Mutex::new(cmd.stdout.take().unwrap()),
-                script_stderr: Mutex::new(cmd.stderr.take().unwrap()),
-                script: Mutex::new(cmd),
+                                       "Req_Buffer_Size".to_string(),
+                                       (1024 * 128).to_string(),
+                               )]),
+                               script_stdin: Mutex::new(cmd.stdin.take().unwrap()),
+                               script_stdout: Mutex::new(cmd.stdout.take().unwrap()),
+                               //script_stderr: Mutex::new(cmd.stderr.take().unwrap()),
+                               script: Mutex::new(cmd),
             })
         }
     }
@@ -194,12 +193,12 @@ pub mod core {
         let src = tokio::spawn(async move {
             let mut rst = vec![
                 0u8;
-                reader_src
-                    .env()
-                    .get("Req_Buffer_Size")
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap()
+            reader_src
+                .env()
+                .get("Req_Buffer_Size")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
             ];
             while let Ok(Some(len)) = reader_src.read(&mut rst).await {
                 debug!("Req src read {} bytes", len);
@@ -207,21 +206,24 @@ pub mod core {
                     debug!("Req src read Zero will closed");
                     break;
                 }
-                writer_dst.write(&rst[0..len]).await.unwrap();
+                if let Ok(len) = writer_dst.write(&rst[0..len]).await {
+                    debug!("Req src -> dst {} bytes", len);
+                };
             }
             //
             writer_dst.close().await.unwrap();
+            debug!("Req src read end");
         });
 
         let dst = tokio::spawn(async move {
             let mut rst = vec![
                 0u8;
-                reader_dst
-                    .env()
-                    .get("Req_Buffer_Size")
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap()
+            reader_dst
+                .env()
+                .get("Req_Buffer_Size")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
             ];
             while let Ok(Some(len)) = reader_dst.read(&mut rst).await {
                 debug!("Req dst read {} bytes", len);
@@ -229,10 +231,13 @@ pub mod core {
                     debug!("Req dst read Zero will closed");
                     break;
                 }
-                writer_src.write(&rst[0..len]).await.unwrap();
+                if let Ok(len) = writer_src.write(&rst[0..len]).await {
+                    debug!("Req dst -> src {} bytes", len);
+                }
             }
             //
             writer_src.close().await.unwrap();
+            debug!("Req dst read end");
         });
 
         let (src_rst, dst_rst) = tokio::join!(src, dst);
