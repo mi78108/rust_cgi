@@ -96,9 +96,9 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
 }
 
 impl Handle<Tcp> for Http {
-    fn name() -> &'static str {
-        "HTTP"
-    }
+    // fn name() -> &'static str {
+    //     "HTTP"
+    // }
 
     async fn matches(stream: &Tcp) -> bool {
         const HTTP_METHODS: &[&[u8]] = &[

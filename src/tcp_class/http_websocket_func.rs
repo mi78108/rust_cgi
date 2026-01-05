@@ -281,9 +281,9 @@ impl Req for Websocket {
 }
 
 impl Handle<Http> for Websocket {
-    fn name() -> &'static str {
-        "WEBSOCKET"
-    }
+    // fn name() -> &'static str {
+    //     "WEBSOCKET"
+    // }
 
     async fn matches(stream: &Http) -> bool {
         if let Some(upgrade) = stream.env().get("upgrade") {
