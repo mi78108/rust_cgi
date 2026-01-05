@@ -32,24 +32,20 @@ class Req
     return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i] 
   end
 
-  def body(length = @body_length )
-    STDIN.read length
-  end
+   def body(length = @body_length)
+    Q.recv(length)
+   end
 
   def method_missing(method_name, *args, &block)
     method_str = method_name.to_s
-    if method_str.start_with?("argv_")
-      return argv(method_str.split("_", 2)[1])
-    end
-    if method_str.start_with?("match_")
-      return match(method_str.split("_", 2)[1])
-    end
-    if method_str.start_with?("param_")
-      return param(method_str.split("_", 2)[1])
-    end
-    if method_str.start_with?("header_")
-      return header(method_str.split("_", 2)[1])
-    end
+    (prefix, core_method) = {
+      "argv_" => :argv,
+      "match_" => :match,
+      "param_" => :param,
+      "header_" => :header
+    }.find { |prefix, _| method_str.start_with?(prefix) }
+
+    return send(core_method, method_str.delete_prefix(prefix)) if prefix
     super
   end
 end
@@ -58,7 +54,6 @@ class Rsp
   attr_accessor :header
 
   def initialize()
-    @body
     @code = 200
     @status = 'OK'
     @version = 'HTTP/1.0'
@@ -68,16 +63,15 @@ class Rsp
     }
   end
 
+  %i[code body].each do |method_name|
+    define_method(method_name) do |val|
+      instance_variable_set("@#{method_name}", val)
+      self
+    end
+  end
+
   def type val
     @header['Content-Type'] = val
-    return self
-  end
-  def code(val)
-    @code = val
-    return self
-  end
-  def body val
-    @body = val
     return self
   end
   def ok body
@@ -325,9 +319,11 @@ module Q
   end
 
 
-  def Q.recv
+  def Q.recv(length)
     # 注意阻塞，会持续到EOF
-    yield(STDIN.read) if block_given?
+    data = length&.positive? ? STDIN.read(length) : STDIN.read
+    yield(data) if block_given?
+    data
   end
 
   def Q.on_data(uio = STDIN)
