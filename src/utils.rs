@@ -37,7 +37,7 @@ pub mod local_log {
     #[macro_export]
     macro_rules! info {
         ($fmt:literal $(, $args:expr)*) => {
-            $crate::_log_common!("INFO ", colored::Color::Green, 3, $fmt $(, $args)*)
+            $crate::_log_common!("INFO ", colored::Color::Green, 1, $fmt $(, $args)*)
         };
     }
 
@@ -59,7 +59,6 @@ pub mod local_log {
 pub mod core {
     use std::{
         collections::HashMap,
-        default,
         io::{Error, ErrorKind},
         path::{Path, PathBuf},
         sync::Arc,
@@ -67,7 +66,7 @@ pub mod core {
 
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
-        process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+        process::{Child, ChildStdin, ChildStdout, Command},
         sync::Mutex,
     };
 
@@ -222,16 +221,14 @@ pub mod core {
                 }
                 let mut remaining = &rst[0..read_len];
                 while remaining.len() > 0 {
-                    if let Ok(written_len) = writer_dst
-                        .write(remaining)
-                        .await
-                        .inspect_err(|e| {
-                            error!(
-                                "Req src -> dst Write failed (written: {}/{}): {}",
-                                read_len - remaining.len(), read_len, e
-                            )
-                        })
-                    {
+                    if let Ok(written_len) = writer_dst.write(remaining).await.inspect_err(|e| {
+                        error!(
+                            "Req src -> dst Write failed (written: {}/{}): {}",
+                            read_len - remaining.len(),
+                            read_len,
+                            e
+                        )
+                    }) {
                         remaining = &remaining[written_len..];
                         debug!("Req src -> dst {} bytes", written_len);
                     } else {
@@ -262,16 +259,14 @@ pub mod core {
                 }
                 let mut remaining = &rst[0..read_len];
                 while remaining.len() > 0 {
-                    if let Ok(written_len) = writer_src
-                        .write(remaining)
-                        .await
-                        .inspect_err(|e| {
-                            error!(
-                                "Req dst -> src Write failed (written: {}/{}): {}",
-                                read_len - remaining.len(), read_len, e
-                            )
-                        })
-                    {
+                    if let Ok(written_len) = writer_src.write(remaining).await.inspect_err(|e| {
+                        error!(
+                            "Req dst -> src Write failed (written: {}/{}): {}",
+                            read_len - remaining.len(),
+                            read_len,
+                            e
+                        )
+                    }) {
                         remaining = &remaining[written_len..];
                         debug!("Req dst -> src {} bytes", written_len);
                     } else {
