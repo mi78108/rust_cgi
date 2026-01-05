@@ -188,11 +188,11 @@ impl Handle<Tcp> for Http {
             }
             buffer.clear();
         }
-        let req_buffer_size = stream
-            .req_header
-            .get("Req_Buffer_Size")
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1024 * 128);
+        // let req_buffer_size = stream
+        //     .req_header
+        //     .get("Req_Buffer_Size")
+        //     .and_then(|s| s.parse::<usize>().ok())
+        //     .unwrap_or(1024 * 128);
         let req_content_length = req_headers
             .get("content-length")
             .and_then(|s| s.parse::<usize>().ok())
