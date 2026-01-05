@@ -5,7 +5,7 @@ require 'mime/types'
 
 
 Q.map(:GET, "/upload") do |_, resp|
-  resp.body("<form action='/static/upload' method='POST' enctype='multipart/form-data'><input name='file' type='file'><button type='submit'>OK</button></form>").html.finally
+  resp.body("<form action='/static/upload' method='POST' enctype='multipart/form-data'><input multiple name='file' type='file'><button type='submit'>OK</button></form>").html.finally
 end
 Q.map(:POST, "/upload") do |req, resp|
   #resp.body(req.body_form_data.to_s).html.finally
