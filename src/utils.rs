@@ -83,9 +83,9 @@ pub mod core {
     }
 
     pub trait Handle<T: Req>: Sync + Send + 'static {
-        fn name() -> &'static str;
+        // fn name() -> &'static str;
         fn matches(req: &T) -> impl Future<Output = bool> + Send;
-        //fn match_from(stream: Tcp) -> impl Future<Output = (Option<Self>, Option<Tcp>)> + Send where Self: Sized;
+        // fn match_from(stream: Tcp) -> impl Future<Output = (Option<Self>, Option<Tcp>)> + Send where Self: Sized;
         fn handle(req: T) -> impl Future<Output = Result<Self, Error>> + Send
         where
             Self: Sized;

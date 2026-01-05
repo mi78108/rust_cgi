@@ -102,22 +102,20 @@ impl From<(TcpStream, SocketAddr)> for Tcp {
     }
 }
 
-pub async fn handle(stream: TcpStream, addr: SocketAddr) -> Result<bool, Error> {
-    let tcp = Tcp::from((stream, addr));
- 
-    Ok(match tcp {
-        tcp if FileSync::matches().await => {
-            let file = FileSync::reader(&tcp).await?;
-            call_bridge(file, tcp).await
+pub async fn handle(stream: Tcp) -> Result<bool, Error> {
+    Ok(match stream {
+        stream if FileSync::matches().await => {
+            let file = FileSync::reader(&stream).await?;
+            call_bridge(file, stream).await
         }
-        tcp if Http::matches(&tcp).await => {
-            let http = Http::handle(tcp).await?;
+        stream if Http::matches(&stream).await => {
+            let http = Http::handle(stream).await?;
             if Websocket::matches(&http).await {
                 call_script(Websocket::handle(http).await?).await
             } else {
                 call_script(http).await
             }
         }
-        _ => call_script(tcp).await,
+        _ => call_script(stream).await,
     })
 }

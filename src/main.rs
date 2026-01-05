@@ -6,7 +6,7 @@ use tokio::net::TcpListener;
 mod tcp_class;
 mod utils;
 
-use crate::tcp_class::handle;
+use crate::tcp_class::{Tcp, handle};
 use crate::utils::local_log::LOG_LEVEL;
 
 #[derive(Parser, Debug)]
@@ -63,7 +63,8 @@ async fn main() {
     while let Ok((stream, addr)) = tcp_listener.accept().await {
         info!("Connection Incoming from {}", addr);
         tokio::spawn(async move {
-            handle(stream, addr).await
+            let tcp = Tcp::from((stream, addr));
+            handle(tcp).await
                 .map(|status| info!("Connection terminated {} status {:?}\n\n", addr, status))
                 .map_err(|e| error!("Connection terminated {} status {:?}\n\n", addr, e))
         });
