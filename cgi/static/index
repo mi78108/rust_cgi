@@ -3,6 +3,15 @@
 require_relative '../_init_'
 require 'mime/types'
 
+
+Q.map(:GET, "/upload") do |_, resp|
+  resp.body("<form action='/static/upload' method='POST' enctype='multipart/form-data'><input name='file' type='file'><button type='submit'>OK</button></form>").html.finally
+end
+Q.map(:POST, "/upload") do |req, resp|
+  #resp.body(req.body_form_data.to_s).html.finally
+  resp.body(STDIN.read).html.finally
+end
+
 Q.map(:GET, %r{^/path/(.*)$}) do |req, resp|
   file_path = req.match_1
   resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
@@ -26,3 +35,4 @@ Q.map(:GET, %r{^/(.*)$}) do |req, resp|
   resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
   Q.fail_404 "File Not found File #{file_path}"
 end
+

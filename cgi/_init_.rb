@@ -1,13 +1,16 @@
 require 'uri'
 require 'json'
 require "pathname"
+require_relative "_ext_"
 
 class Req
   def initialize(path = Q::REQ_PATH)
     @path = path
     @method = Q::REQ_METHOD
-    @args = ENV.keys.filter {|k| k =~ /req_argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
-    @params = ENV['req_params'] ? URI::decode_uri_component(ENV['req_params']).split('&').map {|v| v.split('=')[1]} : Array.new 
+    @args = ENV.keys.filter {|k| k =~ /Req_Argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
+    @params = ENV['Req_Params'] ? URI::decode_uri_component(ENV['Req_Params']).split('&').map {|v| v.split('=')[1]} : Array.new 
+    @body_type = ENV['content-type'] ? ENV['content-type'] : ''
+    @body_length = ENV['content-length'] ? ENV['content-length'].to_i : 0
   end
 
   def header(key)
@@ -15,7 +18,7 @@ class Req
     return nil
   end
   def param(key)
-    return URI::decode_uri_component(header "req_param_#{key}")
+    return URI::decode_uri_component(header "Req_Param_#{key}")
   end
   def param_or(key, val)
     value = param(key)
@@ -27,6 +30,10 @@ class Req
   def match(val)
     return nil if ENV['REQ_URI_MATCH'].nil?
     return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i] 
+  end
+
+  def body(length = @body_length )
+    STDIN.read length
   end
 
   def method_missing(method_name, *args, &block)
