@@ -74,6 +74,10 @@ class Rsp
     @header['Content-Type'] = val
     return self
   end
+  def page val
+    @body = File.read(val)
+    return self
+  end
   def ok body
     @code = 200
     @body = body
