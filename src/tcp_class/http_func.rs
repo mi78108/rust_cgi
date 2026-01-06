@@ -9,17 +9,66 @@ use std::sync::atomic::AtomicUsize;
 use std::thread::current;
 
 #[derive(Debug)]
+<<<<<<< Updated upstream
 pub struct Http {
     pub base_on: Tcp,
     req_path: String,
     req_method: String,
     req_version: String,
     req_buffer_size: usize,
+=======
+pub struct Http<'a> {
+    pub base_on: &'a mut Tcp,
+    // req_path: String,
+    // req_method: String,
+    // req_version: String,
+    // req_buffer_size: usize,
+>>>>>>> Stashed changes
     req_content_length: usize,
     req_content_readed: AtomicUsize,
     req_header: HashMap<String, String>,
 }
 
+<<<<<<< Updated upstream
+=======
+impl<'a> Req for Http<'a> {
+    async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
+        if self.req_content_length > 0
+            && self
+                .req_content_read
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == self.req_content_length
+        {
+            // 表示读取正常 但是数据结束
+            return Ok(None);
+        }
+        self.base_on.read(data).await.and_then(|len_opt| {
+            if let Some(len) = len_opt {
+                self.req_content_read.store(
+                    self.req_content_read
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        + len,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+            }
+            Ok(len_opt)
+        })
+    }
+
+    async fn write(&self, data: &[u8]) -> Result<usize, Error> {
+        self.base_on.write(data).await
+    }
+
+    async fn close(&self) -> Result<(), Error> {
+        self.base_on.close().await
+    }
+
+    fn env(&self) -> &HashMap<String, String> {
+        &self.req_header
+    }
+}
+
+>>>>>>> Stashed changes
 fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     let mut result = Vec::new();
     let mut script_file_path = PathBuf::from(format!("{}{}", CGI_DIR.get().unwrap(), req_path));
@@ -68,6 +117,7 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     }
 }
 
+<<<<<<< Updated upstream
 impl Req for Http {
     fn read(&self, data: &mut [u8]) -> Result<Option<usize>, std::io::Error> {
         if self.req_content_length > 0
@@ -79,6 +129,40 @@ impl Req for Http {
             //return Err(Error::from(ErrorKind::UnexpectedEof));
             // 表示读取正常 但是数据结束
             return Ok(None);
+=======
+impl<'a> Handle<'a, Tcp> for Http<'a> {
+    // fn name() -> &'static str {
+    //     "HTTP"
+    // }
+
+    async fn matches(stream: &Tcp) -> bool {
+        const HTTP_METHODS: &[&[u8]] = &[
+            b"GET ",
+            b"POST ",
+            b"PUT ",
+            b"DELETE ",
+            b"PATCH ",
+            b"HEAD ",
+            b"OPTIONS ",
+            b"CONNECT ",
+        ];
+        if {
+            let mut buffer = [0u8; 16];
+            if let Ok(len) = stream
+                .req_reader
+                .lock()
+                .await
+                .get_mut()
+                .peek(&mut buffer)
+                .await
+            {
+                len > 0 && HTTP_METHODS.iter().any(|&v| buffer.starts_with(v))
+            } else {
+                false
+            }
+        } {
+            return true;
+>>>>>>> Stashed changes
         }
         self.base_on.read(data).and_then(|len_opt| {
             if let Some(len) = len_opt {
@@ -93,6 +177,7 @@ impl Req for Http {
         })
     }
 
+<<<<<<< Updated upstream
     fn write(&self, data: &[u8]) -> Result<usize, std::io::Error> {
         self.base_on.write(data)
     }
@@ -142,6 +227,11 @@ impl From<Tcp> for Http {
             req_content_readed: AtomicUsize::new(0),
         };
 
+=======
+    async fn handle(stream: &'a mut Tcp) -> Result<Self, Error> {
+        let peer_ip = stream.req_header.get("Req_Peer_Ip").unwrap().clone();
+        let peer_port = stream.req_header.get("Req_Peer_Port").unwrap().clone();
+>>>>>>> Stashed changes
         let mut buffer = String::new();
         if let Ok(_size) = http
             .base_on

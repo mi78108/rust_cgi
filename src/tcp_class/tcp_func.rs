@@ -61,3 +61,55 @@ impl From<TcpStream> for Tcp {
         }
     }
 }
+<<<<<<< Updated upstream
+=======
+
+impl From<(TcpStream, SocketAddr)> for Tcp {
+    fn from((stream, addr): (TcpStream, SocketAddr)) -> Self {
+        {
+            let (reader, writer) = stream.into_split();
+            Tcp {
+                req_header: HashMap::from([
+                    ("Req_Script_Name".into(), "/tcp_handle".to_string()),
+                    ("Req_Peer_Ip".into(), addr.ip().to_string()),
+                    ("Req_Peer_Port".into(), addr.port().to_string()),
+                    (
+                        "Req_Buffer_Size".into(),
+                        OPT.get().unwrap().buffer.to_string(),
+                    ),
+                ]),
+                req_reader: Mutex::new(BufReader::new(reader)),
+                req_writer: Mutex::new(BufWriter::new(writer)),
+                is_closed: AtomicBool::new(false),
+            }
+        }
+    }
+}
+
+pub async fn handle(stream: Tcp) -> Result<bool, Error> {
+    // let mut tcp = stream;
+    // if let Ok(http) = Http::handle(&mut tcp).await {
+    //     let mut hq = http;
+    //     if let Ok(ws) = Websocket::handle(&mut hq).await {
+    //         call_script(ws).await;
+    //     }
+    // };
+
+    Ok(true)
+    // Ok(match stream {
+    //     // stream if FileSync::matches().await => {
+    //     //     let file = FileSync::reader(&stream).await?;
+    //     //     call_bridge(file, stream).await
+    //     // }
+    //     // stream if Http::matches(&stream).await => {
+    //     //     let http = Http::handle(stream).await?;
+    //     //     if Websocket::matches(&http).await {
+    //     //         call_script(Websocket::handle(http).await?).await
+    //     //     } else {
+    //     //         call_script(http).await
+    //     //     }
+    //     // }
+    //     _ => call_script(stream).await,
+    // })
+}
+>>>>>>> Stashed changes
