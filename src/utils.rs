@@ -3,6 +3,11 @@ pub mod local_log {
     use std::sync::atomic::AtomicU8;
     pub static LOG_LEVEL: OnceLock<AtomicU8> = OnceLock::new();
 
+
+    // #[track_caller]
+    // pub fn get_caller_function_name() -> String {
+    //     std::panic::Location::caller().to_string()
+    // }
     #[macro_export]
     macro_rules! _log_common {
         ($level:expr, $color:expr, $threshold:expr, $fmt:literal $(, $args:expr)*) => {{
@@ -16,7 +21,7 @@ pub mod local_log {
                     let now = Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string();
 
                     let task_id = try_id().map(|id| id.to_string()).unwrap_or_else(|| "_".to_string());
-
+                    
                     let log_content = format!($fmt $(, $args)*);
 
                     eprintln!(
