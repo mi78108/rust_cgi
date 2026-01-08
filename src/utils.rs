@@ -36,8 +36,8 @@ pub mod local_log {
                     let task_id = try_id().map(|id| id.to_string()).unwrap_or_else(|| "_".to_string());
 
                     let log_content = format!($fmt $(, $args)*);
-                    if let Some(writer) =  crate::utils::local_log::LOG_SENDER.get() {
-                       let _ = writer.send(format!(
+                    if let Some(sender) = crate::utils::local_log::LOG_SENDER.get() {
+                       let _ = sender.send(format!(
                             "[{}] [{}] [{}:{:3}] <{:?}:{}-> {}",
                             now,
                             $level.color($color),
