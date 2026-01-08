@@ -1,8 +1,21 @@
 pub mod local_log {
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicU8;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::thread::{self};
     pub static LOG_LEVEL: OnceLock<AtomicU8> = OnceLock::new();
+    pub static LOG_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 
+    pub fn logger_init(level:u8) {
+        LOG_LEVEL.get_or_init(|| AtomicU8::new(level));
+        let (send, recv): (Sender<String>, Receiver<String>) = channel();
+        LOG_SENDER.get_or_init(|| send);
+        thread::spawn(move || {
+            while let Ok(log) = recv.recv() {
+                eprintln!("{}", log);
+            }
+        });
+    }
 
     // #[track_caller]
     // pub fn get_caller_function_name() -> String {
@@ -21,19 +34,20 @@ pub mod local_log {
                     let now = Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string();
 
                     let task_id = try_id().map(|id| id.to_string()).unwrap_or_else(|| "_".to_string());
-                    
-                    let log_content = format!($fmt $(, $args)*);
 
-                    eprintln!(
-                        "[{}] [{}] [{}:{:3}] <{:?}:{}-> {}",
-                        now,
-                        $level.color($color),
-                        module_path!(),
-                        line!(),
-                        current().id(),
-                        task_id,
-                        log_content
-                    )
+                    let log_content = format!($fmt $(, $args)*);
+                    if let Some(writer) =  crate::utils::local_log::LOG_SENDER.get() {
+                       let _ = writer.send(format!(
+                            "[{}] [{}] [{}:{:3}] <{:?}:{}-> {}",
+                            now,
+                            $level.color($color),
+                            module_path!(),
+                            line!(),
+                            current().id(),
+                            task_id,
+                            log_content
+                        )).map_err(|e| eprintln!("{}",e));
+                    }
                 }
             };
         }}
