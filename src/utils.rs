@@ -6,10 +6,10 @@ pub mod local_log {
     pub static LOG_LEVEL: OnceLock<AtomicU8> = OnceLock::new();
     pub static LOG_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 
-    pub fn logger_init(level:u8) {
-        LOG_LEVEL.get_or_init(|| AtomicU8::new(level));
+    pub fn logger_init(level: u8) {
         let (send, recv): (Sender<String>, Receiver<String>) = channel();
         LOG_SENDER.get_or_init(|| send);
+        LOG_LEVEL.get_or_init(|| AtomicU8::new(level));
         thread::spawn(move || {
             while let Ok(log) = recv.recv() {
                 eprintln!("{}", log);
@@ -17,10 +17,6 @@ pub mod local_log {
         });
     }
 
-    // #[track_caller]
-    // pub fn get_caller_function_name() -> String {
-    //     std::panic::Location::caller().to_string()
-    // }
     #[macro_export]
     macro_rules! _log_common {
         ($level:expr, $color:expr, $threshold:expr, $fmt:literal $(, $args:expr)*) => {{
@@ -37,7 +33,7 @@ pub mod local_log {
 
                     let log_content = format!($fmt $(, $args)*);
                     if let Some(sender) = crate::utils::local_log::LOG_SENDER.get() {
-                       let _ = sender.send(format!(
+                       if let Err(e) = sender.send(format!(
                             "[{}] [{}] [{}:{:3}] <{:?}:{}-> {}",
                             now,
                             $level.color($color),
@@ -46,7 +42,9 @@ pub mod local_log {
                             current().id(),
                             task_id,
                             log_content
-                        )).map_err(|e| eprintln!("{}",e));
+                        )) {
+                            eprintln!("{}",e);
+                        }
                     }
                 }
             };
