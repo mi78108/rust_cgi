@@ -7,7 +7,7 @@ mod tcp_class;
 mod utils;
 
 use crate::tcp_class::{Tcp, handle};
-use crate::utils::local_log::LOG_LEVEL;
+use crate::utils::local_log::{logger_init, LOG_LEVEL};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -46,7 +46,8 @@ async fn main() {
             env::current_dir().unwrap().join(&opt.path)
         }
     });
-    LOG_LEVEL.get_or_init(|| AtomicU8::new(opt.verbose));
+    
+    logger_init(opt.verbose);
 
     info!(
         "Starting server on {} script in {} opt: {:?}",
@@ -64,7 +65,8 @@ async fn main() {
         info!("Connection Incoming from {}", addr);
         tokio::spawn(async move {
             let tcp = Tcp::from((stream, addr));
-            handle(tcp).await
+            handle(tcp)
+                .await
                 .map(|status| info!("Connection terminated {} status {:?}\n\n", addr, status))
                 .map_err(|e| error!("Connection terminated {} status {:?}\n\n", addr, e))
         });
