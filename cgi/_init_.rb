@@ -8,7 +8,7 @@ class Req
     @path = path
     @method = Q::REQ_METHOD
     @args = ENV.keys.filter {|k| k =~ /Req_Argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
-    @params = ENV['Req_Params'] ? URI::decode_uri_component(ENV['Req_Params']).split('&').map {|v| v.split('=')[1]} : Array.new 
+    @params = ENV['Req_Params'] ? URI::decode_uri_component(ENV['Req_Params']).split('&').map {|v| v.split('=')[1]} : Array.new
     @body_type = ENV['content-type'] ? ENV['content-type'] : ''
     @body_length = ENV['content-length'] ? ENV['content-length'].to_i : 0
   end
@@ -22,14 +22,14 @@ class Req
   end
   def param_or(key, val)
     value = param(key)
-    value.nil? ? val : value 
+    value.nil? ? val : value
   end
   def argv(val)
     return @args[val.to_i]
   end
   def match(val)
     return nil if ENV['REQ_URI_MATCH'].nil?
-    return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i] 
+    return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i]
   end
 
    def body(length = @body_length)
@@ -115,7 +115,7 @@ class Rsp
       Q.instance_variables.each do |name|
         instance_variable_set name, Q.instance_variable_get(name)
       end
-      
+
       Q.log "instance_variables:", instance_variables
       Q.log "instance_variables:", self.binding.instance_variables
       Q.log "local_variables:", block.binding.local_variables
@@ -207,7 +207,7 @@ module Q
         Q.call_block(&block)
         return Q
       end
-      for match in path_matches do                
+      for match in path_matches do
         match_result = case match
                        when String then match == map_path
                        when Regexp then (match_data = match.match(map_path)) && (ENV['REQ_URI_MATCH'] = match_data.to_a.to_json; true)
@@ -220,15 +220,16 @@ module Q
           return Q
         end
       end
+      Q.log "unHandle path #{map_path}"
       return Q
     end
-    Q.log "unHandle #{map_path}"
+    Q.log "unHandle method #{map_path}"
     return Q
-  end 
+  end
 
   def Q.log(*info)
     info.each do |v|
-      STDERR.puts ">>[#{Process.pid}]> LOG <#{caller.first}> INFO: #{v}"
+      STDERR.puts ">>[#{Process.pid}]> LOG <#{caller.last}> INFO: #{v}"
       STDERR.flush
     end
   end

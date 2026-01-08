@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::env;
-use std::sync::atomic::AtomicU8;
 use std::{path::PathBuf, sync::OnceLock};
 use tokio::net::TcpListener;
 mod tcp_class;
