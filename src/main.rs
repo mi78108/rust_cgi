@@ -1,12 +1,13 @@
 use clap::Parser;
 use std::env;
 use std::{path::PathBuf, sync::OnceLock};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UdpSocket};
+use tokio::stream;
 mod tcp_class;
 mod utils;
 
 use crate::tcp_class::{Tcp, handle};
-use crate::utils::local_log::{logger_init, LOG_LEVEL};
+use crate::utils::local_log::{LOG_LEVEL, logger_init};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -15,6 +16,8 @@ struct Opt {
     path: String,
     #[arg(short = 'b', long, required = false, default_value = "127.0.0.1")]
     bind: String,
+    #[arg(short = 'u', long, required = false, default_value = "3000")]
+    udp: Option<u32>,
     #[arg(short = 'p', long, required = false, default_value = "3000")]
     port: u32,
     #[arg(short = 't', long, required = false, default_value = "2")]
@@ -45,7 +48,7 @@ async fn main() {
             env::current_dir().unwrap().join(&opt.path)
         }
     });
-    
+
     logger_init(opt.verbose);
 
     info!(
@@ -55,11 +58,18 @@ async fn main() {
         opt
     );
 
-    OPT.get_or_init(|| opt);
+    if let Some(port) = opt.udp {
+        let udp_listener = UdpSocket::bind(format!("{}:{}", opt.bind, port))
+            .await
+            .expect(&format!("Udp Bind {}:{} error", opt.bind, port));
+        udp_listener.set_broadcast(true).unwrap();
+    }
 
     let tcp_listener = TcpListener::bind(&addr_basic)
         .await
         .expect(&format!("bind {} erro", addr_basic));
+
+    OPT.get_or_init(|| opt);
     while let Ok((stream, addr)) = tcp_listener.accept().await {
         info!("Connection Incoming from {}", addr);
         tokio::spawn(async move {
