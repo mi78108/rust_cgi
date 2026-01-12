@@ -2,7 +2,6 @@ use clap::Parser;
 use std::env;
 use std::{path::PathBuf, sync::OnceLock};
 use tokio::net::{TcpListener, UdpSocket};
-use tokio::stream;
 mod tcp_class;
 mod utils;
 
@@ -16,8 +15,8 @@ struct Opt {
     path: String,
     #[arg(short = 'b', long, required = false, default_value = "127.0.0.1")]
     bind: String,
-    #[arg(short = 'u', long, required = false, default_value = "3000")]
-    udp: Option<u32>,
+    #[arg(short = 'u', long, required = false, default_value = "false")]
+    udp: bool,
     #[arg(short = 'p', long, required = false, default_value = "3000")]
     port: u32,
     #[arg(short = 't', long, required = false, default_value = "2")]
@@ -58,18 +57,27 @@ async fn main() {
         opt
     );
 
-    if let Some(port) = opt.udp {
-        let udp_listener = UdpSocket::bind(format!("{}:{}", opt.bind, port))
+    if opt.udp {
+        let udp_listener = UdpSocket::bind(&addr_basic)
             .await
-            .expect(&format!("Udp Bind {}:{} error", opt.bind, port));
-        udp_listener.set_broadcast(true).unwrap();
+            .expect(&format!("Udp Bind {} erro", &addr_basic));
+        udp_listener
+            .set_broadcast(true)
+            .expect(&"Bind Broadcast erro");
+        let mut buffer = vec![0u8; opt.buffer as usize];
+        tokio::spawn(async move {
+            while let Ok((len, addr)) = udp_listener.recv_from(&mut buffer).await {
+                debug!("recv {} from {:?}", len, addr);
+            }
+        });
     }
 
     let tcp_listener = TcpListener::bind(&addr_basic)
         .await
-        .expect(&format!("bind {} erro", addr_basic));
+        .expect(&format!("Tcp Bind {} erro", addr_basic));
 
-    OPT.get_or_init(|| opt);
+    OPT.set(opt).unwrap();
+    
     while let Ok((stream, addr)) = tcp_listener.accept().await {
         info!("Connection Incoming from {}", addr);
         tokio::spawn(async move {
