@@ -67,7 +67,7 @@ async fn main() {
         let mut buffer = vec![0u8; opt.buffer as usize];
         tokio::spawn(async move {
             while let Ok((len, addr)) = udp_listener.recv_from(&mut buffer).await {
-                debug!("recv {} from {:?}", len, addr);
+                debug!("recv {} from {:?} :{}", len, addr , String::from_utf8_lossy(&buffer[..len]));
             }
         });
     }

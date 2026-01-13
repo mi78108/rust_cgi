@@ -10,7 +10,11 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::{OPT, error, tcp_class::Tcp, utils::core::Req};
+use crate::{
+    OPT, error,
+    tcp_class::{Tcp, http_func::Http},
+    utils::core::Req,
+};
 
 #[derive(Debug)]
 pub struct FileSync {
@@ -63,6 +67,9 @@ impl FileSync {
     // pub async fn handle() -> Result<Self, Error> {
     //     todo!()
     // }
+    // pub async fn parse_from(req: &Http) -> Result<Self, Error> {
+    //     None
+    // }
 
     pub async fn reader(req: &Tcp) -> Result<Self, Error> {
         let mut file_key = String::new();
@@ -82,9 +89,10 @@ impl FileSync {
                     })
                 }
                 if keys.is_empty() && values.len() > 0 {
-                    return HashMap::from([
-                        ("default".to_string(), values.get(0).unwrap().to_string())
-                    ]);
+                    return HashMap::from([(
+                        "default".to_string(),
+                        values.get(0).unwrap().to_string(),
+                    )]);
                 }
                 keys.into_iter()
                     .zip(values.into_iter())
@@ -103,14 +111,14 @@ impl FileSync {
             })
             .and_then(|map| {
                 map.get(file_key.trim())
-                .or_else(|| map.get("default"))
-                .map(PathBuf::from)
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidInput,
-                        format!("File Key '{}' Not Exist", file_key),
-                    )
-                })
+                    .or_else(|| map.get("default"))
+                    .map(PathBuf::from)
+                    .ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("File Key '{}' Not Exist", file_key),
+                        )
+                    })
             })
             .and_then(|file_path| {
                 if !file_path.exists() {
