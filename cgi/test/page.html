@@ -1,0 +1,39 @@
+<html>
+    <head>
+        <title>测试页面</title>
+    </head>
+    <body>
+        <div>
+            <p>渲染功能测试</p>
+            <p>render 1 通过块设置具名对象: #{v}</p>
+            <p>render 2 局部变量 传递块时开启捕获: #{aaa}</p>
+            <p>render 3 实例变量 默认开启捕获: #{@bbb}</p>
+            <p>render 4 可执行语句 默认开启: #{Time.now}</p>
+            <p>render 5 默认实例变量 默认开启: #{ @header }</p>
+        </div>
+        <br>
+        <div>
+            <p>WEBSOCKET测试</p>
+            <p id="ws"></p>
+        </div>
+    </body>
+    <script>
+      let ws = new WebSocket("/test");
+      let wsd = document.getElementById("ws")
+      ws.onopen = (ev)=>{
+        wsd.innerHTML = "OK"
+      }
+      ws.onmessage = (ev) => {
+        wsd.innerHTML = ev.data
+      }
+      ws.onclose = (ev) => {
+        wsd.innerHTML = "CLOSE"
+      }
+      ws.onerror = (ev) =>{
+        wsd.innerHTML = "ERRO"
+      }
+      setInterval((ev)=>{
+        ws.send("ping")
+      },1000);
+    </script>
+</html>
