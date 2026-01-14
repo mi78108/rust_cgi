@@ -183,7 +183,7 @@ pub mod core {
             }
 
             let mut cmd = Command::new(script_file)
-                .env_clear()
+                //.env_clear()
                 .envs(req_env)
                 .current_dir(SCRIPT_DIR.get().unwrap())
                 .stdin(std::process::Stdio::piped())
