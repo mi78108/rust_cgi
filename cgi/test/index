@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map :GET do |_, resp|
+  aaa = 123
+  if File.exist?('./page.html')
+    @bbb = 789
+    resp.body(File.read('./page.html')).html.render do |v|
+      v.title = 'Test Page'
+    end.finally
+  else
+    resp.fail_404 ENV.to_a.to_json
+  end
+end
+
+Q.map :WEBSOCKET do |_|
+  Q.recv do |val|
+    Q.write "#{val}_#{Time.now}"
+  end
+end
+
+Q.map do |_, r|
+  r.fail_404 ENV.to_a.to_json
+end
