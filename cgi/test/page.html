@@ -16,6 +16,11 @@
             <p>WEBSOCKET测试</p>
             <p id="ws"></p>
         </div>
+        <br>
+        <div>
+            <p>环境变量测试</p>
+            <code>#{ENV.to_a.to_json}</code>
+        </div>
     </body>
     <script>
       let ws = new WebSocket("/test");
