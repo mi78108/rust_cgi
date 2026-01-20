@@ -307,13 +307,10 @@ impl Handle<Http> for Websocket {
                 "HTTP/1.1 101 SWITCH\r\nServer: Rust Cgi\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {}\r\n\r\n",
                 sec_websocket_accept
             );
-            debug!("flush aa");
             if stream.write(resp.as_bytes()).await.is_ok() {
                 stream.base_on.req_writer.lock().await.flush().await?;
-                debug!("flush ");
             }
         }
-        debug!("t 3");
         Ok(Websocket {
             base_on: stream,
             processed: AtomicUsize::new(0),

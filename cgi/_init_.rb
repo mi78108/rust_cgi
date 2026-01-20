@@ -102,9 +102,9 @@ class Rsp
     return self
   end
   def render(v = {},  &block)
+    ctx = binding
     if block_given?
       Q.make_hkv v
-      ctx = binding
       instance_exec(v, &block)
       block.parameters.map { |_, name| name }.compact.each do |name|
         ctx.local_variable_set name, v
@@ -112,17 +112,17 @@ class Rsp
       block.binding.local_variables.each do |name|
         ctx.local_variable_set name, block.binding.local_variable_get(name)
       end
-      Q.instance_variables.each do |name|
-        instance_variable_set name, Q.instance_variable_get(name)
-      end
 
-      Q.log "instance_variables:", instance_variables
-      Q.log "instance_variables:", self.binding.instance_variables
-      Q.log "local_variables:", block.binding.local_variables
-      Q.log "local_variables:", Q.instance_variables
-      Q.log "local_variables:", instance_variables
-      Q.log "parameters:", block.parameters
+      Q.log "local_variables_block:", block.binding.local_variables
+      Q.log "parameters_block:", block.parameters
     end
+    Q.log "local_variables_Q:", Q.instance_variables
+    Q.log "local_variables_resp:", instance_variables
+    Q.instance_variables.each do |name|
+      instance_variable_set name, Q.instance_variable_get(name)
+    end
+    Q.log "instance_variables_self:", self.binding.instance_variables
+    Q.log "instance_variables_resp_final:", instance_variables
 
     body( @body.gsub(%r|[@#]{(?<code>.*?)}|) do |match|
       Q.log "template matched #{match}"
@@ -324,14 +324,14 @@ module Q
   end
 
 
-  def Q.recv(length)
+  def Q.read(length)
     # 注意阻塞，会持续到EOF
     data = length&.positive? ? STDIN.read(length) : STDIN.read
     yield(data) if block_given?
     data
   end
 
-  def Q.on_data(uio = STDIN)
+  def Q.recv(uio = STDIN)
     loop do
       begin
         result = uio.read_nonblock(Q::BUFFER_SIZE)

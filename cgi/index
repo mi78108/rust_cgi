@@ -2,6 +2,14 @@
 
 require_relative './_init_'
 
+Q.map :GET do |_, resp|
+  if File.exist?('./page.html')
+    resp.body(File.read('./page.html')).html.render.finally
+  else
+    resp.fail_404 ENV.to_a.to_json
+  end
+end
+
 Q.map do |_, r|
   r.fail_404 ENV.to_a.to_json
 end
