@@ -10,11 +10,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::{
-    OPT, error,
-    tcp_class::{Tcp, http_func::Http},
-    utils::core::Req,
-};
+use crate::{OPT, error, tcp_class::Tcp, utils::core::Req};
 
 #[derive(Debug)]
 pub struct FileSync {

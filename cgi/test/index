@@ -1,12 +1,13 @@
 #!/usr/bin/env ruby
 
 require_relative '../_init_'
+html_page = './page.html'
 
 Q.map :GET do |_, resp|
   aaa = 123
-  if File.exist?('./page.html')
+  if File.readable?(html_page)
     @bbb = 789
-    resp.body(File.read('./page.html')).html.render do |v|
+    resp.body(File.read(html_page)).html.render do |v|
       v.title = 'Test Page'
     end.finally
   else

@@ -87,7 +87,7 @@ pub mod core {
         sync::Mutex,
     };
 
-    use crate::{OPT, SCRIPT_DIR, debug, error, info, tcp_class::FileSync};
+    use crate::{OPT, SCRIPT_DIR, debug, error, info};
 
     pub trait Req: Sync + Send + 'static {
         fn read(
@@ -209,8 +209,8 @@ pub mod core {
             if let Some(key) = &opt.key {
                 if let Some(k) = req.env().get("Req_Script_Name") {
                     if key.contains(k) {
-                       // let flsc = FileSync::matches().await;
-                       // return call_bridge(req, flsc).await;
+                        // let flsc = FileSync::matches().await;
+                        // return call_bridge(req, flsc).await;
                     }
                 }
             }
