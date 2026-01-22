@@ -36,7 +36,8 @@ struct Opt {
 pub static SCRIPT_DIR: OnceLock<PathBuf> = OnceLock::new();
 static OPT: OnceLock<Opt> = OnceLock::new();
 
-#[tokio::main(flavor = "current_thread")]
+//#[tokio::main(flavor = "current_thread")]
+#[tokio::main()]
 async fn main() {
     let opt = Opt::parse();
     let addr_basic = format!("{}:{}", opt.bind, opt.port);

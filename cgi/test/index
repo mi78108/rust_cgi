@@ -15,9 +15,16 @@ Q.map :GET do |_, resp|
   end
 end
 
+require 'json'
 Q.map :WEBSOCKET do |_|
+  Q.notify(4444) do |val, id|
+    Q.log("============消息#{id} SELF #{Process.pid}==========")
+    Q.write val
+  end
+
   Q.recv do |val|
-    Q.write "#{val}_#{Time.now}"
+    Q.notify val
+    Q.write val
   end
 end
 

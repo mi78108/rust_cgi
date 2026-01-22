@@ -346,6 +346,43 @@ module Q
     end
   end
 
+  def Q.notify(id, only=true)
+    if not @udp_server.nil? and not block_given?
+      return @udp_server.send({:f=>Process.pid, :c=>id}.to_json, 0, '224.0.0.1', @udp_id) if only
+      return @udp_server.send(id, 0, '224.0.0.1', @udp_id)
+    end
+    if @udp_server.nil?
+      require 'socket'
+      @udp_id = id
+      @udp_server = UDPSocket.new
+      @udp_server.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
+      @udp_server.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEPORT, true)
+
+      @udp_server.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, IPAddr.new('224.0.0.1').hton + IPAddr.new('127.0.0.1').hton)
+      @udp_server.bind('224.0.0.1', @udp_id)
+    end
+    if block_given?
+      @udp_server_thread = Thread::new do
+        loop do
+          body, addr = @udp_server.recvfrom(65507);
+          #Q.log "recv #{body} from #{addr}"
+          if only
+            content = JSON.parse(body)
+            next if Process.pid.to_s.eql? content['f'].to_s
+            yield(content['c'], content['f'])
+          else
+            yield body, addr
+          end
+        end
+      end
+      Q.on_close do
+        @udp_server_thread.kill
+        @udp_server.close
+        Q.log "#{@udp_id} Shutdown Notify"
+      end
+    end
+  end
+
   def Q.on_close(&cbk)
     Q::CBK_ONCLOSE.push(cbk)
   end
@@ -357,7 +394,7 @@ BEGIN{
 }
 
 END {
-  STDERR.puts ">>[#{Process.pid}]> **************Process #{$$} END*************"
+  STDERR.puts ">>[#{Process.pid}]> **************Process #{$$} END***************"
   Q::CBK_ONCLOSE.each_with_index do |cbk, index|
     Q.log "CBK_ONCLOSE [#{index + 1}] called ..."
     cbk && cbk.call()
