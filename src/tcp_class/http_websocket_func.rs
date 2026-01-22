@@ -254,6 +254,9 @@ impl Req for Websocket {
                     self.processed.fetch_add(len, Ordering::Relaxed);
                     self.remainder.fetch_sub(len, Ordering::Relaxed);
                 }
+                if let None = len_opt {
+                    return Ok(Some(0));
+                }
                 Ok(len_opt)
             })
         }

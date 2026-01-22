@@ -243,8 +243,9 @@ pub mod core {
             while let Ok(Some(read_len)) = reader_src.read(&mut rst).await {
                 debug!("Req src read {} bytes", read_len);
                 if read_len == 0 {
-                    debug!("Req src read ZERO will closed");
-                    break;
+                    debug!("Req src read ZERO ");
+                    continue;
+                    //break;
                 }
                 let mut remaining = &rst[0..read_len];
                 while remaining.len() > 0 {
@@ -264,8 +265,8 @@ pub mod core {
                 }
             }
             //
-            writer_dst.close().await.unwrap();
             debug!("Req src read end");
+            writer_dst.close().await.unwrap();
         });
 
         let dst = tokio::spawn(async move {
@@ -281,8 +282,9 @@ pub mod core {
             while let Ok(Some(read_len)) = reader_dst.read(&mut rst).await {
                 debug!("Req dst read {} bytes", read_len);
                 if read_len == 0 {
-                    debug!("Req dst read ZERO will closed");
-                    break;
+                    debug!("Req dst read ZERO ");
+                    continue;
+                    //break;
                 }
                 let mut remaining = &rst[0..read_len];
                 while remaining.len() > 0 {
@@ -302,8 +304,8 @@ pub mod core {
                 }
             }
             //
-            writer_src.close().await.unwrap();
             debug!("Req dst read end");
+            writer_src.close().await.unwrap();
         });
 
         let (src_rst, dst_rst) = tokio::join!(src, dst);
