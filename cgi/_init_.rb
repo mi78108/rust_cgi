@@ -347,9 +347,11 @@ module Q
   end
 
   def Q.notify(id, only=true)
+    member = '224.0.0.1'
     if not @udp_server.nil? and not block_given?
-      return @udp_server.send({:f=>Process.pid, :c=>id}.to_json, 0, '224.0.0.1', @udp_id) if only
-      return @udp_server.send(id, 0, '224.0.0.1', @udp_id)
+      return @udp_server.send({:f=>Process.pid, :c=>id}.to_json, 0, member, @udp_id) if only
+      
+      return @udp_server.send(id, 0, member, @udp_id)
     end
     if @udp_server.nil?
       require 'socket'
@@ -358,8 +360,8 @@ module Q
       @udp_server.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
       @udp_server.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEPORT, true)
 
-      @udp_server.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, IPAddr.new('224.0.0.1').hton + IPAddr.new('127.0.0.1').hton)
-      @udp_server.bind('224.0.0.1', @udp_id)
+      @udp_server.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, IPAddr.new(member).hton + IPAddr.new('127.0.0.1').hton)
+      @udp_server.bind(member, @udp_id)
     end
     if block_given?
       @udp_server_thread = Thread::new do
@@ -369,6 +371,7 @@ module Q
           if only
             content = JSON.parse(body)
             next if Process.pid.to_s.eql? content['f'].to_s
+            
             yield(content['c'], content['f'])
           else
             yield body, addr
