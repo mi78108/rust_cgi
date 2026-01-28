@@ -7,8 +7,8 @@ class Req
   def initialize(path = Q::REQ_PATH)
     @path = path
     @method = Q::REQ_METHOD
-    @args = ENV.keys.filter {|k| k =~ /Req_Argv_\d+/ }.sort.map{ |k| URI::decode_uri_component(ENV[k]) }
-    @params = ENV['Req_Params'] ? URI::decode_uri_component(ENV['Req_Params']).split('&').map {|v| v.split('=')[1]} : Array.new
+    @args = ENV.keys.filter {|k| k =~ /Req_Argv_\d+/ }.sort.map{ |k| URI::decode_www_form_component(ENV[k]) }
+    @params = ENV['Req_Params'] ? URI::decode_www_form_component(ENV['Req_Params']).split('&').map {|v| v.split('=')[1]} : Array.new
     @body_type = ENV['content-type'] ? ENV['content-type'] : ''
     @body_length = ENV['content-length'] ? ENV['content-length'].to_i : 0
   end
@@ -18,7 +18,7 @@ class Req
     return nil
   end
   def param(key)
-    return URI::decode_uri_component(header "Req_Param_#{key}")
+    return URI::decode_www_form_component(header "Req_Param_#{key}")
   end
   def param_or(key, val)
     value = param(key)
@@ -152,9 +152,9 @@ end
 module Q
   CBK_ONCLOSE = Array.new
   BUFFER_SIZE = 10 * 1024 * 1024
-  REQ_PATH = URI::decode_uri_component(ENV['Req_Path'])
+  REQ_PATH = URI::decode_www_form_component(ENV['Req_Path'])
   REQ_BODY_METHOD = ENV['Req_Body_Method']
-  REQ_ARGV_PARAMS = URI::decode_uri_component(ENV['Req_Argv_Params'])
+  REQ_ARGV_PARAMS = URI::decode_www_form_component(ENV['Req_Argv_Params'])
   REQ_METHOD = REQ_BODY_METHOD == 'HTTP' ? ENV['Req_Method'] : ENV['Req_Body_Method']
   SCRIPT_DIR = ENV['Req_Script_Dir']
   SCRIPT_NAME = ENV['Req_Script_Name']
