@@ -1,13 +1,19 @@
 #!/usr/bin/env zsh
 
-mkdir -pv ~/.cgi
-mkdir -pv ~/.local/bin
-mkdir -pv ~/.config/systemd/user
-cp -v ./rust_cgi.service ~/.config/systemd/user
-sed -i "s/\${USERNAME}/$USER/g" ~/.config/systemd/user/rust_cgi.service
-cargo build --release
-systemctl --user stop rust_cgi.service
-cp -v ./target/release/spider ~/.local/bin/rust_cgi
-rsync -auv --delete ./cgi ~/.cgi
+BIN_NAME=target/release/spider
+mkdir -pv "${HOME}"/{.cgi,.local/bin,.config/systemd/user}
+cargo build --release && cp -v $BIN_NAME ${HOME}/.local/bin/rust_cgi
 
-systemctl --user daemon-reload
+cat > "${HOME}"/.config/systemd/user/rust_cgi.service <<EOF
+[Unit]
+Description=Rust_CGI Program
+
+[Service]
+Type=simple
+Environment="RUST_LOG=debug"
+ExecStart=${HOME}/.local/bin/spider -v -b0.0.0.0 -f${HOME}/.cgi
+
+[Install]
+WantedBy=default.target
+EOF
+echo "install finished"
