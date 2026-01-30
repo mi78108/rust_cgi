@@ -75,7 +75,7 @@ class Rsp
     return self
   end
   def page val
-    @body = File.read(val)
+    @body = File.read(val = './page.html')
     return self
   end
   def ok body
