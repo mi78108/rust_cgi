@@ -11,7 +11,15 @@
             <p>render 4 可执行语句 默认开启: #{Time.now}</p>
             <p>render 5 默认实例变量 默认开启: #{ @header }</p>
         </div>
-        <br />
+        <div>
+            <form action="/test/test" method="post" enctype="multipart/form-data">
+                <input type="text" name="text_a">
+                <input type="file" name="file_a">
+                <textarea name="textarea_a"></textarea>
+                <button type="submit">提交</button>
+            </form>
+        </div>
+        <br/>
         <div>
             <p>WEBSOCKET测试</p>
             <p id="ws">

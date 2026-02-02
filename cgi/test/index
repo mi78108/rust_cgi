@@ -7,12 +7,26 @@ Q.map :GET do |_, resp|
   aaa = 123
   if File.readable?(html_page)
     @bbb = 789
-    resp.page(html_page).html.render do |v|
+    resp.html(html_page).render do |v|
       v.title = 'Test Page'
     end.finally
   else
     resp.fail_404 ENV.to_a.to_json
   end
+end
+
+require 'base64'
+Q.map :POST do |req, resp|
+  Q.log ">>>>>> "
+  #req.body_form_data.items.each do |v|
+  #  Q.log v.content
+  #end
+
+form = req.body_form_data.items.map do |v|
+  #{:key => v.header['name'], :value => Base64::encode64(v.content.join) }
+  {:key => v.header['name'], :value => v.content.join("\n") }
+end
+resp.ok_json form
 end
 
 require 'json'

@@ -54,6 +54,7 @@ class Rsp
   attr_accessor :header
 
   def initialize()
+    @else = false
     @code = 200
     @status = 'OK'
     @version = 'HTTP/1.0'
@@ -74,8 +75,12 @@ class Rsp
     @header['Content-Type'] = val
     return self
   end
-  def page val
-    @body = File.read(val = './page.html')
+  def file(page = './page.html')
+    if not File.readable?(page)
+      @else = true
+    else
+      @body = File.read(page)
+    end
     return self
   end
   def ok body
@@ -83,13 +88,23 @@ class Rsp
     @body = body
     return self
   end
-  def json
+  def else
+    yeild if @else and block_given?
+  return self
+  end
+  def json body
     type 'application/json; charset=utf-8'
+    (@body = body.to_json) if not body.nil?
     return self
   end
-  def html
+  def html page
     type 'text/html; charset=utf-8'
+    self.file page
     return self
+  end
+  def ok_html text
+    type 'text/html; charset=utf-8'
+    ok text
   end
   def ok_json body
     type 'application/json; charset=utf-8'
@@ -184,7 +199,7 @@ module Q
       instance_exec(Req.new, @RESP, &block) if block_given?
       # rescue StandardError => e
     rescue Exception => e
-      Q.log e
+      Q.log e.full_message
       Q.fail_500 e.to_s
     end
   end
@@ -229,7 +244,7 @@ module Q
 
   def Q.log(*info)
     info.each do |v|
-      STDERR.puts ">>[#{Process.pid}]> LOG <#{caller.last}> INFO: #{v}"
+      STDERR.puts ">>[#{Process.pid}]> LOG <#{caller(3, 1) }> INFO: #{v}"
       STDERR.flush
     end
   end
