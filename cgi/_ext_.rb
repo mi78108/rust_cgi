@@ -32,7 +32,7 @@ class Form_item
       @cbk = block.call(@header)
       if @cbk.instance_of? Proc
         loop do
-          line = STDIN.readline
+          line = STDIN.readline("\r\n")
           break if finished? line
           @cbk.call(line)
         end
@@ -40,21 +40,16 @@ class Form_item
       end
     end
 
-    @content = STDIN.each.take_while do |line|
+    @content = STDIN.each("\r\n").take_while do |line|
+      Q.log "Form Item Body Line  [#{line.inspect}]"
       not finished? line
-    end.map do |v|
-      v.rstrip
-      # if v.valid_encoding?
-      #   v.chomp
-      # else
-      #   v
-      # end
+    end.tap do |s|
+      s[-1] = s.last[0..-3]
     end
   end
 
   def finished? line
-    #line = line[0..@boundary.length]
-
+    line = line[0..@boundary.length + 4]
     return false if not line.valid_encoding?
     if line.to_s.strip.eql? ('--' + @boundary)
       return true
@@ -79,7 +74,7 @@ class Form_data
     @items = Array.new
     loop do
       Q.log "Part #{@items.size}"
-      content = STDIN.each.take_while do |line|
+      content = STDIN.each("\r\n").take_while do |line|
         not line == "\r\n"
       end
       @items.push Form_item.new @boundary.strip, content, block

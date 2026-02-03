@@ -24,9 +24,17 @@ Q.map :POST do |req, resp|
 
 form = req.body_form_data.items.map do |v|
   #{:key => v.header['name'], :value => Base64::encode64(v.content.join) }
-  {:key => v.header['name'], :value => v.content.join("\n") }
+  fn = v.header['filename']
+  if not fn.nil?
+    File.open("/tmp/#{fn}","wb+") do |f|
+      f.write(v.content.join)
+    end
+    {:key => v.header['name'], :value => fn }
+  else
+    {:key => v.header['name'], :value => v.content.join("\n") }
+  end
 end
-resp.ok_json form
+resp.ok_json form 
 end
 
 require 'json'
