@@ -2,6 +2,7 @@ use clap::Parser;
 use std::env;
 use std::{path::PathBuf, sync::OnceLock};
 use tokio::net::{TcpListener, UdpSocket};
+use tokio::runtime::Builder;
 mod tcp_class;
 mod utils;
 
@@ -37,57 +38,70 @@ pub static SCRIPT_DIR: OnceLock<PathBuf> = OnceLock::new();
 static OPT: OnceLock<Opt> = OnceLock::new();
 
 //#[tokio::main(flavor = "current_thread")]
-#[tokio::main()]
-async fn main() {
+fn main() {
     let opt = Opt::parse();
-    let addr_basic = format!("{}:{}", opt.bind, opt.port);
-    SCRIPT_DIR.get_or_init(|| {
-        if (&opt).path.is_empty() {
-            env::current_dir().unwrap()
-        } else {
-            env::current_dir().unwrap().join(&opt.path)
-        }
-    });
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(opt.thread as usize)
+        .thread_name("main-thread")
+        .thread_stack_size(2 * 1024 * 1024)
+        .build()
+        .unwrap();
 
-    logger_init(opt.verbose);
-
-    info!(
-        "Starting server on {} script in {} opt: {:?}",
-        addr_basic,
-        SCRIPT_DIR.get().unwrap().display(),
-        opt
-    );
-
-    if opt.udp {
-        let udp_listener = UdpSocket::bind(&addr_basic)
-            .await
-            .expect(&format!("Udp Bind {} erro", &addr_basic));
-        udp_listener
-            .set_broadcast(true)
-            .expect(&"Bind Broadcast erro");
-        let mut buffer = vec![0u8; opt.buffer as usize];
-        tokio::spawn(async move {
-            while let Ok((len, addr)) = udp_listener.recv_from(&mut buffer).await {
-                debug!("recv {} from {:?} :{}", len, addr , String::from_utf8_lossy(&buffer[..len]));
+    runtime.block_on(async {
+        let addr_basic = format!("{}:{}", opt.bind, opt.port);
+        SCRIPT_DIR.get_or_init(|| {
+            if (&opt).path.is_empty() {
+                env::current_dir().unwrap()
+            } else {
+                env::current_dir().unwrap().join(&opt.path)
             }
         });
-    }
 
-    let tcp_listener = TcpListener::bind(&addr_basic)
-        .await
-        .expect(&format!("Tcp Bind {} erro", addr_basic));
+        logger_init(opt.verbose);
 
-    OPT.set(opt).unwrap();
-    
-    while let Ok((stream, addr)) = tcp_listener.accept().await {
-        info!("Connection Incoming from {}", addr);
-        tokio::spawn(async move {
-            let tcp = Tcp::from((stream, addr));
-            handle(tcp)
+        info!(
+            "Starting server on {} script in {} opt: {:?}",
+            addr_basic,
+            SCRIPT_DIR.get().unwrap().display(),
+            opt
+        );
+
+        if opt.udp {
+            let udp_listener = UdpSocket::bind(&addr_basic)
                 .await
-                .map(|status| info!("Connection terminated {} status {:?}\n\n", addr, status))
-                .map_err(|e| error!("Connection terminated {} status {:?}\n\n", addr, e))
-        });
-    }
-    info!("Server terminated");
+                .expect(&format!("Udp Bind {} erro", &addr_basic));
+            udp_listener
+                .set_broadcast(true)
+                .expect(&"Bind Broadcast erro");
+            let mut buffer = vec![0u8; opt.buffer as usize];
+            tokio::spawn(async move {
+                while let Ok((len, addr)) = udp_listener.recv_from(&mut buffer).await {
+                    debug!(
+                        "recv {} from {:?} :{}",
+                        len,
+                        addr,
+                        String::from_utf8_lossy(&buffer[..len])
+                    );
+                }
+            });
+        }
+
+        let tcp_listener = TcpListener::bind(&addr_basic)
+            .await
+            .expect(&format!("Tcp Bind {} erro", addr_basic));
+
+        OPT.set(opt).unwrap();
+
+        while let Ok((stream, addr)) = tcp_listener.accept().await {
+            info!("Connection Incoming from {}", addr);
+            tokio::spawn(async move {
+                let tcp = Tcp::from((stream, addr));
+                handle(tcp)
+                    .await
+                    .map(|status| info!("Connection terminated {} status {:?}\n\n", addr, status))
+                    .map_err(|e| error!("Connection terminated {} status {:?}\n\n", addr, e))
+            });
+        }
+        info!("Server terminated");
+    });
 }
