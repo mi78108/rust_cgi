@@ -44,6 +44,7 @@ fn main() {
         .worker_threads(opt.thread as usize)
         .thread_name("main-thread")
         .thread_stack_size(2 * 1024 * 1024)
+        .enable_io()
         .build()
         .unwrap();
 
