@@ -3,6 +3,7 @@
 BIN_NAME=target/release/spider
 mkdir -pv "${HOME}"/{.cgi,.local/bin,.config/systemd/user}
 cargo build --release && cp -v $BIN_NAME ${HOME}/.local/bin/rust_cgi
+cp -vr cgi/* "${HOME}/.cgi"
 
 cat > "${HOME}"/.config/systemd/user/rust_cgi.service <<EOF
 [Unit]

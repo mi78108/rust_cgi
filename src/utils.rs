@@ -6,6 +6,13 @@ pub mod local_log {
     pub static LOG_LEVEL: OnceLock<AtomicU8> = OnceLock::new();
     pub static LOG_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 
+    struct LoggerItem {
+        pub pre:String,
+        pub act:String,
+        pub inf:String,
+        pub nxt:String,
+    }
+
     pub fn logger_init(level: u8) {
         let (send, recv): (Sender<String>, Receiver<String>) = channel();
         LOG_SENDER.get_or_init(|| send);
