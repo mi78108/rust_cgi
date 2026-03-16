@@ -33,7 +33,8 @@ class Req
   end
 
    def body(length = @body_length)
-    Q.recv(length)
+    return if @body_length == 0
+    Q.read(length)
    end
 
   def method_missing(method_name, *args, &block)
@@ -97,7 +98,7 @@ class Rsp
     (@body = body.to_json) if not body.nil?
     return self
   end
-  def html page
+  def html(page='./page.html')
     type 'text/html; charset=utf-8'
     self.file page
     return self

@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map :GET do |_, resp|
+  resp.html.render do |v|
+    v.title = 'Test Page'
+  end.finally
+end

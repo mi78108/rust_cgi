@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map :POST do |req, resp|
+  body = JSON.parse(req.body)
+  resp.json({
+    :key => body['filename'],
+    :result => `cd /tmp; wget -q https://mirrors.aliyun.com/archlinuxcn/#{body['filename']}; tar -tvf /tmp/#{body['filename'].split("/")[1]}`.split("\n")
+  }).finally
+end

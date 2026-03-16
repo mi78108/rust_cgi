@@ -1,0 +1,94 @@
+<html style="width: 100%">
+  <title>AUR PKG</title>
+  <style>
+    div {
+      border: 2px red solid;
+    }
+  </style>
+  <body style="width: 100%">
+    <div style="width: 100%">
+      <div style="text-align: center; height: 20%">
+        <input
+          id="search"
+          type="text"
+          style="width: 70%; height: 70%; margin: auto"
+        />
+      </div>
+      <div style="display: flex; height: 80%">
+        <div
+          id="list"
+          style="
+            display: flex;
+            flex-direction: column;
+            width: 20%;
+            overflow-y: auto;
+          "
+        ></div>
+        <div style="display: block; width: calc(80% - 14px)">
+          <div id="info" style="width: 100%; height: 10%"></div>
+          <div id="ext" style="width: 100%; height: 89%; overflow-y: auto;"></div>
+        </div>
+      </div>
+    </div>
+  </body>
+  <script>
+    let search = document.getElementById("search");
+    let list = document.getElementById("list");
+    let info = document.getElementById("info");
+    let ext = document.getElementById("ext");
+    search.oninput = (val) => {
+      console.log(val);
+      if (window.timer_out) {
+        clearTimeout(window.timer_out);
+      }
+      window.timer_out = setTimeout(() => {
+        fetch("pkg/search", {
+          method: "POST",
+          body: search.value,
+        })
+          .then((v) => v.json())
+          .then((v) => {
+            while (list.firstChild) {
+              list.removeChild(list.firstChild);
+            }
+            v.result.forEach((pkg) => {
+              let item = document.createElement("li");
+              item.value = pkg;
+              item.innerHTML = `${pkg.forarch} ${pkg.pkgname}`;
+              list.appendChild(item);
+              item.onmouseenter = (val) => {
+                info.innerText = JSON.stringify(pkg);
+              };
+              item.onclick = (ev) => {
+                while (ext.firstChild) {
+                  ext.removeChild(list.firstChild);
+                }
+                fetch("pkg/info", {
+                  method: "POST",
+                  body: JSON.stringify(pkg),
+                })
+                  .then((v) => v.json())
+                  .then((v) => {
+                    v.result.forEach((pkg) => {
+                      let item = document.createElement("li");
+                      item.innerHTML = `${pkg}`;
+                      ext.appendChild(item);
+                    });
+                  })
+                  .catch((e) => {
+                    while (ext.firstChild) {
+                      ext.removeChild(list.firstChild);
+                    }
+                  });
+              };
+            });
+          })
+          .catch((e) => {
+            while (list.firstChild) {
+              list.removeChild(list.firstChild);
+            }
+          });
+      }, 300);
+    };
+  </script>
+</html>

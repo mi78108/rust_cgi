@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map :POST do |req, resp|
+  body = req.body
+  resp.json({
+    :key => body,
+    :result => JSON.parse(`sqlite3 -json /tmp/pkginfo.db "select * from pkginfo where forarch in ('x86_64','any') and  pkgname like '%#{body}%';"`)
+  }).finally
+end
