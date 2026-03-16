@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gentoo Cat</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uikit@3.21.6/dist/css/uikit.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/uikit@3.21.6/dist/js/uikit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/uikit@3.21.6/dist/js/uikit-icons.min.js"></script>
+  </head>
+  <body id="body" class="uk-background-muted">
+
+    <!-- 导航栏 -->
+    <div class="uk-navbar-container uk-navbar-transparent uk-background-default uk-box-shadow-small uk-sticky" uk-sticky>
+      <div class="uk-container">
+        <nav uk-navbar>
+          <div class="uk-navbar-left">
+            <a class="uk-navbar-item uk-logo" href="#">Gentoo Cat</a>
+          </div>
+          <div class="uk-navbar-right">
+            <ul class="uk-navbar-nav">
+              <li class="uk-active"><a href="#">首页</a></li>
+              <li><a href="#">分类</a></li>
+              <li><a href="#">标签</a></li>
+              <li><a href="#">归档</a></li>
+              <li><a href="#">关于</a></li>
+            </ul>
+          </div>
+        </nav>
+      </div>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="uk-container uk-margin-large-top">
+      <div class="uk-grid" uk-grid>
+
+        <!-- 左侧文章列表 -->
+        <div class="uk-width-2-3@m">
+          <div 
+            id="list-container"
+            class="uk-background-default uk-border-rounded uk-padding">
+            <div id="content-list" class="uk-overflow-auto" style="height: 960px">
+              <!-- 动态内容 -->
+              <div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom">
+                <h3 class="uk-card-title uk-margin-remove-bottom">Gentoo CGI website</h3>
+                <p class="uk-text-meta uk-margin-small-top">2026-03-13 | Rust backend && ruby cgi</p>
+                <p class="uk-margin-small-top">new start</p>
+                <a href="#" class="uk-button uk-button-text uk-padding-remove-left">阅读全文 →</a>
+              </div>
+
+              @{v.HOT.map do |item|
+              '''<div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom">
+                <h3 class="uk-card-title uk-margin-remove-bottom">Gentoo CGI website</h3>
+                <p class="uk-text-meta uk-margin-small-top">2026-03-13 | Rust backend && ruby cgi</p>
+                <p class="uk-margin-small-top">new start</p>
+                <a href="#" class="uk-button uk-button-text uk-padding-remove-left">阅读全文 →</a>
+              </div>'''
+              end.join}
+            </div>
+
+            <!-- 加载提示 -->
+            <div id="loading" class="uk-text-center uk-margin-top uk-hidden">
+              <span uk-spinner></span> 加载中...
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 右侧侧边栏 -->
+        <div class="uk-width-1-3@m">
+          <div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom uk-text-center">
+            <div uk-icon="icon: server; ratio: 3.5"></div>
+            <h4 class="uk-margin-small-top">Gentoo Cat</h4>
+            <p class="uk-text-meta">Gentoo Linux / Rust / Ruby</p>
+          </div>
+
+          <div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom">
+            <h4 class="uk-card-title">文章分类</h4>
+            <ul class="uk-list uk-list-collapse">
+              @{v.WZFL.map do |item|
+              '<li><a href="#">' + item + '</a></li>'
+              end.join}
+            </ul>
+          </div>
+
+          <div class="uk-card uk-card-default uk-card-body uk-border-rounded">
+            <h4 class="uk-card-title">热门标签</h4>
+            <ul class="uk-list uk-list-collapse">
+              @{v.RMBQ.map do |item|
+              '<li><a href="#">' + item + '</a></li>'
+              end.join}
+            </ul>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="uk-background-default uk-border-top uk-margin-large-top uk-padding-large uk-text-center" uk-sticky>
+      <p class="uk-text-meta">© 2026 Gentoo Cat. All rights reserved.</p>
+    </footer>
+
+  </body>
+  <script>
+  document.pages = {
+    page: 1,
+    loading: false
+  }
+
+  document.req_data =  function (ev) {
+    console.log(ev)
+    document.getElementById('loading').classList.remove('uk-hidden');
+    document.pages.loading = true;
+    fetch(`/website/list?page=${document.pages.page}`, { method: 'GET'})
+      .then(resp=>resp.json())
+      .then(resp=>{
+        document.getElementById('loading').classList.add('uk-hidden');
+        document.getElementById('content-list').innerHTML += resp.map(data=>{
+          return `<div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom">
+<h3 class="uk-card-title uk-margin-remove-bottom">Linux 常用命令大全（新手必备）</h3>
+<p class="uk-text-meta uk-margin-small-top">2026-03-13 | Linux 基础</p>
+<p class="uk-margin-small-top">本文整理了 Linux 最常用的命令，包括文件管理、系统查询、网络操作、权限配置等，适合零基础快速入门。</p>
+<a href="#" class="uk-button uk-button-text uk-padding-remove-left">阅读全文 →</a>
+</div>`
+        }).join("\n")
+      }).catch(errn => {
+        console.log('失败', errn)
+        UIkit.notification('拉取失败', { status: 'danger' })
+      }).finally((_)=>{
+        document.pages.loading = false
+      })
+  }
+
+  document.getElementById('content-list').addEventListener('scroll', (ev)=>{
+    if (ev.target.scrollTop + ev.target.clientHeight >= ev.target.scrollHeight - 50 && document.pages.loading == false) {
+      document.req_data(ev)
+    }
+  })
+  window.addEventListener('scroll', (ev)=>{
+    if(document.getElementById('content-list').scrollHeight > document.getElementById('content-list').clientHeight){
+    }else{
+      if (document.pages.loading == false) {
+        document.req_data(ev)
+      }
+    }
+  })
+  </script>
+</html>
+

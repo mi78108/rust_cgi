@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map(:GET, '/list') do |req, resp|
+  page = req.param_page
+  resp.ok_json(3.times.map { {:page=>page} }).finally
+end
+
+Q.map :GET do |_, resp|
+  resp.html.render do |v|
+    v.HOT = [1,2,3]
+    v.WZFL = ['Linux', 'Bash', 'Docker', 'Nginx']
+    v.RMBQ = ['Linux','Dokcer','Rust','Ruby']
+  end.finally
+end
+
+
+Q.map do |_, r|
+  r.fail_404 ENV.to_a.to_json
+end
