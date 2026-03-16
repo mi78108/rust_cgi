@@ -140,11 +140,12 @@ class Rsp
     Q.log "instance_variables_self:", self.binding.instance_variables
     Q.log "instance_variables_resp_final:", instance_variables
 
-    body( @body.gsub(%r|[@#]{(?<code>.*?)}|) do |match|
-      Q.log "template matched #{match}"
+    body( @body.gsub(/@\{(?<code>.*)\}/) do |match|
+      code = $~[:code]
+      Q.log "template matched #{match} code: [#{code}]"
       begin
         instance_eval do
-          eval($~[:code], ctx)
+          eval(code, ctx)
         end
       rescue => e
         "[ERROR: #{e.message}]"

@@ -21,8 +21,7 @@
     // 1. 初始化图表
     var chartDom = document.getElementById('tempChart');
     var myChart = echarts.init(chartDom);
-
-    var _load = @{%x(sqlite3 --json /tmp/store.db "select * from report where name='"+ req.param_type +"';")}
+    var _load = @{%x(sqlite3 --json /tmp/store.db "select * from report where name=#{req.param_type};)}
 
     // 2. 图表配置
     var option = {
@@ -34,11 +33,11 @@
       },
       yAxis: {
         type: 'value',
-        name: '光照 (%)'
+        name: target.d
       },
       series: [
         {
-          name: '光照',
+          name: target.n,
           type: 'line',      // 折线图
           smooth: true,      // 平滑曲线
           data: _load.map(v=>v['value']),

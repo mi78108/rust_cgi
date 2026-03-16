@@ -2,7 +2,7 @@
 
 require_relative '../_init_'
 
-Q.map :GET do |_, resp|
+Q.map :GET do |req, resp|
   resp.html.render do |v|
     v.HOT = [1,2,3]
     v.WZFL = ['Linux', 'Bash', 'Docker', 'Nginx']
