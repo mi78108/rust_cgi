@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>光照变化曲线</title>
+  <!-- 引入 ECharts -->
+  <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+</head>
+<body>
+  <!-- 图表容器 -->
+  <div id="tempChart" style="width: 100%;height:500px;"></div>
+
+  <script>
+    // 1. 初始化图表
+    var chartDom = document.getElementById('tempChart');
+    var myChart = echarts.init(chartDom);
+
+    var _load = @{%x(sqlite3 --json /tmp/store.db "select * from report where name='light';")}
+
+    // 2. 图表配置
+    var option = {
+      title: { text: '光照变化趋势图' },
+      tooltip: { trigger: 'axis' }, // 鼠标悬浮提示
+      xAxis: {
+        type: 'category',
+        data: _load.map(v=>v['create_time'])
+      },
+      yAxis: {
+        type: 'value',
+        name: '光照 (%)'
+      },
+      series: [
+        {
+          name: '光照',
+          type: 'line',      // 折线图
+          smooth: true,      // 平滑曲线
+          data: _load.map(v=>v['value']),
+          markPoint: { data: [{ type: 'max', name: '最大值' }, { type: 'min', name: '最小值' }] },
+          markLine: { data: [{ type: 'average', name: '平均值' }] }
+        }
+      ]
+    };
+
+    // 3. 渲染
+    myChart.setOption(option);
+  </script>
+</body>
