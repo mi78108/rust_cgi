@@ -140,7 +140,8 @@ class Rsp
     Q.log "instance_variables_self:", self.binding.instance_variables
     Q.log "instance_variables_resp_final:", instance_variables
 
-    @body.gsub!(/@{(?<code>.*?)}/m) do |match|
+    #@body.gsub!(/@{(?<code>.*?)}/m) do |match|
+    @body.gsub!(/@{(?<code>(?>[^{}]|\{[^}]*\})*)}/) do |match|
       code = $~[:code]
       Q.log "template matched #{match} code: [#{code}]"
       begin
