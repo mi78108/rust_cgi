@@ -7,6 +7,12 @@ Q.map(:GET, '/list') do |req, resp|
   resp.ok_json(3.times.map { {:page=>page} }).finally
 end
 
+Q.map(:GET, %r{/article/(?<id>.*)}) do |req, resp|
+  resp.html('./article.html').render do |v|
+    v.id = req.match_1
+  end.finally
+end
+
 Q.map :GET do |_, resp|
   resp.html.render do |v|
     v.HOT = [1,2,3]

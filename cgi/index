@@ -2,6 +2,8 @@
 
 require_relative './_init_'
 
+Q.redirect_302 '/website'
+
 Q.map :GET do |_, resp|
   if File.exist?('./page.html')
     resp.body(File.read('./page.html')).html.render.finally

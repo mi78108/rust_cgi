@@ -4,7 +4,8 @@ require "pathname"
 require_relative "_ext_"
 
 class Req
-  def initialize(path = Q::REQ_PATH)
+  def initialize(matched, path = Q::REQ_PATH)
+    @matched = matched
     @path = path
     @method = Q::REQ_METHOD
     @args = ENV.keys.filter {|k| k =~ /Req_Argv_\d+/ }.sort.map{ |k| URI::decode_www_form_component(ENV[k]) }
@@ -18,7 +19,7 @@ class Req
     return nil
   end
   def param(key)
-    return URI::decode_www_form_component(header "Req_Param_#{key}")
+    return URI::decode_www_form_component(header "Req_Param_#{key}") if not header("Req_Param_#{key}").nil?
   end
   def param_or(key, val)
     value = param(key)
@@ -28,14 +29,18 @@ class Req
     return @args[val.to_i]
   end
   def match(val)
-    return nil if ENV['REQ_URI_MATCH'].nil?
-    return JSON.parse(ENV['REQ_URI_MATCH'])[val.to_i]
+    match = Q::MAPED[@matched]
+    return nil if match.nil?
+    return match if val.nil?
+    return match.to_a[val.to_i] if val.match?(/\d+/)
+
+    match[val]
   end
 
-   def body(length = @body_length)
+  def body(length = @body_length)
     return if @body_length == 0
     Q.read(length)
-   end
+  end
 
   def method_missing(method_name, *args, &block)
     method_str = method_name.to_s
@@ -63,7 +68,7 @@ class Rsp
       'Connection' => 'close',
       'Content-Type' => 'application/json; charset=uft-8',
     }
-  end
+    end
 
   %i[code body].each do |method_name|
     define_method(method_name) do |val|
@@ -79,9 +84,9 @@ class Rsp
   def file(page = './page.html')
     if not File.readable?(page)
       @else = true
-    else
-      @body = File.read(page)
-    end
+      else
+        @body = File.read(page)
+      end
     return self
   end
   def ok body
@@ -91,8 +96,8 @@ class Rsp
   end
   def else
     yeild if @else and block_given?
-  return self
-  end
+    return self
+    end
   def json body
     type 'application/json; charset=utf-8'
     (@body = body.to_json) if not body.nil?
@@ -169,6 +174,7 @@ end
 
 module Q
   CBK_ONCLOSE = Array.new
+  MAPED = Hash.new
   BUFFER_SIZE = 10 * 1024 * 1024
   REQ_PATH = URI::decode_www_form_component(ENV['Req_Path'])
   REQ_BODY_METHOD = ENV['Req_Body_Method']
@@ -178,11 +184,10 @@ module Q
   SCRIPT_NAME = ENV['Req_Script_Name']
   SCRIPT_PATH = ENV['Req_Script_Path']
   SCRIPT_BASENAME = ENV['Req_Script_Basename']
-  @@UNMAP = true
   @RESP = Rsp.new
 
   def self.handle_response
-    if @@UNMAP
+    if @UNMAP
       Q.fail_501 'unHandle'
     else
       @RESP.finally unless @RESP.header['send']
@@ -195,55 +200,66 @@ module Q
   #  end
 
 
-  def Q.call_block &block
-    begin
-      @@UNMAP = false
-      #yield(Req.new, @RESP) if block_given?
-      instance_exec(Req.new, @RESP, &block) if block_given?
-      # rescue StandardError => e
-    rescue Exception => e
-      Q.log e.full_message
-      Q.fail_500 e.to_s
-    end
-  end
-
-  def Q.map(method=nil, *path_matches, &block)
-    return unless @@UNMAP
-    map_dir = "./#{Q::SCRIPT_NAME.sub("/#{Q::SCRIPT_BASENAME}","")}"
-    map_path = Q::REQ_PATH.sub(Q::REQ_PATH.sub("/#{Q::REQ_ARGV_PARAMS}",""), "")
+  def Q.map(method = nil, *path_matches, &block)
+    # 初始化基础路径
+    map_dir = "./#{Q::SCRIPT_NAME.sub("/#{Q::SCRIPT_BASENAME}", "")}"
+    map_path = Q::REQ_PATH.sub(Q::REQ_PATH.sub("/#{Q::REQ_ARGV_PARAMS}", ""), "")
     map_path = '/' if map_path.empty?
+
     Q.log "Ready Map #{map_path} on #{method} with #{path_matches}"
-    Dir.chdir(map_dir) if Dir.exist? map_dir
-    if method.nil? and path_matches.empty?
+    Dir.chdir(map_dir) if Dir.exist?(map_dir)
+
+    # 核心匹配逻辑
+    if method.nil? && path_matches.empty?
       Q.log "Mapped on default"
-      Q.call_block(&block)
+      begin
+        instance_exec(Req.new('default', map_path), @RESP, &block) if block_given?
+      rescue => e
+        Q.log e.full_message
+        Q.fail_500 e.to_s
+      end
       return Q
     end
+
     if method.to_s == Q::REQ_METHOD
       if path_matches.empty?
         Q.log "Mapped #{method} on default"
-        Q.call_block(&block)
+        begin
+          instance_exec(Req.new("default_#{method.to_s}", map_path), @RESP, &block) if block_given?
+        rescue => e
+          Q.log e.full_message
+          Q.fail_500 e.to_s
+        end
         return Q
       end
-      for match in path_matches do
+
+      path_matches.each do |match|
         match_result = case match
                        when String then match == map_path
-                       when Regexp then (match_data = match.match(map_path)) && (ENV['REQ_URI_MATCH'] = match_data.to_a.to_json; true)
-                       when Proc then match.call map_path
+                       when Regexp then match.match?(map_path) && (Q::MAPED[match] = match.match(map_path); true)
+                       when Proc then match.call(map_path) == true
                        else false
                        end
-        if match_result
-          Q.log "Mapped #{method} on #{match}"
-          Q.call_block(&block)
-          return Q
+        next unless match_result
+
+        Q.log "Mapped #{method} on #{match}"
+        begin
+          instance_exec(Req.new(match, map_path), @RESP, &block) if block_given?
+        rescue => e
+          Q.log e.full_message
+          Q.fail_500 e.to_s
         end
+        return Q
       end
+
       Q.log "unHandle path #{map_path}"
       return Q
     end
+
     Q.log "unHandle method #{map_path}"
-    return Q
+    Q
   end
+
 
   def Q.log(*info)
     info.each do |v|
@@ -368,7 +384,7 @@ module Q
     member = '224.0.0.1'
     if not @udp_server.nil? and not block_given?
       return @udp_server.send({:f=>Process.pid, :c=>id}.to_json, 0, member, @udp_id) if only
-      
+
       return @udp_server.send(id, 0, member, @udp_id)
     end
     if @udp_server.nil?
@@ -389,7 +405,7 @@ module Q
           if only
             content = JSON.parse(body)
             next if Process.pid.to_s.eql? content['f'].to_s
-            
+
             yield(content['c'], content['f'])
           else
             yield body, addr
