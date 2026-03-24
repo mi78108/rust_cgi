@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+require 'sqlite3'
+
+MBTILES_FILE = "/usr/share/mobac/atlases/cd.mbtiles"
+
+db = SQLite3::Database.new(MBTILES_FILE)
+db.results_as_hash = true
+
+Q.map(:GET, %r{/tiles/(?<z>\d+)/(?<x>\d+)/(?<y>\d+)}) do |req, resp|
+  z = req.match[:z].to_i
+  x = req.match[:x].to_i
+  y = req.match[:y].to_i
+  tile = db.get_first_value(
+    "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+    z, x, (1 << z) - 1 - y
+  )
+  resp.fail_404("not init").finally if tile.nil?
+  format = db.get_first_value("SELECT value FROM metadata WHERE name='format'") || "png"
+
+  resp.ok(tile).type("image/#{format}").finally
+end
+
+Q.map :GET do |_, resp|
+  resp.html.render do |v|
+    v.HOT = [1,2,3]
+    v.WZFL = ['Linux', 'Bash', 'Docker', 'Nginx']
+    v.RMBQ = ['Linux','Dokcer','Rust','Ruby']
+  end.finally
+end
+
+
+Q.map do |_, r|
+  r.fail_404 ENV.to_a.to_json
+end

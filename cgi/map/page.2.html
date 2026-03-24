@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>OpenLayers 离线地图</title>
+    <!-- OpenLayers 官方 CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@8.2.0/ol.css">
+    <script src="https://cdn.jsdelivr.net/npm/ol@8.2.0/dist/ol.js"></script>
+    <style>
+        * { margin: 0; padding: 0; }
+        #map { width: 100vw; height: 100vh; }
+
+        /* 坐标悬浮面板 */
+        .coord-box {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 9999;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="coord-box" id="coordInfo">经度：--  纬度：--  缩放：--</div>
+
+    <script>
+        // ===================== 地图初始化 =====================
+        const map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.XYZ({
+                        url: '/map/tiles/{z}/{x}/{y}',  // 直接用你的 Ruby 瓦片接口
+                        projection: 'EPSG:3857',     // 标准 Web 墨卡托（WGS84）
+                        tileSize: 256
+                    })
+                })
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([104.3055, 30.5928]), // 中心点 WGS84
+                zoom: 10,                                        // 默认缩放
+                minZoom: 5,
+                maxZoom: 18
+            })
+        });
+
+        // ===================== 实时显示坐标 & 缩放 =====================
+        const coordDom = document.getElementById('coordInfo');
+
+        // 鼠标移动 → 更新坐标
+        map.on('pointermove', function (e) {
+            const lonLat = ol.proj.toLonLat(e.coordinate); // 转为 WGS84 经纬度
+            const lon = lonLat[0].toFixed(6);
+            const lat = lonLat[1].toFixed(6);
+            const zoom = map.getView().getZoom().toFixed(1);
+            coordDom.innerText = `经度：${lon}  纬度：${lat}  缩放：${zoom}`;
+        });
+
+        // 缩放结束 → 刷新显示
+        map.getView().on('change:zoom', function () {
+            const lonLat = ol.proj.toLonLat(map.getView().getCenter());
+            const lon = lonLat[0].toFixed(6);
+            const lat = lonLat[1].toFixed(6);
+            const zoom = map.getView().getZoom().toFixed(1);
+            coordDom.innerText = `经度：${lon}  纬度：${lat}  缩放：${zoom}`;
+        });
+    </script>
+</body>
+</html>
+

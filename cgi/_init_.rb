@@ -28,7 +28,7 @@ class Req
   def argv(val)
     return @args[val.to_i]
   end
-  def match(val)
+  def match(val = nil)
     match = Q::MAPED[@matched]
     return nil if match.nil?
     return match if val.nil?
