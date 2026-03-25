@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require_relative '../../_init_'
+
+Q.map(:POST, "/upload") do |req, resp|
+  require 'securerandom'
+  v = req.body_form_data.items.map do |item|
+    ctx = item.content.join
+    ext = File.extname(item.header['filename'])
+    new_filename = SecureRandom.uuid + ext
+    File.write("./dist/#{new_filename}", ctx)
+    new_filename
+  end
+  resp.ok_json(v).finally
+end
+
+Q.map(:POST, "/post") do |req, resp|
+  content =  JSON.parse(req.body)
+  resp.ok_json(content).finally
+end
+
+Q.map(:GET, %r{/static/(?<name>.*)}) do |req, resp|
+  resp.ok(File.read("./dist/#{req.match[:name]}")).finally
+end
+
+Q.map :GET do |_, resp|
+  resp.html.render do |v|
+  end.finally
+end
+
+
+Q.map do |_, r|
+  r.fail_404 ENV.to_a.to_json
+end

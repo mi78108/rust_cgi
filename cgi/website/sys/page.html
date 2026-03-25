@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gentoo Cat</title>
+    <link rel="stylesheet" href="/static/path/css/uikit.min.css">
+    <script src="/static/path/js/uikit.min.js"></script>
+    <script src="/static/path/js/uikit-icons.min.js"></script>
+
+    <!-- Vditor -->
+    <link rel="stylesheet" href="https://unpkg.com/vditor/dist/index.css" />
+    <script src="https://unpkg.com/vditor/dist/index.min.js"></script>
+    <script src="https://unpkg.com/vditor@3.11.2/dist/js/i18n/zh_CN.js"></script>
+
+    <style>
+    .vditor {
+    border-radius: 8px !important;
+    overflow: hidden;
+    border: 1px solid #e5e7eb !important;
+    }
+    .uk-card {
+    border-radius: 12px;
+    }
+    </style>
+  </head>
+  <body id="body" class="uk-background-muted">
+    <!-- 导航栏 -->
+    <nav class="uk-navbar-container uk-navbar-transparent uk-light uk-background-primary" uk-navbar>
+      <div class="uk-navbar-left">
+        <a class="uk-navbar-item uk-logo" href="#">
+          <span uk-icon="icon: pencil; ratio: 1.2"></span> &nbsp;个人博客
+        </a>
+      </div>
+      <div class="uk-navbar-right">
+        <ul class="uk-navbar-nav">
+          <li><a href="#"><span uk-icon="home"></span> 首页</a></li>
+          <li class="uk-active"><a href="#"><span uk-icon="file-edit"></span> 写文章</a></li>
+          <li><a href="#"><span uk-icon="album"></span> 文章管理</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- 内容区域 -->
+    <div class="uk-container uk-margin-large-top uk-margin-large-bottom">
+      <div class="uk-card uk-card-default uk-card-large uk-card-body">
+        <h3 class="uk-card-title uk-margin-medium-bottom">
+          <span uk-icon="icon: file-text; ratio: 1.1"></span> 撰写新文章
+        </h3>
+
+        <!-- 文章标题 -->
+        <div class="uk-margin-medium">
+          <input class="uk-input uk-form-large" type="text" placeholder="请输入文章标题" id="article-title">
+        </div>
+
+        <!-- 编辑器 -->
+        <div class="uk-margin-medium">
+          <div id="editor"></div>
+        </div>
+
+        <!-- 按钮组 -->
+        <div class="uk-flex uk-flex-right uk-margin-large-top">
+          <button class="uk-button uk-button-default uk-margin-right" id="btn-clear">
+            <span uk-icon="trash"></span> 清空内容
+          </button>
+          <button class="uk-button uk-button-primary" id="btn-save">
+            <span uk-icon="save"></span> 保存文章
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    // 初始化 Vditor
+    const vditor = new Vditor('editor', {
+      //mode: 'wysiwyg', // IR 即时 wysiwyg 所见即所得 sv分屏
+      mode: 'ir',
+      height: 640,
+      lang: 'zh_CN',
+      icon: 'ant',
+      placeholder: '开始写你的博客文章，支持粘贴/拖拽上传图片...',
+      outline: true,
+      preview: {
+        theme: 'ant-design',
+        hljs: {
+          lineNumber: true
+        }
+      },
+      comment: {
+        enable: true
+      },
+      upload: {
+        url: '/website/sys/upload',
+        accept: 'image/*',
+        paste: true,
+        drag: true,
+        multiple: true,
+        success: (element, resp) => {
+          if(resp){
+            console.log(resp)
+            JSON.parse(resp).forEach(v=>{
+              vditor.insertValue(`![](/website/sys/static/${v})`)
+            })
+          }
+        }
+      },
+      toolbar: [
+        'headings', 'bold', 'italic', 'strike', 'link',
+        '|', 'list', 'ordered-list', 'check',
+        '|', 'image', 'upload', 'table', 'code',
+        '|', 'quote', 'undo', 'redo', 'preview'
+      ]
+    });
+
+    // 保存文章
+    document.getElementById('btn-save').addEventListener('click', () => {
+      const title = document.getElementById('article-title').value.trim();
+      const content = vditor.getValue();
+      if (!title) {
+        UIkit.notification({ message: '请输入文章标题', status: 'warning', pos: 'top-center' });
+        return;
+      }
+      if (!content) {
+        UIkit.notification({ message: '文章内容不能为空', status: 'warning', pos: 'top-center' });
+        return;
+      }
+
+      // 这里可以把 title + content 保存成 .md 文件 或 存入 SQLite
+      console.log('标题：', title);
+      console.log('Markdown 内容：', content);
+      fetch("/website/sys/post",{
+        method: 'POST',
+        body: JSON.stringify({
+          title: title,
+          content: content
+        })
+      }).then(resp=>resp.json()).then(resp=>{
+          UIkit.notification({
+            message: '✅ 文章保存成功！',
+            status: 'success',
+            pos: 'top-center',
+            timeout: 2000
+          });
+        }).catch(e=>{
+          UIkit.notification({
+            message: '保存失败 ' + e,
+            status: 'error',
+            pos: 'top-center',
+            timeout: 2000
+          });
+        })
+    });
+
+    // 清空编辑器
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      document.getElementById('article-title').value = '';
+      vditor.setValue('');
+      UIkit.notification({ message: '已清空', status: 'primary', pos: 'top-center' });
+    });
+    </script>
+  </body>
+</html>
+
