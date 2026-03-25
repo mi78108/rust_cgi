@@ -3,7 +3,7 @@
 require_relative '../_init_'
 require 'sqlite3'
 
-MBTILES_FILE = "./map/map.mbtiles"
+MBTILES_FILE = "#{ENV['HOME']}/Documents/map.mbtiles"
 
 db = SQLite3::Database.new(MBTILES_FILE)
 db.results_as_hash = true
