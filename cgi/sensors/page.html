@@ -27,18 +27,18 @@
       tooltip: { trigger: 'axis' }, // 鼠标悬浮提示
       xAxis: {
         type: 'category',
-        data: @{%x(sqlite3 --json #{$db} "select create_time as t from report where name='light';").rstrip}.map(v=>v['t'])
-      },
-      legend: { data: ['温度', '湿度', '亮度'] },
+        data: @{%x(sqlite3 --json #{$db} "select create_time as t from report where name='light' and create_time > DATETIME('now', '-24 hours');").rstrip}.map(v=>v['t'])
+    },
+    legend: { data: ['温度', '湿度', '亮度'] },
       yAxis: {
         type: 'value',
       },
       series: [
-        {
+      {
           name: "温度",
           type: 'line',      // 折线图
           smooth: true,      // 平滑曲线
-          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='temp';").rstrip}.map(v=>v['v']),
+          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='temp' and create_time > DATETIME('now', '-24 hours');").rstrip}.map(v=>v['v']),
         itemStyle: { color: '#F56C6C' },
         markPoint: { data: [{ type: 'max', name: '最大值' }, { type: 'min', name: '最小值' }] },
         markLine: { data: [{ type: 'average', name: '平均值' }] }
@@ -48,7 +48,7 @@
           name: "湿度",
           type: 'line',      // 折线图
           smooth: true,      // 平滑曲线
-          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='humi';").rstrip}.map(v=>v['v']),
+          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='humi' and create_time > DATETIME('now', '-24 hours');").rstrip}.map(v=>v['v']),
         itemStyle: { color: '#409EFF' },
         markPoint: { data: [{ type: 'max', name: '最大值' }, { type: 'min', name: '最小值' }] },
         markLine: { data: [{ type: 'average', name: '平均值' }] }
@@ -57,12 +57,12 @@
           name: "亮度",
           type: 'line',      // 折线图
           smooth: true,      // 平滑曲线
-          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='light';").rstrip}.map(v=>v['v']),
+          data: @{%x(sqlite3 --json #{$db} "select value as v from report where name='light' and create_time > DATETIME('now', '-24 hours');").rstrip}.map(v=>v['v']),
         itemStyle: { color: '#E6A23C' },
         markPoint: { data: [{ type: 'max', name: '最大值' }, { type: 'min', name: '最小值' }] },
         markLine: { data: [{ type: 'average', name: '平均值' }] }
-      }
-      ]
+    }
+    ]
     };
 
     // 3. 渲染
