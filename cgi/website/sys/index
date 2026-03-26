@@ -1,30 +1,104 @@
 #!/usr/bin/env ruby
 
+require 'securerandom'
+require "sqlite3"
 require_relative '../../_init_'
+$db = SQLite3::Database.new "#{ENV['HOME']}/Documents/website/website.db"
+$dist = "#{ENV['HOME']}/Documents/website/dist"
+$db.results_as_hash = true
+
+$db.execute <<-SQL
+  CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rid INTEGER NOT NULL,
+    title TEXT,
+    content TEXT,
+    content_html TEXT,
+    status TEXT,
+    created_at DATETIME DEFAULT (datetime('now', '+8 hour')),
+    updated_at DATETIME DEFAULT (datetime('now', '+8 hour'))
+  );
+SQL
+
+$db.execute <<-SQL
+  CREATE TABLE IF NOT EXISTS resource (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rid INTEGER NOT NULL,
+    content TEXT,
+    status TEXT,
+    created_at DATETIME DEFAULT (datetime('now', '+8 hour')),
+    updated_at DATETIME DEFAULT (datetime('now', '+8 hour'))
+  );
+SQL
 
 Q.map(:POST, "/upload") do |req, resp|
-  require 'securerandom'
   v = req.body_form_data.items.map do |item|
     ctx = item.content.join
     ext = File.extname(item.header['filename'])
     new_filename = SecureRandom.uuid + ext
-    File.write("./dist/#{new_filename}", ctx)
+    File.write("#{$dist}/#{new_filename}", ctx)
+    $db.execute("INSERT INTO resource (rid, content, status) VALUES (?, ?, ?)", [req.param_rid, new_filename,0] );
     new_filename
   end
   resp.ok_json(v).finally
 end
 
 Q.map(:POST, "/post") do |req, resp|
-  content =  JSON.parse(req.body)
-  resp.ok_json(content).finally
+  ctx =  JSON.parse(req.body)
+  rid = req.param_rid
+  $db.execute("INSERT INTO posts (rid, title, content, content_html, created_at) VALUES (?, ?, ?, ?, ?)", [rid.start_with?("T") ? 0 : rid, ctx['title'], ctx['content'], ctx['content_html'], ctx['created_at'] || Time.now.to_s])
+  id = $db.last_insert_row_id
+  $db.execute("UPDATE resource set rid = ?, status=1 WHERE rid=?", [id, rid])
+  resp.ok_json({:opt => "ok", :val=> id}).finally
 end
 
 Q.map(:GET, %r{/static/(?<name>.*)}) do |req, resp|
-  resp.ok(File.read("./dist/#{req.match[:name]}")).finally
+  resp.ok(File.read("#{$dist}/#{req.match[:name]}")).finally
 end
 
-Q.map :GET do |_, resp|
+Q.map(:GET, %r{/(?<rid>\d+)/version}) do |req, resp|
+  rid = req.match[:rid]
+  versions = $db.execute("SELECT * FROM posts WHERE id=?", [rid])
+  find_child = Proc.new do |current_id|
+    children = $db.execute("SELECT * FROM posts WHERE rid = ?", [current_id])
+
+    result = children.dup
+    children.each do |child|
+      result += find_child.call(child['id'])
+    end
+    result
+  end
+  versions += find_child.call(rid)
+  resp.html('./version.html').render do |v|
+    v.versions = versions
+  end.finally
+end
+
+Q.map(:GET, %r{/(?<rid>\d+)/content}) do |req, resp|
+  art = $db.execute("SELECT * FROM posts WHERE id = ?", [req.match[:rid]]).first
+  resp.ok_html(art['content_html']).finally
+end
+
+Q.map :DELETE do |req, resp|
+  id = req.argv_0
+  count = 0
+  $db.execute("DELETE  FROM posts WHERE id = ?", [id])
+  $db.execute("SELECT * FROM resource WHERE rid = ?", [id]).each do |fs|
+    File.delete("./dist/#{fs['content']}")
+    count += 1
+  end
+  $db.execute("DELETE  FROM resource WHERE rid = ?", [id])
+  resp.ok_json({:opt => "ok", :val => count}).finally
+end
+
+Q.map :GET do |req, resp|
+  rid = req.argv_0
+  art = rid.nil? ? [] : $db.execute("SELECT * FROM posts WHERE id = ?", [rid])
+  art = art.size.zero? ? {} : art.first
+  rid = ("T" + SecureRandom.uuid) if rid.nil?
   resp.html.render do |v|
+    v.rid = rid
+    v.art = art
   end.finally
 end
 

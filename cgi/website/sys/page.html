@@ -9,9 +9,8 @@
     <script src="/static/path/js/uikit-icons.min.js"></script>
 
     <!-- Vditor -->
-    <link rel="stylesheet" href="https://unpkg.com/vditor/dist/index.css" />
-    <script src="https://unpkg.com/vditor/dist/index.min.js"></script>
-    <script src="https://unpkg.com/vditor@3.11.2/dist/js/i18n/zh_CN.js"></script>
+    <link rel="stylesheet" href="/website/static/css/dist/index.css" />
+    <script src="/website/static/js/dist/index.min.js"></script>
 
     <style>
     .vditor {
@@ -34,7 +33,7 @@
       </div>
       <div class="uk-navbar-right">
         <ul class="uk-navbar-nav">
-          <li><a href="#"><span uk-icon="home"></span> 首页</a></li>
+          <li><a href="/website"><span uk-icon="home"></span> 首页</a></li>
           <li class="uk-active"><a href="#"><span uk-icon="file-edit"></span> 写文章</a></li>
           <li><a href="#"><span uk-icon="album"></span> 文章管理</a></li>
         </ul>
@@ -45,7 +44,7 @@
     <div class="uk-container uk-margin-large-top uk-margin-large-bottom">
       <div class="uk-card uk-card-default uk-card-large uk-card-body">
         <h3 class="uk-card-title uk-margin-medium-bottom">
-          <span uk-icon="icon: file-text; ratio: 1.1"></span> 撰写新文章
+          <span uk-icon="icon: file-text; ratio: 1.1"></span> @{ art['title'].nil? ? "撰写新文章" : "变更 #{art['title']}"}
         </h3>
 
         <!-- 文章标题 -->
@@ -71,6 +70,9 @@
     </div>
 
     <script>
+    //document.rid = (new Date()).getTime();
+    document.rid = "@{rid}";
+    document.art = @{art.to_json};
     // 初始化 Vditor
     const vditor = new Vditor('editor', {
       //mode: 'wysiwyg', // IR 即时 wysiwyg 所见即所得 sv分屏
@@ -78,8 +80,9 @@
       height: 640,
       lang: 'zh_CN',
       icon: 'ant',
-      placeholder: '开始写你的博客文章，支持粘贴/拖拽上传图片...',
+      placeholder: '开始写你的文章，支持粘贴/拖拽上传图片...',
       outline: true,
+      cdn : "/website/static/path",
       preview: {
         theme: 'ant-design',
         hljs: {
@@ -90,7 +93,7 @@
         enable: true
       },
       upload: {
-        url: '/website/sys/upload',
+        url: `/website/sys/upload?rid=${document.rid}`,
         accept: 'image/*',
         paste: true,
         drag: true,
@@ -125,22 +128,29 @@
         return;
       }
 
-      // 这里可以把 title + content 保存成 .md 文件 或 存入 SQLite
-      console.log('标题：', title);
-      console.log('Markdown 内容：', content);
-      fetch("/website/sys/post",{
+      fetch(`/website/sys/post?rid=${document.rid}`,{
         method: 'POST',
         body: JSON.stringify({
           title: title,
-          content: content
+          content: content,
+          created_at: document.art['created_at'],
+          content_html: vditor.getHTML()
         })
       }).then(resp=>resp.json()).then(resp=>{
-          UIkit.notification({
-            message: '✅ 文章保存成功！',
-            status: 'success',
-            pos: 'top-center',
-            timeout: 2000
-          });
+          if (resp && resp['opt'] == 'ok'){
+            document.rid = resp['val'];
+            UIkit.notification({
+              message: '✅ 文章保存成功！',
+              status: 'success',
+              pos: 'top-center',
+              timeout: 2000
+            });
+            if(document.art['title']){
+              setTimeout(()=>{
+                window.location.href = `/website/sys/${document.rid}`
+              },2000)
+            }
+          }
         }).catch(e=>{
           UIkit.notification({
             message: '保存失败 ' + e,
@@ -157,6 +167,11 @@
       vditor.setValue('');
       UIkit.notification({ message: '已清空', status: 'primary', pos: 'top-center' });
     });
+
+    window.onload = (ev)=>{
+      vditor.setValue(document.art['content'] || "")
+      document.getElementById('article-title').value = document.art['title'] || "";
+    }
     </script>
   </body>
 </html>

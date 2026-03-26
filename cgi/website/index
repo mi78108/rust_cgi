@@ -1,15 +1,25 @@
 #!/usr/bin/env ruby
 
+require "sqlite3"
 require_relative '../_init_'
 
+$dist = "#{ENV['HOME']}/Documents/website/dist"
+system("mkdir -qp #{$dist}")
+$db = SQLite3::Database.new "#{ENV['HOME']}/Documents/website/website.db"
+$db.results_as_hash = true
+
 Q.map(:GET, '/list') do |req, resp|
-  page = req.param_page
-  resp.ok_json(3.times.map { {:page=>page} }).finally
+  whereSql = "id IN (SELECT MAX(id) FROM posts WHERE rid != 0 GROUP BY rid UNION SELECT id FROM posts WHERE rid = 0 AND id NOT IN (SELECT rid FROM posts WHERE rid != 0))"
+  rst = $db.execute("SELECT * FROM posts WHERE #{whereSql} ORDER BY id LIMIT ?, 10", [req.param_count.to_i]).map do |art|
+    art
+  end
+  resp.ok_json(rst).finally
 end
 
 Q.map(:GET, %r{/article/(?<id>.*)}) do |req, resp|
-  resp.html('./article.html').render do |v|
-    v.id = req.match_1
+  rst = $db.execute("SELECT * FROM posts WHERE id = ?",[req.match[:id]]).first
+  resp.html('./article_md.html').render do |art|
+    art.merge! rst
   end.finally
 end
 

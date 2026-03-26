@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="height: 100%;">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@{art.title}</title>
+    <link rel="stylesheet" href="/static/path/css/uikit.min.css">
+    <script src="/static/path/js/uikit.min.js"></script>
+    <script src="/static/path/js/uikit-icons.min.js"></script>
+
+    <!-- Vditor -->
+    <link rel="stylesheet" href="/website/static/css/dist/index.css" />
+    <script src="/website/static/js/dist/index.min.js"></script>
+
+    <style>
+    </style>
+  </head>
+  <body id="body" class="uk-background-muted" style="height: 90%;">
+
+    <div class="uk-container uk-margin-large-top" style="height: 90%;">
+      <article class="uk-article">
+        <h1 class="uk-text-center uk-article-title" onclick="window.open('/website/sys/@{art.id}')">@{art['title']}</h1>
+        <p class="uk-article-meta">撰写于 @{art.created_at} | 上次更新 @{art.updated_at} | <a href="/website/sys/@{art.id}">编辑</a> | <a href="/website/sys/@{art.id}/version">管理</a></p>
+        <p class="uk-article-lead"></p>
+        <hr class="uk-article-divider">
+
+        <!-- ====================== ✅ Vditor 只读预览区域 ====================== -->
+        <div id="vditorPreview"></div>
+
+      </article>
+    </div>
+
+    <footer class="uk-background-default uk-border-top uk-margin-large-top uk-padding-large uk-text-center" uk-sticky style="height: 10%;">
+      <p class="uk-text-meta">© 2026 Gentoo Cat. All rights reserved.</p>
+    </footer>
+    <script>
+    Vditor.preview(document.getElementById("vditorPreview"), @{art.content.inspect}, {
+      cdn : "/website/static/path"
+    })
+    </script>
+  </body>
+</html>
+

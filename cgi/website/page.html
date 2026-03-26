@@ -20,11 +20,11 @@
           <div class="uk-navbar-right">
             <ul class="uk-navbar-nav">
               <li class="uk-active"><a href="#">首页</a></li>
-              <li><a href="#">分类</a></li>
-              <li><a href="#">标签</a></li>
-              <li><a href="#">归档</a></li>
-              <li><a href="/map">地图</a></li>
-              <li><a href="/sensors">环境</a></li>
+              <li><a href="/website/sys">新建</a></li>
+              <!-- <li><a href="#">标签</a></li> -->
+              <!-- <li><a href="#">归档</a></li> -->
+              <li><a href="/map">离线地图</a></li>
+              <li><a href="/sensors">实时环境</a></li>
               <li><a href="#">关于</a></li>
             </ul>
           </div>
@@ -49,15 +49,6 @@
                 <p class="uk-margin-small-top">new start</p>
                 <a href="website/article/1" class="uk-button uk-button-text uk-padding-remove-left">阅读全文 →</a>
               </div>
-
-              @{v.HOT.map do |item|
-              """<div class='uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom'>
-                <h3 class='uk-card-title uk-margin-remove-bottom'>Gentoo CGI website</h3>
-                <p class='uk-text-meta uk-margin-small-top'>2026-03-13 | Rust backend && ruby cgi</p>
-                <p class='uk-margin-small-top'>new start #{item}</p>
-                <a href='website/article/#{item}' class='uk-button uk-button-text uk-padding-remove-left'>阅读全文</a>
-              </div>"""
-              end.join}
             </div>
 
             <!-- 加载提示 -->
@@ -106,7 +97,8 @@
   </body>
   <script>
   document.pages = {
-    page: 1,
+    page: 0,
+    count: 0,
     loading: false
   }
 
@@ -114,18 +106,26 @@
     console.log(ev)
     document.getElementById('loading').classList.remove('uk-hidden');
     document.pages.loading = true;
-    fetch(`/website/list?page=${document.pages.page}`, { method: 'GET'})
+    fetch(`/website/list?count=${document.pages.count}`, { method: 'GET'})
       .then(resp=>resp.json())
       .then(resp=>{
         document.getElementById('loading').classList.add('uk-hidden');
+        if(resp && resp.length > 0){
+          document.pages.count += resp.length;
+          if(resp.length == 10){
+            document.pages.page += 1;
+          }
         document.getElementById('content-list').innerHTML += resp.map(data=>{
           return `<div class="uk-card uk-card-default uk-card-body uk-border-rounded uk-margin-bottom">
-<h3 class="uk-card-title uk-margin-remove-bottom">Linux 常用命令大全（新手必备）</h3>
-<p class="uk-text-meta uk-margin-small-top">2026-03-13 | Linux 基础</p>
-<p class="uk-margin-small-top">本文整理了 Linux 最常用的命令，包括文件管理、系统查询、网络操作、权限配置等，适合零基础快速入门。</p>
-<a href="#" class="uk-button uk-button-text uk-padding-remove-left">阅读全文 →</a>
+<h3 class="uk-card-title uk-margin-remove-bottom">${data['title']}</h3>
+<p class="uk-text-meta uk-margin-small-top">${data['created_at']} 更新于 ${data['updated_at']}</p>
+<div class="uk-margin-small-top" style="max-height: 10vh; overflow-y: hidden; font-size: smaller !important"> ${data['content_html']} </div>
+<a href="/website/article/${data['id']}" class="uk-button uk-button-text uk-padding-remove-left">阅读全文</a>
 </div>`
         }).join("\n")
+      }else{
+        UIkit.notification('没有更多数据', { status: 'danger' })
+      }
       }).catch(errn => {
         console.log('失败', errn)
         UIkit.notification('拉取失败', { status: 'danger' })
@@ -143,10 +143,13 @@
     if(document.getElementById('content-list').scrollHeight > document.getElementById('content-list').clientHeight){
     }else{
       if (document.pages.loading == false) {
-        document.req_data(ev)
+        // document.req_data(ev)
       }
     }
   })
+  window.onload = (ev)=>{
+    document.req_data(ev)
+  }
   </script>
 </html>
 

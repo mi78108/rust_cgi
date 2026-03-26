@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文章版本管理 - Gentoo Cat</title>
+  <link rel="stylesheet" href="/static/path/css/uikit.min.css">
+  <script src="/static/path/js/uikit.min.js"></script>
+  <script src="/static/path/js/uikit-icons.min.js"></script>
+
+  <style>
+  .version-item {
+  transition: all 0.2s;
+  }
+  .version-item:hover {
+  background: #f8f9fa;
+  }
+  </style>
+</head>
+<body class="uk-background-muted">
+
+<!-- 顶部标题 -->
+<div class="uk-container uk-margin-large-top">
+  <h1 class="uk-heading-small uk-text-center">
+    <span uk-icon="icon: file-text; ratio: 1.2"></span> 文章版本管理
+  </h1>
+  <p class="uk-text-center uk-text-meta">共 @{v.versions.size} 个历史版本</p>
+  <hr>
+</div>
+
+<!-- 文章版本列表 -->
+<div class="uk-container">
+<div class="uk-grid-small uk-flex-middle" uk-grid>
+<div class="uk-width-1-1">
+@{ versions.map.with_index do |info,idx|
+"""<div class='uk-card uk-card-default uk-card-small uk-margin-small version-item'>
+<div class='uk-card-body'>
+<div class='uk-grid-small uk-flex-middle' uk-grid>
+<div class='uk-width-expand'>
+  <div class='uk-text-bold'><a href='/website/sys/#{info['rid']}/version' style='display: #{ 'none' if info['rid'].to_i == 0 || info['rid'].to_i == rid.to_i };'>查看母版</a> #{info['title']}</div>
+  <div class='uk-text-meta uk-text-small'>
+    版本 #{idx} · 创建于 #{info['created_at']} · 更新于 #{info['updated_at']} . 状态 #{info['status']}
+  </div>
+</div>
+<div class='uk-width-auto'>
+<button class='uk-icon-button uk-button-primary' uk-icon='eye' onclick=\"window.open('/website/sys/#{info['id']}/content','_self')\" title='查看'></button>
+<button class='uk-icon-button uk-button-danger' uk-icon='trash' onclick=\"del(#{info['id']})\" title='删除'></button>
+</div>
+</div>
+</div>
+</div>
+"""
+end.join
+}
+
+</div>
+</div>
+</div>
+
+<!-- 页脚 -->
+<footer class="uk-background-default uk-border-top uk-margin-large-top uk-padding-large uk-text-center">
+<p class="uk-text-meta">© 2026 Gentoo Cat. All rights reserved.</p>
+</footer>
+
+<script>
+// 删除确认
+function del(id) {
+if (confirm('确定要删除这个版本吗？')) {
+fetch(`/website/sys/${id}`, { method: 'DELETE' })
+.then(() => location.reload())
+}
+}
+</script>
+
+</body>
+</html>
