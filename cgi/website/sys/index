@@ -2,6 +2,7 @@
 
 require 'securerandom'
 require "sqlite3"
+require 'mime/types'
 require_relative '../../_init_'
 $db = SQLite3::Database.new "#{ENV['HOME']}/Documents/website/website.db"
 $dist = "#{ENV['HOME']}/Documents/website/dist"
@@ -52,9 +53,10 @@ Q.map(:POST, "/post") do |req, resp|
   resp.ok_json({:opt => "ok", :val=> id}).finally
 end
 
-Q.map(:GET, %r{/static/(?<name>.*)}) do |req, resp|
-  resp.ok(File.read("#{$dist}/#{req.match[:name]}")).finally
-end
+#Q.map(:GET, %r{/static/(?<name>.*)}) do |req, resp|
+#  file_path = "#{$dist}/#{req.match[:name]}"
+#  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(file_path).first}; charset=utf-8").finally
+#end
 
 Q.map(:GET, %r{/(?<rid>\d+)/version}) do |req, resp|
   rid = req.match[:rid]
