@@ -46,13 +46,19 @@ end
 
 Q.map(:POST, "/post") do |req, resp|
   ctx =  JSON.parse(req.body)
-  rid = req.param_rid
-  $db.execute("INSERT INTO posts (rid, title, content, content_html, created_at) VALUES (?, ?, ?, ?, ?)", [rid.start_with?("T") ? 0 : rid, ctx['title'], ctx['content'], ctx['content_html'], ctx['created_at'] || Time.now.to_s])
+  $db.execute("INSERT INTO posts (rid, title, content, content_html, created_at) VALUES (?, ?, ?, ?, ?)", [0, ctx['title'], ctx['content'], ctx['content_html'], ctx['created_at'] || Time.now.to_s])
   id = $db.last_insert_row_id
-  $db.execute("UPDATE resource set rid = ?, status=1 WHERE rid=?", [id, rid])
+  $db.execute("UPDATE resource set rid = ?, status=1 WHERE rid=?", [id, req.param_rid])
   resp.ok_json({:opt => "ok", :val=> id}).finally
 end
 
+Q.map(:PUT, "/post") do |req, resp|
+  ctx =  JSON.parse(req.body)
+  rid = req.param_rid
+  $db.execute("UPDATE posts SET rid=?, title=?, content=?, content_html=?, updated_at=? WHERE id =?", [rid, ctx['title'], ctx['content'], ctx['content_html'], Time.now.to_s, rid])
+  id = $db.last_insert_row_id
+  resp.ok_json({:opt => "ok", :val=> id}).finally
+end
 #Q.map(:GET, %r{/static/(?<name>.*)}) do |req, resp|
 #  file_path = "#{$dist}/#{req.match[:name]}"
 #  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(file_path).first}; charset=utf-8").finally

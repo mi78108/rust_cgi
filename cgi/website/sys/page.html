@@ -77,14 +77,13 @@
     const vditor = new Vditor('editor', {
       //mode: 'wysiwyg', // IR 即时 wysiwyg 所见即所得 sv分屏
       mode: 'ir',
-      height: 640,
-      lang: 'zh_CN',
-      icon: 'ant',
+      height: "auto",
+      width: "auto",
       placeholder: '开始写你的文章，支持粘贴/拖拽上传图片...',
       outline: true,
       cdn : "/website/static/path",
       preview: {
-        theme: 'ant-design',
+        actions: ["desktop", "tablet", "mobile"],
         hljs: {
           lineNumber: true
         }
@@ -98,6 +97,7 @@
         paste: true,
         drag: true,
         multiple: true,
+        withCredentials: false,
         success: (element, resp) => {
           if(resp){
             console.log(resp)
@@ -106,13 +106,7 @@
             })
           }
         }
-      },
-      toolbar: [
-        'headings', 'bold', 'italic', 'strike', 'link',
-        '|', 'list', 'ordered-list', 'check',
-        '|', 'image', 'upload', 'table', 'code',
-        '|', 'quote', 'undo', 'redo', 'preview'
-      ]
+      }
     });
 
     // 保存文章
@@ -129,7 +123,7 @@
       }
 
       fetch(`/website/sys/post?rid=${document.rid}`,{
-        method: 'POST',
+        method: `@{art.empty? ? 'POST' : 'PUT'}`,
         body: JSON.stringify({
           title: title,
           content: content,

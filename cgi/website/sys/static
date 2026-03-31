@@ -1,4 +1,4 @@
 #!/usr/bin/env ruby
 
 ENV['STATIC_DIST'] = "#{ENV['HOME']}/Documents/website/dist"
-load ENV['Req_Script_Path'].gsub(ENV['Req_Script_Name'],'') + "/static/index"
+load ENV['Cgi_Root'] + "/static/index"

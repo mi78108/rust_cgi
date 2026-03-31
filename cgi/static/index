@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+$STATIC_DIST = "#{ ENV['STATIC_DIST'] || ENV['Req_Script_Dir']}"
 require_relative '../_init_'
 require 'mime/types'
 
@@ -19,20 +20,20 @@ Q.map(:GET, %r{^/path/(.*)$}) do |req, resp|
 end
 
 Q.map(:GET, %r{^/type/(.*?)/(.*)$}) do |req, resp|
-  file_path = req.match_2
+  file_path = "#{$STATIC_DIST}/#{req.match_2}"
   resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
   Q.fail_404 "File Not found File #{file_path}"
 end
 
 Q.map(:GET, %r{^/(.*?)/(.*)$}) do |req, resp|
-  file_path = req.match_2
+  file_path = "#{$STATIC_DIST}/#{req.match_2}"
   resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
   Q.fail_404 "File Not found File #{file_path}"
 end
 
 Q.map(:GET, %r{^/(.*)$}) do |req, resp|
-  file_path = req.match_1
-  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(req.match_1).first}; charset=utf-8").finally if File.exist? file_path
+  file_path = "#{$STATIC_DIST}/#{req.match_1}"
+  resp.ok(File.read(file_path)).type("#{MIME::Types.type_for(file_path).first}; charset=utf-8").finally if File.exist? file_path
   Q.fail_404 "File Not found File #{file_path}"
 end
 

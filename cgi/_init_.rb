@@ -380,6 +380,10 @@ module Q
     end
   end
 
+  def Q.load(name)
+    load ENV['Cgi_Root'] + name
+  end
+
   def Q.notify(id, only=true)
     member = '224.0.0.1'
     if not @udp_server.nil? and not block_given?

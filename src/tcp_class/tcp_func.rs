@@ -1,4 +1,4 @@
-use crate::OPT;
+use crate::{OPT, SCRIPT_DIR};
 use crate::tcp_class::http_func::Http;
 use crate::tcp_class::http_websocket_func::Websocket;
 use crate::tcp_class::tcp_file_func::FileSync;
@@ -65,6 +65,7 @@ impl From<TcpStream> for Tcp {
             let (reader, writer) = stream.into_split();
             let mut header = HashMap::new();
 
+            header.insert("Cgi_Root".into(), SCRIPT_DIR.get().unwrap().to_string_lossy().to_string());
             header.insert("Req_Script_Name".into(), "/tcp_handle".to_string());
             header.insert(
                 "Req_Buffer_Size".into(),
@@ -86,13 +87,15 @@ impl From<(TcpStream, SocketAddr)> for Tcp {
             let (reader, writer) = stream.into_split();
             Tcp {
                 req_header: HashMap::from([
-                    ("Req_Script_Name".into(), "/tcp_handle".to_string()),
-                    ("Req_Peer_Ip".into(), addr.ip().to_string()),
-                    ("Req_Peer_Port".into(), addr.port().to_string()),
-                    (
-                        "Req_Buffer_Size".into(),
-                        OPT.get().unwrap().buffer.to_string(),
-                    ),
+
+                                ("Cgi_Root".into(), SCRIPT_DIR.get().unwrap().to_string_lossy().to_string()),
+                                ("Req_Script_Name".into(), "/tcp_handle".to_string()),
+                                ("Req_Peer_Ip".into(), addr.ip().to_string()),
+                                ("Req_Peer_Port".into(), addr.port().to_string()),
+                                (
+                                    "Req_Buffer_Size".into(),
+                                    OPT.get().unwrap().buffer.to_string(),
+                                ),
                 ]),
                 req_reader: Mutex::new(BufReader::new(reader)),
                 req_writer: Mutex::new(BufWriter::new(writer)),
