@@ -3,7 +3,7 @@
 require_relative '../_init_'
 
 Q.map :GET do |req, resp|
-  $db = "/home/hawk/Desktop/spider/serv/store.db"
+  $db = "/home/hawk/Documents/website/sensors.db"
   resp.html.render do |v|
     v.HOT = [1,2,3]
     v.WZFL = ['Linux', 'Bash', 'Docker', 'Nginx']

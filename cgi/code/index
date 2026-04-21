@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+
+require_relative '../_init_'
+
+Q.map(:POST) do |req, resp|
+  script = "/tmp/eval_code"
+  rst = JSON.parse(req.body)
+  File.write(script, rst['code'])
+  system("chmod +x #{script}")
+  raw_output = %x{bash -c #{script} 2>&1; echo $?}
+  lines = raw_output.split("\n")
+  rst['result'] = lines.pop
+  rst['output'] = lines.join("\n")
+
+  Q.log rst.to_json
+  resp.ok_json({:result => rst['result'] ,:output => rst['output']}).finally
+end
+
+Q.map do |_, r|
+  r.fail_404 ENV.to_a.to_json
+end

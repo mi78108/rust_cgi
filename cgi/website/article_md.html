@@ -18,7 +18,7 @@
   <body id="body" class="uk-background-muted" style="height: 90%;">
 
     <div class="uk-container uk-margin-large-top" style="height: 90%;">
-      <article class="uk-article">
+      <article class="uk-article" style="height: 90%;overflow: auto;">
         <h1 class="uk-text-center uk-article-title" onclick="window.open('/website/sys/@{art.id}')">@{art['title']}</h1>
         <p class="uk-article-meta">撰写于 @{art.created_at} | 上次更新 @{art.updated_at} | <a href="/website/sys/@{art.id}">编辑</a> | <a href="/website/sys/@{art.id}/version">管理</a></p>
         <p class="uk-article-lead"></p>
