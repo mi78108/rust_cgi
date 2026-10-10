@@ -1,4 +1,0 @@
-#!/usr/bin/env ruby
-
-ENV['STATIC_DIST'] = "#{ENV['HOME']}/Documents/website/dist"
-load ENV['Cgi_Root'] + "/static/index"
