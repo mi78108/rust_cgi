@@ -343,13 +343,12 @@ Q.route '/demo/stream_body', method: :GET do |req, rsp|
     # StringIO (IO 子类): rsp.body(StringIO.new(str))
     require 'stringio'
     data = "line1\nline2\nline3\n"
-    rsp.body(StringIO.new(data)).stream.finish
+    rsp.body(StringIO.new(data)).stream(1).finish
   when 'block'
     # Block: rsp.body { |emit| ... }
-    rsp.body { |emit|
+    rsp.body { |emit,vv|
       4.times { |i| emit.call("block-chunk-#{i}\n") }
-    }.stream
-    Q.log '0000000000000000000000000',rsp.body.class
+    }.stream 2
   else
     rsp.fail_400.type_text.body("kind must be one of: proc, stringio, block\n")
   end

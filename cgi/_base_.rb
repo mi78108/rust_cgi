@@ -280,9 +280,7 @@ class Q
     #   wrap(Q::Body 实例)         → 原样返回
     #   wrap(nil)                  → TextBody.new('')
     def self.wrap(v = nil, &block)
-      Q.log "222222222222222 #{v}"
       return TextBody.new('') if v.nil? && block.nil?
-      return StreamBody.new(&block) unless block.nil?
 
       case v
       when Base        then v
@@ -290,7 +288,7 @@ class Q
         # 如果 string 路径指向真实文件，当 FileBody（不复制内容）
         File.file?(v) ? FileBody.new(v) : TextBody.new(v)
       when Pathname    then FileBody.new(v.to_s)
-      when Proc        then StreamBody.new(&block)
+      when Proc        then StreamBody.new(&v)
       when IO, StringIO
         # IO / File / Socket / StringIO 任何"可读字节流"对象都当 StreamBody：
         # each_chunk 时按 BUFFER_SIZE 读，yield 数据块。size 未知 → chunked。
@@ -300,14 +298,12 @@ class Q
             emit.call(chunk)
           end
         end
-      else
-        # duck type: respond_to?(:to_path) 且 to_path 指向真文件
-        if v.respond_to?(:to_path) && ::File.file?(v.to_path)
-          FileBody.new(v.to_path)
-        else
-          Q.log 'cccccccccccccccccccccc'
-          TextBody.new(v.to_s)
+      when nil
+        unless block.nil?
+          StreamBody.new(&block)
         end
+      else
+        Q.log "body wrap unimplemented #{v} | #{block}"
       end
     end
 
@@ -341,13 +337,13 @@ class Q
 
     # 块生成器 body。size 永远 nil（未知 → chunked）。
     class StreamBody < Base
-      def initialize(&gen)
-        @gen = gen
+      def initialize(&cbk)
+        @cbk = cbk
       end
 
       def size; nil; end
       def each_chunk(chunk_size = Q::BUFFER_SIZE, &emit)
-        @gen.call(emit, chunk_size)
+        @cbk.call(emit, chunk_size)
       end
     end
   end
@@ -363,7 +359,7 @@ class Q
       'Content-Type' => 'text/html; charset=utf-8',
     }.freeze
 
-    attr_reader :header
+    attr_reader :header, :sent
 
     # chainable setter + getter（then 风格 sentinel）。
     # 用唯一 Object 实例作为哨兵，避免和任何用户传值冲突。
@@ -529,10 +525,7 @@ class Q
       Q.write_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
         @chunking = true
       unless block
-        Q.log 'vvvvvvvvvvvvvv'
         @body.each_chunk(chunk_size) do |chunk|
-
-          Q.log "chunk #{chunk}"
           Q.write_chunk(chunk)
         end
         Q.write_chunk_end
@@ -650,10 +643,6 @@ class Q
       end
       Q.log "stream ..."
       throw :q_resp_sent, :handled
-    end
-
-    def sent?
-      @sent
     end
   end
 end
@@ -981,7 +970,7 @@ class Q
         log((e.backtrace || []).first(5).map { |b| "  #{b}" })
         rsp.code(500).body("#{e.class}: #{e.message}").finish
       end
-      rsp.finish unless rsp.sent?
+      rsp.finish unless rsp.sent
     end
   end
 end
