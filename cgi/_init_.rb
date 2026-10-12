@@ -261,6 +261,8 @@ module Q
   end
 
 
+
+
   def Q.log(*info)
     info.each do |v|
       STDERR.puts ">>[#{Process.pid}]> LOG <#{caller(3, 1) }> INFO: #{v}"

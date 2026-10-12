@@ -7,7 +7,7 @@
 #   * ENV 契约文档化（Req_* 子进程只读；Cgi_Root 由 spider 设）
 #   * 一次性请求生命周期：method / path / params / argv / headers / body
 #   * chainable Rsp，响应写完 throw :q_resp_sent :handled，由 Q.route catch 住
-#   * 渲染模板用 @{}，eval 在 binding，捕获 StandardError + ScriptError
+#   * 渲染模板用 @<{}>，eval 在 binding，捕获 StandardError + ScriptError
 #
 # ENV 契约（rust_cgi 提供，子进程只读）：
 #   CGI:
@@ -56,12 +56,12 @@
 #   req.named(:id, 0)                    # 命名捕获组
 #   req.argv(0, 'none')                  # restful 第 0 段
 #
-# Pattern 规则（相对脚本 URL prefix）:
-#   '/'             匹配脚本本身（cgi/test/index 的 '/' 匹配 /test）
+# Pattern 规则（对照 Q::MAP_PATH）:
+#   '/'             匹配 restful 为空（脚本本身调用）
 #   '/info'         精确路径
-#   '/*'            通配当前 prefix 下所有路径
+#   '/*'            通配所有非空 restful 路径
 #   '/users/<id>'   命名捕获（自动转 (?<id>[^/]+)）
-#   /^\/users\/(?<id>\d+)$/  正则相对路径（/ 必须显式写）
+#   /^\/users\/(?<id>\d+)$/  正则（/ 必须显式写）
 #   nil             兜底（总是匹配）
 #
 #   写不写 ^/$ 锚点都行——外层用 \A/\z 统一包。
@@ -70,6 +70,7 @@
 require 'json'
 require 'uri'
 require 'pathname'      # Q::Body.wrap 智能识别 Pathname → FileBody
+require 'stringio'
 require 'cgi'           # CGI.unescape / CGI.parse（query / cookie 解析）
 
 # ============================================================
@@ -116,31 +117,19 @@ class Q
   REQ_VERSION     = QEnv.fetch('Req_Version', 'HTTP/1.1').freeze
   BODY_METHOD     = QEnv.fetch('Req_Body_Method', 'HTTP').freeze
   PEER_IP         = QEnv.fetch('Req_Peer_Ip', '').freeze
-  PEER_PORT       = QEnv.fetch('Req_Peer_Port', '0').freeze
+  PEER_PORT       = QEnv.fetch_i('Req_Peer_Port', '0')
   PEER_ADDR       = "#{PEER_IP}:#{PEER_PORT}".freeze
   BUFFER_SIZE     = QEnv.fetch_i('Req_Buffer_Size', 131_072)
-  ARGV_COUNT      = ARGV.size
-
-  # 动态计算"切去 restful 段后的脚本 URL"（与 _init_.rb#map_path 等价）。
-  # 用 ENV 直接读（QEnv.SNAPSHOT 是 load 时冻结的快照，不重读）。
-  #   Req_Path=/test/info, Argv=info → /test
-  #   Req_Path=/test/u/42, Argv=u/42 → /test
-  #   Req_Path=/test, Argv=空 → /test
-  #   Req_Path=/, Argv=空 → /
-  def self.req_rel_path(req_path = nil, argv = nil)
-    p = req_path || ENV['Req_Path'] || '/'
-    a = argv || ENV['Req_Argv_Params'] || ''
-    return p if a.empty?
-    result = p.sub("/#{a}", '')
-    result.empty? ? '/' : result
-  end
+  ARGV_COUNT      = QEnv.fetch_i('Req_Argv_Count', 0)
+  ARGV_PARAMS     = QEnv.fetch('Req_Argv_Params', '').freeze
+  MAP_PATH        = "/#{ARGV_PARAMS}"  # restful 部分（空时 = '/'），路由匹配基准
 
   class Req
     attr_reader :method, :path, :query, :body_type, :body_length
 
     def initialize
       @method      = Q::REQ_METHOD
-      @path        = Q.req_rel_path    # 切去 restful 段后的"脚本 URL"
+      @path        = Q::ARGV_PARAMS.empty? ? '/' : "/#{Q::ARGV_PARAMS}"  # restful 路径部分
       @query       = Q::REQ_PARAMS
       @body_type   = QEnv.fetch('content-type', '')
       @body_length = QEnv.fetch_i('content-length', 0)
@@ -278,7 +267,7 @@ class Q
     # 抽象基类
     class Base
       def size;        raise NotImplementedError, "#{self.class}#size";        end
-      def each_chunk(&block); raise NotImplementedError, "#{self.class}#each_chunk"; end
+      def each_chunk(chunk_size = Q::BUFFER_SIZE, &block); raise NotImplementedError, "#{self.class}#each_chunk"; end
     end
 
     # 工厂方法：根据 v 的类型自动包成对应 Q::Body 子类
@@ -291,16 +280,17 @@ class Q
     #   wrap(Q::Body 实例)         → 原样返回
     #   wrap(nil)                  → TextBody.new('')
     def self.wrap(v = nil, &block)
+      Q.log "222222222222222 #{v}"
       return TextBody.new('') if v.nil? && block.nil?
-      return StreamBody.new(&block) if v.nil? && block
+      return StreamBody.new(&block) unless block.nil?
 
       case v
       when Base        then v
       when String
         # 如果 string 路径指向真实文件，当 FileBody（不复制内容）
-        ::File.file?(v) ? FileBody.new(v) : TextBody.new(v)
+        File.file?(v) ? FileBody.new(v) : TextBody.new(v)
       when Pathname    then FileBody.new(v.to_s)
-      when Proc        then StreamBody.new(&v)
+      when Proc        then StreamBody.new(&block)
       when IO, StringIO
         # IO / File / Socket / StringIO 任何"可读字节流"对象都当 StreamBody：
         # each_chunk 时按 BUFFER_SIZE 读，yield 数据块。size 未知 → chunked。
@@ -315,6 +305,7 @@ class Q
         if v.respond_to?(:to_path) && ::File.file?(v.to_path)
           FileBody.new(v.to_path)
         else
+          Q.log 'cccccccccccccccccccccc'
           TextBody.new(v.to_s)
         end
       end
@@ -324,24 +315,24 @@ class Q
     class TextBody < Base
       def initialize(str); @str = str.to_s; end
       def size; @str.bytesize; end
-      def each_chunk; yield @str; end
+      def each_chunk(chunk_size = Q::BUFFER_SIZE); yield @str; end
       def to_s; @str; end
       alias_method :bytes, :to_s
     end
 
     # 静态文件 body。
-    # each_chunk 用 BUFFER_SIZE 分块 yield（默认 128KB），避免大文件一次性吃光内存。
+    # each_chunk 按参数 chunk_size 分块 yield（默认 Q::BUFFER_SIZE），避免大文件一次性吃光内存。
     class FileBody < Base
       attr_reader :path, :size
 
       def initialize(path)
         @path = path
-        @size = ::File.stat(path).size
+        @size = File.stat(path).size
       end
 
-      def each_chunk
-        ::File.open(@path, 'rb') do |f|
-          while (chunk = f.read(Q::BUFFER_SIZE))
+      def each_chunk(chunk_size = Q::BUFFER_SIZE)
+        File.open(@path, 'rb') do |f|
+          while (chunk = f.read(chunk_size))
             yield chunk
           end
         end
@@ -355,8 +346,8 @@ class Q
       end
 
       def size; nil; end
-      def each_chunk(&emit)
-        @gen.call(emit)
+      def each_chunk(chunk_size = Q::BUFFER_SIZE, &emit)
+        @gen.call(emit, chunk_size)
       end
     end
   end
@@ -404,21 +395,19 @@ class Q
       return @body if v.equal?(RSP_READ) && block.nil?
 
       @body = if v.equal?(RSP_READ)
-                Q::Body.wrap(&block)
+                Q::Body.wrap(nil, &block)
               else
                 Q::Body.wrap(v, &block)
               end
-      # StreamBody size 未知 → finish 走 chunked 路径 yield each_chunk
-      @streaming = true if @body.is_a?(Q::Body::StreamBody)
       self
     end
 
     # = setter：rsp.body = "..." 形式（与 body(v) 等价，chainable）
-    def body=(v)
-      @body = Q::Body.wrap(v)
-      @streaming = true if @body.is_a?(Q::Body::StreamBody)
-      self
-    end
+    # def body=(v)
+    #   @body = Q::Body.wrap(v)
+    #   @streaming = true if @body.is_a?(Q::Body::StreamBody)
+    #   self
+    # end
 
     def initialize
       @code        = 200
@@ -426,8 +415,7 @@ class Q
       @body        = Q::Body::TextBody.new('')
       @header      = DEFAULT_HEADERS.dup
       @sent        = false
-      @streaming   = false
-      @stream_ended = false
+      @chunking   = false
     end
 
     # --- Content-Type 快捷 ---
@@ -519,10 +507,6 @@ class Q
       self
     end
 
-    def streaming?
-      @streaming == true
-    end
-
     # 流式响应：切换到 Transfer-Encoding: chunked。
     #
     # 3 种用法：
@@ -536,60 +520,62 @@ class Q
     #
     #   3) rsp.stream                              # 无 block：单纯切 chunked 模式
     #      headers 发出去，body 留空给 finish 时通过 each_chunk yield。
-    def stream(content_type: 'text/event-stream', &block)
-      type(content_type)
-
-      # body 已是 StreamBody（用户先调 rsp.body(IO).stream）—— 不重发 headers
-      if @body.is_a?(Q::Body::StreamBody)
-        @streaming = true
-        return self
-      end
+    def stream(chunk_size = BUFFER_SIZE, &block)
+        return self if @chunking
 
       # 切 chunked 模式：发 headers + 标记 streaming
       @header.delete('Content-Length')
       @header['Transfer-Encoding'] = 'chunked'
-      Q.write_stream_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
-      @streaming = true
-      return self unless block
+      Q.write_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
+        @chunking = true
+      unless block
+        Q.log 'vvvvvvvvvvvvvv'
+        @body.each_chunk(chunk_size) do |chunk|
+
+          Q.log "chunk #{chunk}"
+          Q.write_chunk(chunk)
+        end
+        Q.write_chunk_end
+        return self
+      end
 
       i = 0
       while (data = block.call(i))
-        break if data.nil? || data == '' || data == false
-        Q.write_stream_chunk(data.to_s)
+        break if data.nil? || data.size == 0 || data == false
+        Q.write_chunk(data)
         i += 1
       end
-      Q.write_stream_end
-      @stream_ended = true
+      Q.write_chunk_end
       self
     end
 
     # 单 chunk 流式：把 block 返回值当一个 chunk frame 发出。
     # 链式可调多次发多个 chunk，最后调 rsp.finish 触发 write_stream_end。
     #   rsp.chunk { "hello\n" }.chunk { Time.now.to_s + "\n" }.finish
-    def chunk(content_type: 'text/event-stream', &block)
-      unless @streaming
-        type(content_type)
-        Q.write_stream_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
-        @streaming = true
-      end
-      data = block&.call
-      Q.write_stream_chunk(data.to_s) if data
-      self
-    end
-
+    # def stream(chunk_size = BUFFER_SIZE, &block)
+    #   unless @chunking
+    #     type(content_type)
+    #     Q.write_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
+    #     @chunking = true
+    #   end
+    #   data = block&.call
+    #   Q.write_chunk(data.to_s) if data
+    #   self
+    # end
+    #
     # --- 模板渲染 ---
 
-    # 模板渲染：@{} 在 ctx 上 eval；异常 → "[ERROR: msg]"
+    # 模板渲染：@<{}> 在 ctx 上 eval；异常 → "[ERROR: msg]"
     #
     # 只接受 hash：rsp.render(key: value, ...) —— hash 转成 ctx 局部变量
     # 块内局部变量（如 user/title）通过 rsp.set(hash) 注入到 rsp 实例变量，
-    # render 会自动把 rsp 实例变量导入 ctx，@{} 可访问。
+    # render 会自动把 rsp 实例变量导入 ctx，@<{}> 可访问。
     #
     # 用法：
     #   Q.route '/x' do |req, rsp|
     #     rsp.set(title: '事件统计', user: req.param('user', 'alice'))
-    #     rsp.body '<h1>@{title}</h1><p>@{user}</p>'
-    #     rsp.render                          # → @{} 看到 title/user
+    #     rsp.body '<h1>@<{title}></h1><p>@<{user}></p>'
+    #     rsp.render                          # → @<{}> 看到 title/user
     #
     #     # 或者直接 inline（hash 一次性注入）：
     #     rsp.render(title: '事件统计', user: req.param('user', 'alice'))
@@ -598,92 +584,38 @@ class Q
     # 优先级（覆盖关系，后注入的赢）：
     #   1. rsp 实例变量（@header / @code / rsp.set 注入的 @xxx）
     #   2. render 的 hash 参数（最高优先级，hash key 覆盖前面所有同名变量）
+    #
+    # @<{}> 内的 eval 被 Q.capture_stdout 包住，模板内 puts/print 输出会进入 body。
     def render(**vars_hash)
-      ctx_binding = binding
-
-      # rsp 实例变量注入（去 @ 当 local var）
-      instance_variables.each do |ivar|
-        name = ivar.to_s.sub(/\A@/, '')
+      #Q.log(@body.to_s)
+      ctx = binding
+      instance_variables.each do |iv|
+        name = iv.to_s.delete_prefix('@')
         next if name.empty? || name == '_'
-        ctx_binding.local_variable_set(name, instance_variable_get(ivar))
+        ctx.local_variable_set(name, instance_variable_get(iv))
       end
-
-      # hash 注入（最高优先级）
-      vars_hash.each do |k, v|
-        ctx_binding.local_variable_set(k.to_s, v)
-      end
-
-      rendered = Q::Rsp.render_template(@body.to_s) do |code|
+      vars_hash.each { |k, v| ctx.local_variable_set(k.to_s, v) }
+      rendered = @body.to_s.gsub(%r|@<{(?<code>.*?)}>|m) do |match|
+        code = $~[:code]
+        Q.log "render match code=#{code}"
         begin
-          ctx_binding.eval(code).to_s
+          captured = Q.capture_stdout do
+            ret  = ctx.eval(code).to_s
+            Q.log "render eval=#{ret}"
+          end
+          Q.log "render replaced=#{captured}"
+          captured
         rescue StandardError, ScriptError => e
-          "[ERROR: #{e.class}: #{e.message}]"
+          err = "[ERROR: #{e.class}: #{e.message}]"
+          Q.log "render error=#{err}"
+          err
         end
       end
       @body = Q::Body::TextBody.new(rendered)
       self
     end
 
-    # @{} 模板渲染：手写 parser（不限嵌套层，但不支持 Ruby 字符串字面 #{...}）。
-    # 在 @{} 内部必须用 `+` 字符串拼接而非 `#{...}` 插值（因为简单 {} 平衡 parser
-    # 会把字符串里的 `{` `}` 也算一层嵌套，导致匹配错位）。
-    # 例如：  "hello " + name + " world"   ✓
-    #        "hello #{name}"               ✗（会被 parser 误判）
-    def self.render_template(body)
-      # 关键：body 可能含 UTF-8 多字节字符，必须全程按 byte 操作，
-      # 不能用 String#index('@{', i)（i 是 char pos 会被中文搞乱）。
-      # 也不能用 byteslice/at_idx 互转（UTF-8 字符跨多个 byte）。
-      needle = '@{'.b
-      out = +''
-      i = 0
-      while i < body.bytesize
-        at_idx = body.byteslice(i, body.bytesize - i).index(needle)
-        break if at_idx.nil?
-        at_idx += i  # 转回绝对 byte pos
-        out << body.byteslice(i, at_idx - i)
-        # 找匹配的 }（简单 {} 平衡，忽略字符串字面）
-        depth = 1
-        j = at_idx + 2
-        while j < body.bytesize && depth > 0
-          c = body.getbyte(j)
-          case c
-          when 123 then depth += 1  # {
-          when 125                  # }
-            depth -= 1
-            break if depth == 0
-          end
-          j += 1
-        end
-        if depth == 0
-          code = body.byteslice(at_idx + 2, j - at_idx - 2)
-          out << yield(code)
-          i = j + 1
-        else
-          # 未闭合，原样输出
-          out << body.byteslice(at_idx, 2)
-          i = at_idx + 2
-        end
-      end
-      out << body.byteslice(i, body.bytesize - i) if i < body.bytesize
-      out
-    end
-
-    # 工具：去掉多行字符串的共同 leading whitespace
-    #   "  a\n  b\n  c".strip_common_indent == "a\nb\nc"
-    #   "  a\n    b\n".strip_common_indent == "a\n  b\n"  （保留相对缩进）
-    def self.strip_common_indent(s)
-      return s unless s.include?("\n")
-
-      lines = s.split("\n", -1)
-      # 找出非空白行的最小缩进
-      indents = lines.reject { |l| l.strip.empty? }.map { |l| l[/^[ \t]*/].length }
-      return s if indents.empty?
-
-      min = indents.min
-      lines.map { |l| l.length >= min ? l[min..] : l }.join("\n")
-    end
-
-    # 给模板 @{} 注入变量（链式 render 时用：rsp.html(p).render { rsp.set(...) }）
+    # 给模板 @<{}> 注入变量（链式 render 时用：rsp.html(p).render { rsp.set(...) }）
     def set(key, value = nil)
       if key.is_a?(Hash)
         key.each { |k, v| instance_variable_set("@#{k}", v) }
@@ -706,29 +638,17 @@ class Q
     def finish
       return self if @sent
       @sent = true
-
-      if @body.is_a?(Q::Body::StreamBody)
-        # 若还没发过 chunked headers，先发
-        unless @header['Transfer-Encoding']
-          @header.delete('Content-Length')
-          @header['Transfer-Encoding'] = 'chunked'
-          Q.write_stream_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
+      Q::STATE[:responded] = true
+      unless @chunking
+        if @body.size
+          Q.write_headers(@header, content_length: @body.size, code: @code, status: @status)
+          @body.each_chunk { |chunk| Q.write(chunk, true) }
+        else
+          Q.write_headers(@header, content_length: 0, code: @code, status: @status)
         end
-        @body.each_chunk { |chunk| Q.write_stream_chunk(chunk) }
-        Q.write_stream_end
-        @stream_ended = true
-      elsif streaming? && @body.size
-        @body.each_chunk { |chunk| Q.write_stream_chunk(chunk) }
-        Q.write_stream_end
-        @stream_ended = true
-      elsif streaming?
-        # stream / chunk 内部已发完所有 chunked frames
-      elsif @body.size
-        Q.write_stream_headers(@header, content_length: @body.size, code: @code, status: @status)
-        @body.each_chunk { |chunk| Q.write(chunk, true) }
-      else
-        Q.write_stream_headers(@header, content_length: 0, code: @code, status: @status)
+        throw :q_resp_sent, :handled
       end
+      Q.log "stream ..."
       throw :q_resp_sent, :handled
     end
 
@@ -838,7 +758,7 @@ end
 # ============================================================
 class Q
   ONCLOSE_CBS = []
-
+  STATE     = { responded: false }
   class << self
     # --- 脚本定位 ---
     def script_name;     ENV.fetch('Req_Script_Name', nil);     end
@@ -846,7 +766,7 @@ class Q
     def script_path;     ENV.fetch('Req_Script_Path', nil);     end
     def script_dir;      ENV.fetch('Req_Script_Dir', nil);      end
 
-    # 脚本工作目录：脚本所在 dir（不是 dir/rel，rel 是 URL prefix 非文件路径）
+    # 脚本工作目录：脚本所在 dir（不是 URL 上的 restful 路径）
     def script_cwd
       dir = ENV['Req_Script_Dir']
       dir unless dir.nil? || dir.empty?
@@ -863,6 +783,15 @@ class Q
         STDERR.puts ">>[#{Process.pid}]> LOG <#{caller(3, 1).first}> #{v}"
         STDERR.flush
       end
+    end
+
+    def Q.capture_stdout
+      original_stdout = $stdout
+      $stdout = StringIO.new
+      yield
+      $stdout.string
+    ensure
+      $stdout = original_stdout
     end
 
     def write(content, flush = true)
@@ -887,7 +816,7 @@ class Q
     end
 
     # 流式：先发 header + Transfer-Encoding: chunked
-    def write_stream_headers(header, content_length: nil, transfer_encoding: nil, code: 200, status: 'OK')
+    def write_headers(header, content_length: nil, transfer_encoding: nil, code: 200, status: 'OK')
       merged = { 'Connection' => 'close' }.merge(header)
       merged['Content-Length'] = content_length.to_s if content_length
       merged['Transfer-Encoding'] = transfer_encoding if transfer_encoding
@@ -899,13 +828,16 @@ class Q
       STDOUT.flush
     end
 
-    def write_stream_chunk(chunk)
-      data = chunk.to_s
-      STDOUT.write("#{data.bytesize.to_s(16)}\r\n#{data}\r\n")
+    def write_chunk(chunk)
+      data = chunk
+      length = data.to_s.bytesize
+      STDOUT.write("#{length.to_s(16)}\r\n")
+      STDOUT.write(data)
+      STDOUT.write("\r\n")
       STDOUT.flush
     end
 
-    def write_stream_end
+    def write_chunk_end
       STDOUT.write("0\r\n\r\n")
       STDOUT.flush
     end
@@ -948,9 +880,8 @@ class Q
         :not_handled
       end
 
-      # 命中 → 跑 on_close 回调后 exit 0（不继续跑后续 Q.route / END 兜底）
+      # 命中 → exit 0（不继续跑后续 Q.route / END 兜底）
       if caught == :handled
-        #run_on_close_callbacks
         exit 0
       end
       self
@@ -958,36 +889,36 @@ class Q
 
     # --- 路由匹配 ---
 
-    # pattern 写法（**必须以 '/' 开头或为 Regexp**，相对脚本 URL prefix）：
-    #   '/'                 匹配脚本本身
-    #   '/info'             相对脚本 URL（自动加 prefix）
-    #   '/*'                通配当前 prefix 下所有路径
-    #   '/users/<id>'       字符串含命名捕获占位符
+# pattern 写法（必须以 '/' 开头或为 Regexp，对照 Q::MAP_PATH）：
+    #   '/'            匹配 restful 为空（脚本本身调用，无 restful 段）
+    #   '/info'        匹配 MAP_PATH="/info"
+    #   '/*'           通配所有非空 MAP_PATH
+    #   '/users/<id>'  字符串命名捕获占位符（自动转 (?<id>[^/]+)）
     #   /^\/users\/(?<id>\d+)$/  正则（/ 必须显式写，^/$ 写不写都行）
     #
     # 不以 / 开头 → 抛 ArgumentError
     def match_pattern?(pattern)
-      url_prefix = compute_url_prefix
+
       # 每条 pattern 测试前清空 Q::MATCH（避免上一次命中的捕获污染日志）
       Q::MATCH.clear
 
       result = case pattern
                when nil      then true
-               when String   then match_string(pattern, url_prefix)
-               when Regexp   then match_regexp(pattern, url_prefix)
-               when Proc     then pattern.call(REQ_PATH) == true
+               when String   then match_string(pattern, MAP_PATH)
+               when Regexp   then match_regexp(pattern, MAP_PATH)
+               when Proc     then pattern.call(MAP_PATH, REQ_PATH) == true
                else               false
                end
 
-      log_match(pattern, url_prefix, result)
+      log_match(pattern, MAP_PATH, result)
       result
     end
 
     # 内部 helper：把每条路由的匹配结果打到 STDERR（含命中的命名捕获），方便调试路由
-    def log_match(pattern, url_prefix, result)
+    def log_match(pattern, map_path, result)
       matched = result ? 'true ' : 'false'
       caller_line = caller(2, 1).first || 'unknown'
-      msg = "Q.match #{pattern.inspect.ljust(36)} [match=#{matched}] prefix=#{url_prefix.inspect} req=#{REQ_PATH.inspect}"
+      msg = "Q.match #{pattern.inspect.ljust(36)} [match=#{matched}] map_path=#{map_path.inspect} req=#{REQ_PATH.inspect}"
       msg += "  captured=#{Q::MATCH.inspect}" unless Q::MATCH.empty?
       STDERR.puts ">>[#{Process.pid}]> LOG <#{caller_line}> #{msg}"
       STDERR.flush
@@ -996,83 +927,47 @@ class Q
 
     # 字符串 pattern 匹配逻辑
     #
-    # pattern 是**相对脚本 URL 的 path-from-prefix**（必须以 '/' 开头）。
-    #   脚本 cgi/test/index 处理 /test/* 请求
-    #   Q.route '/info'       →  匹配 Req_Path=/test/info  （rel=/test + '/info'）
-    #   Q.route '/users/<id>' →  匹配 Req_Path=/test/users/42
-    #   Q.route '/'           →  匹配 Req_Path=/test （脚本自身 URL）
-    #   Q.route '/*'          →  匹配所有 /test/* 请求
-    def match_string(pattern, url_prefix)
-      raise ArgumentError, "Q.route String pattern 必须以 '/' 开头（relative to script URL prefix），got: #{pattern.inspect}" unless pattern.start_with?('/')
+    # pattern 直接与 MAP_PATH 对照（必须以 '/' 开头）。
+    #   MAP_PATH="/info"       →  pattern '/info' 命中
+    #   MAP_PATH="/users/42"   →  pattern '/users/<id>' 命中（捕获到 id="42"）
+    #   MAP_PATH="/"           →  pattern '/' 命中（restful 为空）
+    #   MAP_PATH 任意非空       →  pattern '/*' 命中
+    def match_string(pattern, map_path)
+      raise ArgumentError, "Q.route String pattern 必须以 '/' 开头，got: #{pattern.inspect}" unless pattern.start_with?('/')
 
-      rel = Q.req_rel_path
       return true if pattern == '/*'
-
-      # '/' 特殊：严格只匹配"脚本本身 URL"（req_path 完全等于 rel，不含 restful 后缀）
-      if pattern == '/'
-        return true  if url_prefix.empty? && REQ_PATH == '/'
-        return true  if !url_prefix.empty? && rel == url_prefix && REQ_PATH == rel
-        return true  if !url_prefix.empty? && rel == url_prefix + '/' && REQ_PATH == rel
-        return false
-      end
+      return true if pattern == map_path
 
       # 含正则元字符或命名捕获的字符串当 Regexp 解析
       if pattern.match?(/[?*+()|^\[\]\\.]/) || pattern.match?(/<[A-Za-z_]\w*>/)
         # 把 <name> 命名捕获占位符转成 (?<name>[^/]+)
         converted = pattern.gsub(/<([A-Za-z_]\w*)>/, '(?<\\1>[^/]+)')
-        # 完整路径 = rel + pattern（pattern 已有 '/' 前缀）
-        full = rel + converted
         # 注意：必须用单引号或 Regexp.escape 防止 \\A 被双引号吃掉
-        re = Regexp.new('\A' + full + '\z')
-        mm = re.match(REQ_PATH)
+        re = Regexp.new('\A' + converted + '\z')
+        mm = re.match(map_path)
         return false unless mm
         Q::MATCH.replace(mm.named_captures.transform_keys(&:to_sym))
         true
       else
         # 字符串精确匹配：完整路径 = rel + pattern
-        (rel + pattern) == REQ_PATH
+        pattern == REQ_PATH
       end
     end
     private :match_string
 
     # Regexp pattern 匹配逻辑
     #
-    # Regexp 也是**相对脚本 URL**（与 string 一致）。
-    #   Q.route /^\/users\/(?<id>\d+)$/  →  \A/test/users/(?<id>\d+)\z
-    #
-    # 规则：
-    #   - 写相对路径（以 / 开头，/ 必须显式写）
-    #   - ^ 和 $ 写不写都行（外层用 \A/\z 统一包）
-    #   - 不以 / 开头 → 抛 ArgumentError
-    def match_regexp(pattern, _url_prefix)
-      rel = Q.req_rel_path
-      # 剥掉 source 里的 ^ 和 $ 锚点（外层用 \A/\z 统一包）
-      src = pattern.source.sub(/\A\^/, '').sub(/\$\z/, '')
-      # ruby %r{...} 写 \/ 实际 source 是 \/（2 字符），regex 等价于 /。
-      # 剥 ^ 后若剩 \/xxx，剥掉前导 \（与 \/ 保持一致）
-      src = src.sub(/\A\\/, '')
-      unless src.start_with?('/')
-        raise ArgumentError, "Q.route Regexp pattern 必须以 / 开头（relative to script URL prefix），got: #{pattern.source.inspect}"
-      end
-      anchored = Regexp.new('\A' + rel + src + '\z', pattern.options)
-      m = anchored.match(REQ_PATH)
+    # Regexp 直接对照 MAP_PATH（必须以 / 开头，/ 必须显式写）。
+    #   pattern /^\/users\/(?<id>\d+)$/  →  匹配 MAP_PATH="/users/42"（捕获到 id="42"）
+    #   ^ 和 $ 写不写都行（外层用 \A/\z 统一包）
+    def match_regexp(pattern, map_path)
+      anchored = Regexp.new('\A' + pattern.source + '\z', pattern.options)
+      m = anchored.match(map_path)
       return false unless m
       Q::MATCH.replace(m.named_captures.transform_keys(&:to_sym))
       true
     end
     private :match_regexp
-
-    # 脚本 URL 前缀。从 Req_Script_Name 去掉 basename。
-    #   Req_Script_Name = "index"         → ""    （脚本在 cgi 根）
-    #   Req_Script_Name = "test/index"    → "/test"
-    #   Req_Script_Name = "api/v2/users"  → "/api/v2"
-    def compute_url_prefix
-      sn = script_name.to_s
-      base = script_basename.to_s
-      rel = sn.sub("/#{base}", '')
-      rel.empty? ? '' : '/' + rel
-    end
-    public :compute_url_prefix
 
     private
 
@@ -1088,19 +983,6 @@ class Q
       end
       rsp.finish unless rsp.sent?
     end
-
-    # 跑 on_close 回调（用于 Q.route 命中 throw :handled 路径）。
-    # END 块兜底路径不调这里（END 块自己有简化版）。
-    def run_on_close_callbacks
-      Q::ONCLOSE_CBS.each_with_index do |cb, i|
-        log " >>> call onclose cbk (#{i}) ->  closed"
-        begin
-          cb.call
-        rescue StandardError => e
-          log "on_close callback #{i} raised: #{e.class}: #{e.message}"
-        end
-      end
-    end
   end
 end
 
@@ -1114,7 +996,7 @@ BEGIN {
 END {
   # 兜底：脚本所有 Q.route 都没匹配当前请求时返 404。
   # （Q.route 命中路径已经 throw :handled 跑完 callback 后 exit 0，不会进这里。）
-  Q.write_resp(404, "Not Found", {}, "unhandled request: #{Q::REQ_PATH} with #{Q::REQ_METHOD}\n")
+  Q.write_resp(404, "Not Found", {}, "unhandled request: #{Q::REQ_PATH} with #{Q::REQ_METHOD}\n") unless Q::STATE[:responded]
 
   Q::ONCLOSE_CBS.each_with_index do |cb, i|
     begin

@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+
+require_relative '../_base_'
+
+# 测试用:小脚本,演示 MAP_PATH 相对 pattern 匹配。
+#   GET /test/echo/t1/42    →  MAP_PATH="/t1/42",  pattern '/t1/<id>' 命中(id=42)
+#   GET /test/echo/u/99     →  MAP_PATH="/u/99",    pattern %r{/u/(?<id>\d+)} 命中
+#   GET /test/echo/t3       →  MAP_PATH="/t3",       pattern '/t3' 命中
+#   GET /test/echo          →  MAP_PATH="/",         pattern '/' 命中兜底
+
+Q.get '/t1/<id>' do |r, p|
+  puts "name: #{r.named_id}"
+  p.ok_text "echo t1 id=#{r.named_id}\n"
+end
+
+Q.get %r{/u/(?<id>\d+)} do |r, p|
+  puts "regex id: #{r.named_id}"
+  p.ok_text "echo u id=#{r.named_id}\n"
+end
+
+Q.get '/t3' do |_r, p|
+  # Pathname 当文件路径 → FileBody
+  Pathname('/tmp/main.c').tap { |pn| puts "file exists? #{pn.exist?}" }
+  p.body(Pathname('/tmp/main.c')).stream
+end
+
+Q.get '/t4' do |_r, p|
+  f = File.open('/tmp/main.c', 'r')
+  p.stream(1) { |i|
+    v = f.read 1
+    Q.log(">>>>>>>>>>> #{v}")
+    v
+  }
+  f.close
+end
+
+Q.get '/t5' do |r, p|
+  # @<{}> 内不能含 {}（gsub 找不到配对），示例代码用简单表达式 + 多行 puts
+  p.body(%(<div>@<{
+    puts "method=" + r.method
+    puts "argv_count=" + r.argv_count.to_s
+  }>
+  @<{ puts "p 123" }></div>)).render
+end
+
+Q.get '/' do |_r, p|
+  p.body("unhandled (兜底: MAP_PATH=/)")
+end

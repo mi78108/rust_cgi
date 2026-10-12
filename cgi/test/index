@@ -2,51 +2,20 @@
 # frozen_string_literal: true
 # test/index — Q._base_.rb 公共 API 测试 + 样例
 #
-# 路由 pattern 全部去 /test 前缀（脚本在 cgi/test/index，自动加 prefix /test）。
-# pattern 写法：
-#   '/info'           →  实际匹配 /test/info
-#   '/users/<id>'     →  相对路径 + 命名捕获
-#   %r{^\/users\/(?<id>\d+)$}  →  相对 Regexp（/ 必须显式写，^/$ 写不写都行）
+# 路由 pattern 对照 Q::MAP_PATH（脚本 URL 之后的 restful 部分）：
+#   Req_Path=/test             → MAP_PATH="/"        （restful 为空）
+#   Req_Path=/test/info        → MAP_PATH="/info"
+#   Req_Path=/test/u/42        → MAP_PATH="/u/42"
+#   Req_Path=/test/demo/x/y    → MAP_PATH="/demo/x/y"
 #
-# 所有 demo 在 GET / 列出（demo 路由 Q.route '/' 匹配 /test 本身）。
-# GET /qa 输出所有 demo 的 curl 命令和期望 status/type，可以直接复制验证。
-# 任何未匹配的路径走底部兜底：rsp.fail_404.type_json.body(...).finish。
+# 为避免和现有 demo path 冲突，所有 demo 加 /demo/ 前缀段。
+#   pattern '/demo/info'       → 匹配 GET /test/demo/info
+#   pattern %r{/demo/regex/(?<id>\d+)}  → 匹配 GET /test/demo/regex/42
 #
-# API 速查（与 _base_.rb 一一对应）：
-#   路由:    Q.route pattern, method: :GET|:POST|[:GET,:PUT] do |req, rsp| ... end
-#   HTTP method 快捷: Q.get / Q.post / Q.put / Q.delete / Q.patch / Q.head / Q.options
-#   Pattern 匹配:
-#     '/'                 脚本本身（/test）
-#     '/info'             相对路径 → /test/info
-#     '/users/<id>'       相对路径 + 命名捕获（<id> 转 (?<id>[^/]+)）
-#     %r{^\/users\/(?<id>\d+)$}  相对 Regexp（自动加 prefix）
-#     '/*'                脚本 prefix 下所有
-#     nil                 兜底（总是匹配）
-#   req 访问器（统一 (key, default=nil) 签名）:
-#     req.method / path / query / body_type / body_length
-#     req.argv(idx) / argv_count / named(name) / params / param(key)
-#     req.header(name) / cookies / cookie(name) / body / body_json / body_text
-#     req.body_form_data { |item| ... }
-#     method_missing 糖: req.argv_0 / req.param_user / req.header_host / req.named_id / req.cookie_session
-#   rsp 链式 (then-style sentinel, 0 参 = 读, 1 参 = 设):
-#     rsp.code / status / body                    # 读: rsp.code;  设+链: rsp.code(200)
-#     rsp.type / type_json / type_html / type_text / type_xml / type_bin(mime)
-#     rsp.header (attr) / header_field / header_remove
-#     rsp.cookie_set(name, value, max_age:, path:, httponly:, secure:, samesite:)
-#     rsp.ok / ok_json / ok_html / ok_text / ok_xml
-#     rsp.fail_400/403/404/405/500/501             # 链: rsp.fail_404.type_json.body(...)
-#     rsp.redirect_to(loc, code: 302, body: '')
-#     rsp.send_file(path, download_as:, mime:)
-#     rsp.type_file(path, mime:, download_as:)      # 拆开 send_file 的 header 部分
-#     rsp.set(hash) / render(**vars_hash)          # @{} 模板
-#     rsp.stream { |n| n < 10 ? "..." : nil }      # 生成器风格, nil 终止
-#     rsp.chunk { "..." }.chunk { "..." }          # 链式单 chunk
-#     rsp.body(IO/path/block/string)               # Q::Body.wrap 智能识别
-#     rsp.finish / sent?
-#   Q 模块:
-#     Q.script_name / basename / path / dir / cwd
-#     Q.read / log / write
-#     Q.on_close { ... }                          # 路由命中后、exit 0 之前回调
+# @<{}> 模板说明：render 把 eval 包在 Q.capture_stdout 里 —— 模板内
+# puts/print 输出进 body；表达式返回值会被吞。
+#   因此 demo 模板里的代码用 puts，不要依赖表达式返回值。
+#   并且 @<{}> 内不能含 {}（gsub 找不到配对），用 do/end 或简单表达式。
 
 require_relative '../_base_'
 
@@ -55,50 +24,49 @@ Q.on_close do
 end
 
 # ============================================================
-# 0) 索引页 — 脚本本身 URL（/test）。Q.route '/' 匹配 prefix 本身
+# 0) 索引页 — 脚本本身 URL（MAP_PATH="/"）
 # ============================================================
 Q.route '/', method: :GET do |_req, rsp|
   rows = [
-    ['#0  GET /',                        '本索引页（脚本本身 URL = /test）'],
-    ['#1  GET /info',                    'req 基本信息 (method/path/query/params/headers/cookies/argv)'],
-    ['#2  GET /req',                     'req 访问器 + 默认值 (param/header/cookie/argv)'],
-    ['#3  GET /req_user/<id>',           'URL 命名捕获 + method_missing 糖（完整 /test/ 前缀写法）'],
-    ['#3a GET /req_user2/<id>',         '相对路径 "req_user2/<id>" —— 自动加 /test/ 前缀'],
-    ['#3b GET /req_user3/<id>',         'Regexp 写法（pattern 含完整 /test/ 前缀）'],
-    ['#3c GET /',                        "Q.route '/' 匹配脚本本身"],
-    ['#4  GET /render?user=alice',       'render(hash) — 一次性注入'],
-    ['#5  GET /render_set?user=bob',     'render + rsp.set — 两次注入'],
-    ['#6  GET /render_multiline',        '多行 heredoc + 4 个 @{} 块'],
-    ['#7a GET /ok_json',                 'rsp.ok_json(obj)'],
-    ['#7b GET /ok_html',                 'rsp.ok_html(str)'],
-    ['#7c GET /ok_text',                 'rsp.ok_text(str)'],
-    ['#7d GET /ok_xml',                  'rsp.ok_xml(str)'],
-    ['#8  GET /header_custom',           'header_field + header_remove'],
-    ['#9  GET /cookie_set',              'cookie_set 多 Set-Cookie'],
-    ['#10 GET /redirect_perm',           '301 永久重定向'],
-    ['#10 GET /redirect_temp',           '302 临时重定向（默认）'],
-    ['#11 GET /fail_404_json',           'fail_404 + type_json'],
-    ['#11 GET /fail_500_html',           'fail_500 + type_html'],
-    ['#11 GET /fail_400_text',           'fail_400 + type_text'],
-    ['#11 GET /fail_403',                'fail_403'],
-    ['#11 GET /fail_405',                'fail_405'],
-    ['#11 GET /fail_501',                'fail_501'],
-    ['#12 GET /stream',                  'stream 生成器风格（block 返值当 chunk，nil 终止）'],
-    ['#12 GET /stream_max',              'stream 同样 nil 终止'],
-    ['#13 GET /chunk',                   'chunk 链式（每调一次一个 frame）'],
-    ['#14 GET /stream_sse',              'text/event-stream SSE 心跳'],
-    ['#15a GET /hawk',                    'body(IO).stream.finish 流式发 IO 对象'],
-    ['#15b GET /download?fn=page.html', 'send_file 一步完成（内部 = type_file + body）'],
-    ['#16 GET /dual_methods',            'method: %i[GET PUT] 多方法'],
-    ['#16 GET /dual_methods',            'Q.get/put/... HTTP method 快捷别名'],
-    ['#17 POST /echo',                   'POST body 回显'],
-    ['#17 POST /echo_json',               'req.body_json 自动解析 + req.body_text 别名'],
-    ['#18 POST /upload',                 'multipart 上传 (curl -F file=@xxx)'],
-    ['#19 GET /sent',                    'finish 幂等（第二次 no-op）'],
-    ['#20 GET /qa',                      '跑测试套件（列出 curl + 期望 status/type）'],
-    ['#   任何未匹配',                     '兜底 → JSON 404'],
+    ['#0  GET /test',                    '本索引页（脚本本身 URL）'],
+    ['#1  GET /test/demo/info',          'req 基本信息 (method/path/argv/params/headers/cookies)'],
+    ['#2  GET /test/demo/req',           'req 访问器 + 默认值 (param/header/cookie/argv)'],
+    ['#3  GET /test/demo/u/<id>',        'URL 命名捕获 + method_missing 糖'],
+    ['#3a GET /test/demo/str/<id>',      '字符串 pattern (含 <name>)'],
+    ['#3b GET /test/demo/rx/<id>',       'Regexp pattern'],
+    ['#4  GET /test/demo/render',        'render(hash) — 一次性注入'],
+    ['#5  GET /test/demo/render_set',    'render + rsp.set — 两次注入'],
+    ['#6  GET /test/demo/render_puts',   'render + 多行 puts 模板'],
+    ['#7a GET /test/demo/ok_json',       'rsp.ok_json(obj)'],
+    ['#7b GET /test/demo/ok_html',       'rsp.ok_html(str)'],
+    ['#7c GET /test/demo/ok_text',       'rsp.ok_text(str)'],
+    ['#7d GET /test/demo/ok_xml',        'rsp.ok_xml(str)'],
+    ['#8  GET /test/demo/header_custom', 'header_field + header_remove'],
+    ['#9  GET /test/demo/cookie_set',    'cookie_set 多 Set-Cookie'],
+    ['#10 GET /test/demo/redirect_perm', '301 永久重定向'],
+    ['#10 GET /test/demo/redirect_temp', '302 临时重定向（默认）'],
+    ['#11 GET /test/demo/fail_404_json', 'fail_404 + type_json'],
+    ['#11 GET /test/demo/fail_500_html', 'fail_500 + type_html'],
+    ['#11 GET /test/demo/fail_400_text', 'fail_400 + type_text'],
+    ['#11 GET /test/demo/fail_403',      'fail_403'],
+    ['#11 GET /test/demo/fail_405',      'fail_405'],
+    ['#11 GET /test/demo/fail_501',      'fail_501'],
+    ['#12 GET /test/demo/stream',        'stream 生成器风格（block 返值当 chunk，nil 终止）'],
+    ['#13 GET /test/demo/chunk',         'chunk 链式（每调一次一个 frame）'],
+    ['#14 GET /test/demo/stream_sse',    'text/event-stream SSE 心跳'],
+    ['#15a GET /test/demo/hawk',         'body(IO).stream.finish 流式发 IO'],
+    ['#15c GET /test/demo/stream_body?kind=proc|stringio|block', 'StreamBody 三种构造（proc/StringIO/block）'],
+    ['#15b GET /test/demo/download',     'send_file 一步完成'],
+    ['#16 GET /test/demo/dual_methods',  '多 method (GET/PUT)'],
+    ['#17 POST /test/demo/echo',         'POST body 回显'],
+    ['#17 POST /test/demo/echo_json',    'req.body_json 自动解析'],
+    ['#18 POST /test/demo/upload',       'multipart 上传'],
+    ['#19 GET /test/demo/sent',          'finish 幂等（第二次 no-op）'],
+    ['#20 GET /test/demo/qa',            'QA 套件（列出 curl + 期望 status/type）'],
+    ['#   任何未匹配',                    '兜底 → JSON 404'],
   ]
-  body = +"<h1>Q._base_.rb API test (script URL prefix: <code>#{Q.compute_url_prefix}</code>)</h1>\n"
+  body = +"<h1>Q._base_.rb API test</h1>\n"
+  body << "<p>script URL prefix: <code>/test</code>（MAP_PATH = 脚本 URL 之后的 restful 部分）</p>\n"
   body << "<table border=\"1\" cellpadding=\"4\" style=\"border-collapse:collapse;font-family:monospace\">"
   body << "<tr style=\"background:#eee\"><th>Endpoint</th><th>演示</th></tr>\n"
   rows.each { |url, desc| body << "<tr><td><a href=\"#{url.split[1]}\">#{url}</a></td><td>#{desc}</td></tr>\n" }
@@ -109,7 +77,7 @@ end
 # ============================================================
 # 1) req 基本信息
 # ============================================================
-Q.route '/info', method: :GET do |req, rsp|
+Q.route '/demo/info', method: :GET do |req, rsp|
   rsp.ok_json(
     method:      req.method,
     path:        req.path,
@@ -128,17 +96,17 @@ Q.route '/info', method: :GET do |req, rsp|
 end
 
 # ============================================================
-# 2) req 访问器 — 统一 (key, default=nil) 签名
+# 2) req 访问器
 # ============================================================
-Q.route '/req', method: :GET do |req, rsp|
+Q.route '/demo/req', method: :GET do |req, rsp|
   rsp.ok_json(
-    param_user:         req.param('user'),                  # 缺 key → nil
-    param_user_or:      req.param('user', 'guest'),         # 缺 key → 'guest'
-    param_qty_or:       req.param('qty', 0),                # 缺 key → 0
+    param_user:         req.param('user'),
+    param_user_or:      req.param('user', 'guest'),
+    param_qty_or:       req.param('qty', 0),
     param_missing_or:   req.param('not_there', 'fallback'),
     header_host:        req.header('host'),
     header_xx_or:       req.header('xx-not-exist', 'n/a'),
-    cookie_seen:        req.cookie('seen'),                 # 没 cookie → nil
+    cookie_seen:        req.cookie('seen'),
     cookie_seen_or:     req.cookie('seen', 'no'),
     argv_0_or:          req.argv(0, 'root'),
     argv_count:         req.argv_count
@@ -146,157 +114,140 @@ Q.route '/req', method: :GET do |req, rsp|
 end
 
 # ============================================================
-# 3) 命名捕获 + method_missing 糖（相对 Regexp 写法，自动加 /test/ 前缀）
+# 3) 命名捕获 — Regexp pattern
 # ============================================================
-Q.route %r{^\/req_user/(?<id>\d+)$}, method: :GET do |req, rsp|
+Q.route %r{/demo/u/(?<id>\d+)}, method: :GET do |req, rsp|
   rsp.ok_json(
-    note:          '相对 regex (自动加 /test/ 前缀)',
-    named_id_via_sym:   req.named(:id),     # 标准 symbol
-    named_id_via_str:   req.named('id'),    # 也接受字符串
-    named_id_via_sugar: req.named_id,       # method_missing: req.named_<name>
-    argv_0:             req.argv(0),
-    argv_0_via_sugar:   req.argv_0,         # method_missing: req.argv_<idx>
-    param_user_or:      req.param_user || 'guest'  # method_missing: req.param_<key>
+    note:                'Regexp pattern（命名捕获）',
+    named_id_via_sym:    req.named(:id),
+    named_id_via_str:    req.named('id'),
+    named_id_via_sugar:  req.named_id,
+    argv_0:              req.argv(0),
+    argv_0_via_sugar:    req.argv_0,
+    param_user_or:       req.param_user || 'guest'
   ).finish
 end
 
-# 3a) 相对路径 "req_user2/<id>" —— 自动加 /test/ 前缀，<id> 转命名捕获
-#     字符串含正则元字符或 <name> → 当 Regexp 解析
-Q.route '/req_user2/<id>', method: :GET do |req, rsp|
+# 3a) 字符串 pattern（含 <name> → 命名捕获）
+Q.route '/demo/str/<id>', method: :GET do |req, rsp|
   rsp.ok_json(
-    note:      '相对路径 pattern（自动加 /test/ 前缀，<id> 转命名捕获）',
-    id:        req.named(:id),
-    id_sugar:  req.named_id
+    note:     '字符串 pattern（含 <id>，自动转命名捕获）',
+    id:       req.named(:id),
+    id_sugar: req.named_id
   ).finish
 end
 
-# 3b) Regexp 写法（自动加 /test/ 前缀，regex 写相对路径：^\/users/...）
-#     ^ 和 $ 在外层用 \A/\z 统一包，pattern 内部写不写都行
-#     但 / 必须显式写在相对路径里（与 string pattern 一致）
-Q.route %r{^\/req_user3/(?<id>\d+)$}, method: :GET do |req, rsp|
-  rsp.ok_json(
-    note: '相对 Regexp 写法（自动加 /test/ 前缀）',
-    id:   req.named(:id)
-  ).finish
-end
-
-# 3b2) Regexp 写法（不带 ^/$ 锚点，外层 \A/\z 统一包也行）
-Q.route %r{\/req_user4/(?<id>\d+)}, method: :GET do |req, rsp|
-  rsp.ok_json(
-    note: '相对 Regexp 不带锚点（外层 \A/\z 统一包）',
-    id:   req.named(:id)
-  ).finish
-end
-
-# 3c) Q.route '/' 匹配脚本本身 URL（prefix 本身 /test 或 /test/）
-Q.route '/', method: :GET do |req, rsp|
-  rsp.ok_json(
-    note:       "Q.route '/' 匹配脚本本身（cgi/test/index 里 '/' 匹配 /test 或 /test/）",
-    url_prefix: Q.compute_url_prefix,
-    req_path:   req.path
-  ).finish
+# 3b) Regexp 不带 ^/$ 锚点
+Q.route %r{/demo/rx/(?<id>\d+)}, method: :GET do |req, rsp|
+  rsp.ok_json(note: 'Regexp 不带锚点', id: req.named(:id)).finish
 end
 
 # ============================================================
 # 4) render(hash) — 一次性注入
 # ============================================================
-Q.route '/render', method: :GET do |req, rsp|
+Q.route '/demo/render', method: :GET do |req, rsp|
   user = req.param('user', 'world')
-  rsp.body(+'' << <<~HTML
-    <h1>hello @{user}</h1>
-    <p>qty: @{qty}</p>
+  qty  = req.param('qty', 0)
+  # 用 puts 风格（capture_stdout 收集 stdout 进 body）
+  rsp.body(+'' << <<~HTML)
+    @<{
+      puts "hello " + user
+      puts "qty: " + qty.to_s
+    }>
   HTML
-  )
-  rsp.render(user: user, qty: req.param('qty', 0))
+  rsp.render(user: user, qty: qty)
   rsp.type_html.finish
 end
 
 # ============================================================
 # 5) render + rsp.set — 两次注入
 # ============================================================
-Q.route '/render_set', method: :GET do |req, rsp|
+Q.route '/demo/render_set', method: :GET do |req, rsp|
   user   = req.param('user', 'guest')
   total  = (1..10).reduce(0) { |a, b| a + b }
   rsp.set(user: user, total: total)
-  rsp.body(+'' << <<~HTML
-    <h1>@{user}</h1>
-    <p>1+2+...+10 = @{total}</p>
+  rsp.body(+'' << <<~HTML)
+    @<{
+      puts "user=" + user
+      puts "1+2+...+10 = " + total.to_s
+    }>
   HTML
-  )
   rsp.render
   rsp.type_html.finish
 end
 
 # ============================================================
-# 6) render_multiline — 多行 @{} 块（4 种场景）
+# 6) render_puts — 多行 @<{}> 块（多场景演示）
 # ============================================================
-Q.route '/render_multiline', method: :GET do |_req, rsp|
+Q.route '/demo/render_puts', method: :GET do |_req, rsp|
   items = %w[apple banana cherry date]
   rsp.set(items: items)
-  rsp.body(+'' << <<~'HTML'
+  rsp.body(+'' << <<~'HTML')
     <!doctype html>
     <html><body>
-      <h1>render_multiline demo</h1>
+      <h1>render_puts demo</h1>
 
       <h2>1) if/else</h2>
-      <pre>@{if items.size > 2
-            'big list (' + items.size.to_s + ' items)'
-          else
-            'small list'
-          end}</pre>
-
-      <h2>2) map + join</h2>
-      <ul>@{items.map { |n| '<li>' + n + '</li>' }.join}</ul>
-
-      <h2>3) reduce + 字符串拼接</h2>
-      <p>total chars: @{(items.map { |s| s.length }.reduce(0, :+)).to_s}</p>
-
-      <h2>4) 嵌套块</h2>
-      <table border="1">@{
-        rows = items.map.with_index do |n, i|
-          '<tr><td>' + (i + 1).to_s + '</td><td>' + n + '</td></tr>'
+      <pre>@<{
+        if items.size > 2
+          puts "big list (" + items.size.to_s + " items)"
+        else
+          puts "small list"
         end
-        rows.join
-      }</table>
+      }></pre>
+
+      <h2>2) each + puts</h2>
+      <ul>@<{
+        items.each do |n|
+          puts "<li>" + n + "</li>"
+        end
+      }></ul>
+
+      <h2>3) reduce + puts</h2>
+      <p>total chars: @<{
+        total = items.reduce(0) do |a, b|
+          a + b.length
+        end
+        puts total.to_s
+      }></p>
     </body></html>
   HTML
-  )
   rsp.render.type_html.finish
 end
 
 # ============================================================
 # 7) ok_json / ok_html / ok_text / ok_xml
 # ============================================================
-Q.route '/ok_json', method: :GET do |_req, rsp|
+Q.route '/demo/ok_json', method: :GET do |_req, rsp|
   rsp.ok_json(ok: true, ts: Time.now.to_i, items: %w[a b c]).finish
 end
 
-Q.route '/ok_html', method: :GET do |_req, rsp|
+Q.route '/demo/ok_html', method: :GET do |_req, rsp|
   rsp.ok_html('<h1>ok_html demo</h1><p>inline html</p>').finish
 end
 
-Q.route '/ok_text', method: :GET do |_req, rsp|
+Q.route '/demo/ok_text', method: :GET do |_req, rsp|
   rsp.ok_text("plain text line 1\nline 2\n").finish
 end
 
-Q.route '/ok_xml', method: :GET do |_req, rsp|
+Q.route '/demo/ok_xml', method: :GET do |_req, rsp|
   rsp.ok_xml('<?xml version="1.0"?><root><item>1</item><item>2</item></root>').finish
 end
 
 # ============================================================
 # 8) header_field / header_remove
 # ============================================================
-Q.route '/header_custom', method: :GET do |_req, rsp|
+Q.route '/demo/header_custom', method: :GET do |_req, rsp|
   rsp.header_field('X-Custom-A', 'aaa')
     .header_field('X-Custom-B', 'bbb')
-    .header_remove('Content-Type')              # 删掉默认 text/html
+    .header_remove('Content-Type')
   rsp.type_json.body('{"demo":"header_field + header_remove"}').finish
 end
 
 # ============================================================
 # 9) cookie_set — 多 Set-Cookie
 # ============================================================
-Q.route '/cookie_set', method: :GET do |_req, rsp|
+Q.route '/demo/cookie_set', method: :GET do |_req, rsp|
   rsp.cookie_set('session',    'abc123', max_age: 3600,   httponly: true, samesite: 'Lax')
     .cookie_set('preference', 'dark',     max_age: 86_400)
     .cookie_set('tracking',   'off',      secure: true)
@@ -306,57 +257,52 @@ end
 # ============================================================
 # 10) redirect_to
 # ============================================================
-Q.route '/redirect_perm', method: :GET do |_req, rsp|
-  rsp.redirect_to('/info', code: 301)
+Q.route '/demo/redirect_perm', method: :GET do |_req, rsp|
+  rsp.redirect_to('/demo/info', code: 301)
 end
 
-Q.route '/redirect_temp', method: :GET do |_req, rsp|
-  rsp.redirect_to('/info', code: 302)        # default
+Q.route '/demo/redirect_temp', method: :GET do |_req, rsp|
+  rsp.redirect_to('/demo/info', code: 302)
 end
 
 # ============================================================
 # 11) fail_xxx 链式
 # ============================================================
-Q.route '/fail_404_json', method: :GET do |_req, rsp|
+Q.route '/demo/fail_404_json', method: :GET do |_req, rsp|
   rsp.fail_404.type_json.body({ error: 'not_found', resource: 'whatever' }.to_json).finish
 end
 
-Q.route '/fail_500_html', method: :GET do |_req, rsp|
+Q.route '/demo/fail_500_html', method: :GET do |_req, rsp|
   rsp.fail_500.type_html.body('<h1>500 boom</h1>').finish
 end
 
-Q.route '/fail_400_text', method: :GET do |_req, rsp|
+Q.route '/demo/fail_400_text', method: :GET do |_req, rsp|
   rsp.fail_400.type_text.body("400 bad request\n").finish
 end
 
-Q.route '/fail_403', method: :GET do |_req, rsp|
+Q.route '/demo/fail_403', method: :GET do |_req, rsp|
   rsp.fail_403.type_html.body('<h1>403 Forbidden</h1>').finish
 end
 
-Q.route '/fail_405', method: :GET do |_req, rsp|
+Q.route '/demo/fail_405', method: :GET do |_req, rsp|
   rsp.fail_405.type_html.body('<h1>405 Method Not Allowed</h1>').finish
 end
 
-Q.route '/fail_501', method: :GET do |_req, rsp|
+Q.route '/demo/fail_501', method: :GET do |_req, rsp|
   rsp.fail_501.type_html.body('<h1>501 Not Implemented</h1>').finish
 end
 
 # ============================================================
-# 12) stream — 生成器风格：block 返值当 chunk，nil/""/false 终止
+# 12) stream — 生成器风格
 # ============================================================
-Q.route '/stream', method: :GET do |_req, rsp|
-  rsp.stream { |n| n < 5 ? "tick #{n}\n" : nil }   # 5 个 chunk 后 nil 终止
-end
-
-# stream 终止：block 返 nil/""/false 结束（不需要 max，块内自管循环边界）
-Q.route '/stream_max', method: :GET do |_req, rsp|
-  rsp.stream { |n| n < 3 ? "row #{n}\n" : nil }       # 3 个 chunk 后 n=3 返 nil 终止
+Q.route '/demo/stream', method: :GET do |_req, rsp|
+  rsp.stream { |n| n < 5 ? "tick #{n}\n" : nil }
 end
 
 # ============================================================
-# 13) chunk — 链式单 chunk，每调一次一个 frame
+# 13) chunk — 链式
 # ============================================================
-Q.route '/chunk', method: :GET do |_req, rsp|
+Q.route '/demo/chunk', method: :GET do |_req, rsp|
   rsp.chunk { "frame 1\n" }
      .chunk { "frame 2\n" }
      .chunk { "frame 3\n" }
@@ -364,27 +310,55 @@ Q.route '/chunk', method: :GET do |_req, rsp|
 end
 
 # ============================================================
-# 14) stream_sse — text/event-stream SSE 心跳
+# 14) stream_sse — text/event-stream
 # ============================================================
-Q.route '/stream_sse', method: :GET do |_req, rsp|
+Q.route '/demo/stream_sse', method: :GET do |_req, rsp|
   rsp.stream(content_type: 'text/event-stream') do |n|
     n < 5 ? "data: tick #{n}\n\n" : nil
   end
 end
 
 # ============================================================
-# 14b) body(IO) + stream 流式发 IO 对象（File/IO/Socket/StringIO）
-#   rsp.body(File.open(path)).stream.finish   ← 一行流式
-# Q::Body.wrap 自动检测 IO → StreamBody，each_chunk 时按 BUFFER_SIZE 读。
+# 14b) body(IO) + stream
 # ============================================================
-Q.route '/hawk', method: :GET do |_req, rsp|
-  rsp.body(File.open('/tmp/w_1612/rust_cgi/cgi/test/page.html', 'rb')).stream.finish
+Q.route '/demo/hawk', method: :GET do |_req, rsp|
+  rsp.body(File.open('/home/mi78108/Projects/rust_cgi/cgi/test/page.html', 'rb')).stream.finish
+end
+
+# ============================================================
+# 14c) StreamBody 三种构造方式演示
+#   - Proc       (新建一个实例,proc 收 emit)
+#   - StringIO   (IO 子类,each_chunk 按 BUFFER_SIZE 读)
+#   - block 给 body( ) (BlockBody.new(&block))
+# size 都未知 → finish 自动走 Transfer-Encoding: chunked
+# ============================================================
+Q.route '/demo/stream_body', method: :GET do |req, rsp|
+  case req.param('kind', 'proc')
+  when 'proc'
+    # Proc: rsp.body(&proc)
+    rsp.body( proc do |emit|
+      3.times { |i| emit.call("proc-chunk-#{i}\n") }
+    end).stream
+  when 'stringio'
+    # StringIO (IO 子类): rsp.body(StringIO.new(str))
+    require 'stringio'
+    data = "line1\nline2\nline3\n"
+    rsp.body(StringIO.new(data)).stream.finish
+  when 'block'
+    # Block: rsp.body { |emit| ... }
+    rsp.body { |emit|
+      4.times { |i| emit.call("block-chunk-#{i}\n") }
+    }.stream
+    Q.log '0000000000000000000000000',rsp.body.class
+  else
+    rsp.fail_400.type_text.body("kind must be one of: proc, stringio, block\n")
+  end
 end
 
 # ============================================================
 # 15) send_file — 静态文件下载
 # ============================================================
-Q.route '/download', method: :GET do |req, rsp|
+Q.route '/demo/download', method: :GET do |req, rsp|
   fn = req.param('fn', 'page.html')
   path = File.join(__dir__, fn)
   if File.readable?(path)
@@ -398,14 +372,14 @@ end
 # ============================================================
 # 16) 多 method 路由
 # ============================================================
-Q.route '/dual_methods', method: %i[GET PUT] do |req, rsp|
+Q.route '/demo/dual_methods', method: %i[GET PUT] do |req, rsp|
   rsp.ok_json(method: req.method, path: req.path, accepted: %w[GET PUT]).finish
 end
 
 # ============================================================
-# 17) POST /echo — 回显 body
+# 17) POST /echo
 # ============================================================
-Q.route '/echo', method: :POST do |req, rsp|
+Q.route '/demo/echo', method: :POST do |req, rsp|
   body = req.body.to_s
   rsp.ok_json(
     method:      req.method,
@@ -417,24 +391,23 @@ Q.route '/echo', method: :POST do |req, rsp|
 end
 
 # ============================================================
-# 17b) POST /echo_json — 演示 req.body_json 自动解析
-#   curl -X POST $BASE/echo_json -H 'Content-Type: application/json' -d '{"x":1}'
+# 17b) POST /echo_json
 # ============================================================
-Q.route '/echo_json', method: :POST do |req, rsp|
-  data = req.body_json   # 自动 rescue JSON::ParserError
+Q.route '/demo/echo_json', method: :POST do |req, rsp|
+  data = req.body_json
   rsp.ok_json(
     parsed:       data,
     parsed_class: data.class.name,
     body_type:    req.body_type,
     body_length:  req.body_length,
-    raw_head:     (req.body_text || '')[0, 200]   # 语义化别名，body 为空时给 ''
+    raw_head:     (req.body_text || '')[0, 200]
   ).finish
 end
 
 # ============================================================
-# 18) POST /upload — multipart 上传
+# 18) POST /upload — multipart
 # ============================================================
-Q.route '/upload', method: :POST do |req, rsp|
+Q.route '/demo/upload', method: :POST do |req, rsp|
   form = req.body_form_data
   if form.nil?
     rsp.fail_400.type_html.body('expected multipart/form-data').finish
@@ -450,68 +423,65 @@ Q.route '/upload', method: :POST do |req, rsp|
 end
 
 # ============================================================
-# 19) finish 幂等 — 第二次 finish no-op
+# 19) finish 幂等
 # ============================================================
-Q.route '/sent', method: :GET do |_req, rsp|
+Q.route '/demo/sent', method: :GET do |_req, rsp|
   rsp.ok_text("first finish\n").finish
-  rsp.finish                                          # 第一次 finish
-  rsp.body('SECOND FINISH SHOULD NOT APPEAR')         # 设 body 但 finish 已发，不会再发
-  rsp.finish                                          # 第二次 no-op (rsp.sent? == true)
+  rsp.finish
+  rsp.body('SECOND FINISH SHOULD NOT APPEAR')
+  rsp.finish
 end
 
 # ============================================================
-# 20) on_close — 进程退出前回调
+# 20) on_close
 # ============================================================
 Q.on_close do
   STDERR.puts "[on_close] pid=#{Process.pid} path=#{Q::REQ_PATH} method=#{Q::REQ_METHOD}"
-  'closed'                                            # 返值会被 END 块打印
+  'closed'
 end
 
 # ============================================================
-# 21) QA 套件索引 — 列出所有 curl + 期望 status/type
-# 注意：cgi/test/index 实际 URL 是 /test/...，下面是用户视角的 URL
+# 21) QA 套件
 # ============================================================
-Q.route '/qa', method: :GET do |_req, rsp|
+Q.route '/demo/qa', method: :GET do |_req, rsp|
   cases = [
-    # [method, user_path, expected_code, expected_type]
-    ['GET',  '/',                          200, 'text/html'],
-    ['GET',  '/info',                      200, 'application/json'],
-    ['GET',  '/req',                       200, 'application/json'],
-    ['GET',  '/test/req_user/42',          200, 'application/json'],
-    ['GET',  '/test/req_user2/42',         200, 'application/json'],
-    ['GET',  '/test/req_user3/42',         200, 'application/json'],
-    ['GET',  '/render',                    200, 'text/html'],
-    ['GET',  '/render_set',                200, 'text/html'],
-    ['GET',  '/render_multiline',          200, 'text/html'],
-    ['GET',  '/ok_json',                   200, 'application/json'],
-    ['GET',  '/ok_html',                   200, 'text/html'],
-    ['GET',  '/ok_text',                   200, 'text/plain'],
-    ['GET',  '/ok_xml',                    200, 'application/xml'],
-    ['GET',  '/header_custom',             200, 'application/json'],
-    ['GET',  '/cookie_set',                200, 'application/json'],
-    ['GET',  '/redirect_perm',             301, 'text/html'],
-    ['GET',  '/redirect_temp',             302, 'text/html'],
-    ['GET',  '/fail_404_json',             404, 'application/json'],
-    ['GET',  '/fail_500_html',             500, 'text/html'],
-    ['GET',  '/fail_400_text',             400, 'text/plain'],
-    ['GET',  '/fail_403',                  403, 'text/html'],
-    ['GET',  '/fail_405',                  405, 'text/html'],
-    ['GET',  '/fail_501',                  501, 'text/html'],
-    ['GET',  '/stream',                    200, 'text/event-stream'],
-    ['GET',  '/stream_max',                200, 'text/event-stream'],
-    ['GET',  '/chunk',                     200, 'text/event-stream'],
-    ['GET',  '/stream_sse',                200, 'text/event-stream'],
-    ['GET',  '/hawk',                      200, 'text/event-stream'],
-    ['GET',  '/download',                  200, nil],                # 由 send_file 设
-    ['GET',  '/dual_methods',              200, 'application/json'],
-    ['PUT',  '/dual_methods',              200, 'application/json'],
-    ['POST', '/echo',                      200, 'application/json'],
-    # /echo_json 需要传 application/json body
-    ['POST', '/echo_json',                 200, 'application/json'],
-    # /upload 需要传 multipart body（用 curl -F file=@xxx），裸 POST 返 400
-    ['POST', '/upload',                    400, 'text/html'],
-    ['GET',  '/sent',                      200, 'text/plain'],
-    ['GET',  '/test/zzz_not_exist',        404, 'application/json'],  # 兜底
+    # [method, user_url, expected_code, expected_type]
+    ['GET',  '/test',                           200, 'text/html'],
+    ['GET',  '/test/demo/info',                 200, 'application/json'],
+    ['GET',  '/test/demo/req',                  200, 'application/json'],
+    ['GET',  '/test/demo/u/42',                 200, 'application/json'],
+    ['GET',  '/test/demo/str/42',               200, 'application/json'],
+    ['GET',  '/test/demo/rx/42',                200, 'application/json'],
+    ['GET',  '/test/demo/render',               200, 'text/html'],
+    ['GET',  '/test/demo/render_set',           200, 'text/html'],
+    ['GET',  '/test/demo/render_puts',          200, 'text/html'],
+    ['GET',  '/test/demo/ok_json',              200, 'application/json'],
+    ['GET',  '/test/demo/ok_html',              200, 'text/html'],
+    ['GET',  '/test/demo/ok_text',              200, 'text/plain'],
+    ['GET',  '/test/demo/ok_xml',               200, 'application/xml'],
+    ['GET',  '/test/demo/header_custom',        200, 'application/json'],
+    ['GET',  '/test/demo/cookie_set',           200, 'application/json'],
+    ['GET',  '/test/demo/redirect_perm',        301, 'text/html'],
+    ['GET',  '/test/demo/redirect_temp',        302, 'text/html'],
+    ['GET',  '/test/demo/fail_404_json',        404, 'application/json'],
+    ['GET',  '/test/demo/fail_500_html',        500, 'text/html'],
+    ['GET',  '/test/demo/fail_400_text',        400, 'text/plain'],
+    ['GET',  '/test/demo/fail_403',             403, 'text/html'],
+    ['GET',  '/test/demo/fail_405',             405, 'text/html'],
+    ['GET',  '/test/demo/fail_501',             501, 'text/html'],
+    ['GET',  '/test/demo/stream',               200, 'text/event-stream'],
+    ['GET',  '/test/demo/chunk',                200, 'text/event-stream'],
+    ['GET',  '/test/demo/stream_sse',           200, 'text/event-stream'],
+    ['GET',  '/test/demo/hawk',                 200, 'text/event-stream'],
+    ['GET',  '/test/demo/stream_body',          200, 'text/event-stream'],
+    ['GET',  '/test/demo/download',             200, nil],
+    ['GET',  '/test/demo/dual_methods',         200, 'application/json'],
+    ['PUT',  '/test/demo/dual_methods',         200, 'application/json'],
+    ['POST', '/test/demo/echo',                 200, 'application/json'],
+    ['POST', '/test/demo/echo_json',            200, 'application/json'],
+    ['POST', '/test/demo/upload',               400, 'text/html'],
+    ['GET',  '/test/demo/sent',                 200, 'text/plain'],
+    ['GET',  '/test/demo/zzz_not_exist',        404, 'application/json'],
   ]
   out = +"<h1>QA — 复制下面命令验证</h1>\n<pre>BASE=http://127.0.0.1:3000\n"
   cases.each do |m, path, want_code, want_type|
@@ -520,9 +490,8 @@ Q.route '/qa', method: :GET do |_req, rsp|
     out << "curl -s -i #{flag}\"$BASE#{path}\"#{body_p}   # expect #{want_code}"
     out << (want_type ? " #{want_type}\n" : "\n")
   end
-  # 单独说明 multipart
-  out << "\n# /upload 需要传 multipart body:\n"
-  out << "curl -s -i -X POST \"$BASE/test/upload\" -F file=@/etc/hostname\n"
+  out << "\n# /demo/upload 需要传 multipart body:\n"
+  out << "curl -s -i -X POST \"$BASE/test/demo/upload\" -F file=@/etc/hostname\n"
   out << '</pre>'
   rsp.type_html.body(out).finish
 end
@@ -533,4 +502,3 @@ end
 Q.route do |req, rsp|
   rsp.fail_404.type_json.body({ error: 'not_found', method: req.method, path: req.path }.to_json).finish
 end
-
