@@ -40,7 +40,7 @@ Q.get '/t5' do |r, p|
     puts "method=" + r.method
     puts "argv_count=" + r.argv_count.to_s
   }>
-  @<{ puts "p 123" }></div>)).render
+  @<{ puts "p 123" }></div>)).render(r:r)
 end
 
 Q.get '/' do |_r, p|
