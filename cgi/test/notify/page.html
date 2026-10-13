@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ws + notify demo</title>
+  <style>
+    body { font-family: monospace; max-width: 800px; margin: 20px auto; padding: 0 16px; }
+    #log { white-space: pre-wrap; background: #f5f5f5; padding: 12px; min-height: 200px; border: 1px solid #ccc; }
+    .row { margin: 8px 0; }
+    input, button { font-size: 14px; padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <h1>ws + notify demo</h1>
+  <p>ws://<span id="host"></span>/test/notify/ws</p>
+
+  <div class="row">
+    <input id="msg" type="text" placeholder="message" style="width:60%">
+    <button id="send">send</button>
+    <span id="status" style="margin-left:8px;color:#888">disconnected</span>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    var hostEl = document.getElementById('host');
+    var logEl = document.getElementById('log');
+    var msgEl = document.getElementById('msg');
+    var sendBtn = document.getElementById('send');
+    var statusEl = document.getElementById('status');
+
+    hostEl.textContent = location.host;
+
+    // ws wire format 跟 spider (生产者) 协议对齐。
+    // 本 CGI 假设 spider 直接透传裸 user message，每条消息用换行分隔（demo 简化）。
+    // 实际生产请按 spider 文档实现 length-prefix / frame 边界等。
+    var ws = new WebSocket('ws://' + location.host + '/test/notify/ws');
+
+    ws.onopen = function () {
+      statusEl.textContent = 'connected';
+      statusEl.style.color = '#0a0';
+    };
+    ws.onclose = function () {
+      statusEl.textContent = 'disconnected';
+      statusEl.style.color = '#888';
+    };
+    ws.onerror = function (e) {
+      logEl.textContent += '[error] ' + JSON.stringify(e) + '\n';
+    };
+    ws.onmessage = function (ev) {
+      logEl.textContent += '< ' + ev.data + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    function sendMsg() {
+      var v = msgEl.value;
+      if (!v) return;
+      ws.send(v);
+      logEl.textContent += '> ' + v + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+      msgEl.value = '';
+    }
+    sendBtn.onclick = sendMsg;
+    msgEl.onkeydown = function (e) { if (e.key === 'Enter') sendMsg(); };
+  </script>
+</body>
+</html>

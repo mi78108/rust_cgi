@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require_relative '../_base_'
+require_relative '../_ext_form_'
 
 # 测试用:小脚本,演示 MAP_PATH 相对 pattern 匹配。
 #   GET /test/echo/t1/42    →  MAP_PATH="/t1/42",  pattern '/t1/<id>' 命中(id=42)

@@ -135,6 +135,7 @@ class Q
       @body_length = QEnv.fetch_i('content-length', 0)
       @params      = nil
       @cookies     = nil
+      @on_data_cbk = nil
     end
 
     # --- restful argv ---
@@ -188,6 +189,20 @@ class Q
     def body(length = @body_length)
       return nil if @body_length.zero?
       Q.read(length)
+    end
+
+    def on_data(&cbk)
+      loop do
+        begin
+          val = Q.recv(BUFFER_SIZE)
+          ret = cbk.call(val)
+          Q.write(ret) unless ret.nil?
+        rescue EOFError
+          Q.log("connection EOF")
+          #throw :q_resp_sent, :handled
+          break
+        end
+      end
     end
 
     # 解析 body 为 JSON Hash/Array。90% POST JSON 的标准模式。
@@ -592,12 +607,12 @@ class Q
         code = $~[:code]
         Q.log "render match code=#{code}"
         begin
-          captured = Q.capture_stdout do
-            ret  = ctx.eval(code).to_s
-            Q.log "render eval=#{ret}"
+          captured, ret = Q.capture_stdout do
+            ctx.eval(code).to_s
           end
+          Q.log "render eval=#{ret}"
           Q.log "render replaced=#{captured}"
-          captured
+          captured.empty? ? ret : captured
         rescue StandardError, ScriptError => e
           err = "[ERROR: #{e.class}: #{e.message}]"
           Q.log "render error=#{err}"
@@ -632,6 +647,8 @@ class Q
       return self if @sent
       @sent = true
       Q::STATE[:responded] = true
+      return self if BODY_METHOD == WEBSOCKET
+
       unless @chunking
         if @body.size
           Q.write_headers(@header, content_length: @body.size, code: @code, status: @status)
@@ -647,100 +664,9 @@ class Q
   end
 end
 
-# ============================================================
-# Q::Form / Q::FormItem — multipart/form-data 解析
-# ============================================================
-class Q
-  class FormItem
-    attr_reader :name, :filename, :content_type, :content
-
-    def initialize(header, content)
-      cd = (header['Content-Disposition'] || '').split(';').map(&:strip)
-      name = nil
-      filename = nil
-      cd.each do |seg|
-        k, v = seg.split('=', 2)
-        next unless v
-        v = v.gsub(/\A"|"\z/, '')
-        name = v if k == 'name'
-        filename = v if k == 'filename'
-      end
-      @name = name
-      @filename = filename
-      @content_type = header['Content-Type'] || 'text/plain'
-      @content = content
-    end
-
-    def file?
-      !@filename.nil? && !@filename.empty?
-    end
-
-    def to_h
-      {
-        name: @name,
-        filename: @filename,
-        content_type: @content_type,
-        size: @content.bytesize,
-      }
-    end
-  end
-
-  class Form
-    attr_reader :items
-
-    def self.parse(boundary, &block)
-      return nil unless boundary
-      boundary = boundary.strip
-      items = []
-      STDIN.readline # 丢弃首行 CRLF
-      loop do
-        headers = {}
-        while (line = STDIN.readline.chomp) != ''
-          next unless line.include?(':')
-          k, v = line.split(':', 2)
-          headers[k.strip] = v.strip
-        end
-        content = +''
-        finish_marker = nil
-        loop do
-          line = STDIN.readline
-          if line.start_with?("--#{boundary}--\r\n") || line.start_with?("--#{boundary}--\n") || line.chomp == "--#{boundary}--"
-            finish_marker = :final
-            break
-          elsif line.start_with?("--#{boundary}--") || line.start_with?("--#{boundary}")
-            finish_marker = :more
-            break
-          else
-            content << line
-          end
-        end
-        content.chomp! # 去末尾 CRLF
-        item = FormItem.new(headers, content)
-        items << item
-        block&.call(item)
-        break if finish_marker == :final
-      end
-      new(items)
-    end
-
-    def initialize(items)
-      @items = items
-    end
-
-    def [](name)
-      @items.find { |i| i.name == name.to_s }
-    end
-
-    def each_file
-      return enum_for(:each_file) unless block_given?
-      @items.each { |i| yield i if i.file? }
-    end
-
-    def files_count
-      @items.count(&:file?)
-    end
-  end
-end
+# Q::Form / Q::FormItem 已迁移到 _ext_form_.rb（multipart 扩展模块）。
+#   - 使用方需显式 require_relative '_ext_form_'
+#   - Req#body_form_data 内部调用 Q::Form.parse，未加载时抛 NameError
 
 # ============================================================
 # Q — 路由 + I/O + lifecycle
@@ -748,6 +674,7 @@ end
 class Q
   ONCLOSE_CBS = []
   STATE     = { responded: false }
+  WEBSOCKET = 'WEBSOCKET'.freeze
   class << self
     # --- 脚本定位 ---
     def script_name;     ENV.fetch('Req_Script_Name', nil);     end
@@ -767,6 +694,10 @@ class Q
       length.nil? || length <= 0 ? STDIN.read : STDIN.read(length)
     end
 
+    def recv(max_size)
+      STDIN.readpartial(max_size)
+    end
+
     def log(*info)
       info.each do |v|
         STDERR.puts ">>[#{Process.pid}]> LOG <#{caller(3, 1).first}> #{v}"
@@ -777,8 +708,8 @@ class Q
     def Q.capture_stdout
       original_stdout = $stdout
       $stdout = StringIO.new
-      yield
-      $stdout.string
+      ret = yield
+      return $stdout.string, ret
     ensure
       $stdout = original_stdout
     end
@@ -853,6 +784,12 @@ class Q
       end
     end
 
+    # WebSocket 路由快捷别名
+    #   Q.ws '/echo' do |req| req.on_data { |data| "echo: #{data}" } end
+    def ws(pattern = nil, &block)
+      route(pattern, method: WEBSOCKET, &block)
+    end
+
     def route(pattern = nil, method: nil, &block)
       # 兜底：pattern 和 method 都 nil → 总是匹配
       caught = catch(:q_resp_sent) do
@@ -862,6 +799,15 @@ class Q
         end
 
         methods = method.nil? ? nil : Array(method).map(&:to_s).map(&:upcase)
+        # WS 路由：method 含 'WEBSOCKET' 时只看 BODY_METHOD（HTTP 请求直接跳过）
+        if methods&.include?('WEBSOCKET')
+          if BODY_METHOD == 'WEBSOCKET' && match_pattern?(pattern)
+            exec_route_block(block)
+            throw :q_resp_sent, :handled
+          end
+          next
+        end
+
         if (methods.nil? || methods.empty? || methods.include?(REQ_METHOD)) && match_pattern?(pattern)
           exec_route_block(block)
           throw :q_resp_sent, :handled
@@ -985,6 +931,7 @@ BEGIN {
 END {
   # 兜底：脚本所有 Q.route 都没匹配当前请求时返 404。
   # （Q.route 命中路径已经 throw :handled 跑完 callback 后 exit 0，不会进这里。）
+  # WS 模式下没 404 协议，spider 通过 STDIN EOF 触发关闭即可。
   Q.write_resp(404, "Not Found", {}, "unhandled request: #{Q::REQ_PATH} with #{Q::REQ_METHOD}\n") unless Q::STATE[:responded]
 
   Q::ONCLOSE_CBS.each_with_index do |cb, i|

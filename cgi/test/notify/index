@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# test/notify/index — WebSocket + MulticastMember demo
+#
+# 流程：
+#   - 浏览器 ws → CGI → MulticastMember.send(:chat, msg) 广播到同网段
+#                    → CGI echo 写回浏览器
+#   - mcast peer → CGI notify(:chat) callback → 推到 Queue
+#                  → 主 loop drain → 写到浏览器（Q.write）
+#
+# 线程模型：
+#   - mcast 内部 loop thread 收到包后同步调 notify callback（只 push 进 Queue）
+#   - 主 ws loop 只在 $stdin 与 Queue 两处拿数据，统一写 $stdout，无并发写
+#
+# 限制（CGI lifecycle）：
+#   - 每次 ws 连接 fork 一个 CGI 进程，exit 时 mcast 释放
+#   - 双向场景若需更长生命周期，得让 spider 常驻 mcast 并通过 fd/pipe 灌给 CGI
+
+require_relative '../../_base_'
+require_relative '../../_ext_notify_'
+
+# ============================================================
+# 0) page.html — ws 客户端页面
+# ============================================================
+Q.route '/', method: :GET do |req, rsp|
+  page = File.join(__dir__, 'page.html')
+  if File.readable?(page)
+    rsp.type_html.body(File.read(page)).finish
+  else
+    rsp.fail_404.type_text.body("page.html not found at #{page}\n").finish
+  end
+end
+
+# ============================================================
+# 1) 索引页
+# ============================================================
+Q.route '/notify', method: :GET do |req, rsp|
+  body = +"<h1>WebSocket + MulticastMember demo</h1>\n"
+  body << "<ul>\n"
+  body << "  <li><a href=\"notify/page.html\">打开 ws 客户端页面</a></li>\n"
+  body << "  <li>mcast group/port: 默认 239.255.0.1:5000</li>\n"
+  body << "  <li>同网段起另一个 spider + 这个 CGI 即可看到 mcast peer</li>\n"
+  body << "</ul>\n"
+  rsp.type_html.body(body).finish
+end
+
+# ============================================================
+# 2) WebSocket — /notify/ws
+#   双向：浏览器输入 ↔ CGI ↔ mcast 群组
+# ============================================================
+Q.ws '/ws' do |req|
+  m = MulticastMember.new("cgi-#{Process.pid}")   # new 即自动 start
+  m.notify(:chat) do |msg|
+    # msg.from 是 "ip:port" 字符串（不是 hash），用 msg.name 取 peer name
+    Q.write "[#{msg.name}] #{msg.text}\n"
+  end
+  req.on_data do |val|
+    m.send(:chat, "mm #{val}")
+    nil
+  end
+  m.stop
+end

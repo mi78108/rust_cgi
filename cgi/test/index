@@ -18,6 +18,7 @@
 #   并且 @<{}> 内不能含 {}（gsub 找不到配对），用 do/end 或简单表达式。
 
 require_relative '../_base_'
+require_relative '../_ext_form_'
 
 Q.on_close do
   Q.log 'bye'
@@ -62,6 +63,7 @@ Q.route '/', method: :GET do |_req, rsp|
     ['#17 POST /test/demo/echo_json',    'req.body_json 自动解析'],
     ['#18 POST /test/demo/upload',       'multipart 上传'],
     ['#19 GET /test/demo/sent',          'finish 幂等（第二次 no-op）'],
+    ['#21 WS /test/demo/ws_echo',       'WebSocket echo（Q.ws + req.on_data）'],
     ['#20 GET /test/demo/qa',            'QA 套件（列出 curl + 期望 status/type）'],
     ['#   任何未匹配',                    '兜底 → JSON 404'],
   ]
@@ -429,6 +431,24 @@ Q.route '/demo/sent', method: :GET do |_req, rsp|
   rsp.finish
   rsp.body('SECOND FINISH SHOULD NOT APPEAR')
   rsp.finish
+end
+
+# ============================================================
+# 21) WebSocket echo — Q.ws / Q.route method: :WEBSOCKET 演示
+#   浏览器（spider）↔ CGI 只传裸 user message（CGI 不接触 ws frame）。
+#   spider 端按你设计的 wire format 解/编（未定，先盘）。
+#
+# Block 内直接用 req.on_data 读 + Q.write 回写（Req#on_data 已封装好）：
+#   Q.ws '/demo/ws_echo' do |req|
+#     req.on_data do |chunk|
+#       "echo: #{chunk}"   # block 返回值自动 Q.write 写回
+#     end
+#   end
+# ============================================================
+Q.ws '/demo/ws_echo' do |req|
+  req.on_data do |chunk|
+    "echo: #{chunk}"
+  end
 end
 
 # ============================================================
