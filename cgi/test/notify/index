@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# test/notify/index — WebSocket + MulticastMember demo
+# test/notify/index — WebSocket + SocketNotify demo
 #
 # 流程：
-#   - 浏览器 ws → CGI → MulticastMember.send(:chat, msg) 广播到同网段
+#   - 浏览器 ws → CGI → SocketNotify.emit(:chat, msg) 广播到同网段
 #                    → CGI echo 写回浏览器
 #   - mcast peer → CGI notify(:chat) callback → 推到 Queue
 #                  → 主 loop drain → 写到浏览器（Q.write）
@@ -36,28 +36,46 @@ end
 # 1) 索引页
 # ============================================================
 Q.route '/notify', method: :GET do |req, rsp|
-  body = +"<h1>WebSocket + MulticastMember demo</h1>\n"
+  body = +"<h1>WebSocket + SocketNotify / FsNotify demo</h1>\n"
   body << "<ul>\n"
-  body << "  <li><a href=\"notify/page.html\">打开 ws 客户端页面</a></li>\n"
+  body << "  <li><a href=\"notify/page.html\">SocketNotify (UDP mcast)</a></li>\n"
+  body << "  <li><a href=\"notify/fs.html\">FsNotify (FS IPC)</a></li>\n"
   body << "  <li>mcast group/port: 默认 239.255.0.1:5000</li>\n"
+  body << "  <li>fs root: /tmp/notify_fs</li>\n"
   body << "  <li>同网段起另一个 spider + 这个 CGI 即可看到 mcast peer</li>\n"
+  body << "  <li>开多个浏览器访问 fs.html，跨 CGI 进程消息互通</li>\n"
   body << "</ul>\n"
   rsp.type_html.body(body).finish
 end
 
 # ============================================================
-# 2) WebSocket — /notify/ws
+# 2) WebSocket — /page/ws （page.html 自动从 URL 推导）
 #   双向：浏览器输入 ↔ CGI ↔ mcast 群组
 # ============================================================
-Q.ws '/ws' do |req|
-  m = MulticastMember.new("cgi-#{Process.pid}")   # new 即自动 start
-  m.notify(:chat) do |msg|
-    # msg.from 是 "ip:port" 字符串（不是 hash），用 msg.name 取 peer name
+Q.ws '/page/ws' do |req|
+  m = SocketNotify.new("cgi-#{Process.pid}").notify(:chat) do |msg|
     Q.write "[#{msg.name}] #{msg.text}\n"
   end
   req.on_data do |val|
-    m.send(:chat, "mm #{val}")
+    m.emit(:chat, "mm #{val}")
     nil
   end
   m.stop
+end
+
+# ============================================================
+# 3) WebSocket — /fs.html/ws （FsNotify 演示）
+#   双向：浏览器输入 ↔ CGI ↔ FS IPC
+#   同 root 下的其他 CGI/进程互相能收到（跨进程，靠文件系统当 socket）
+# ============================================================
+Q.ws '/fs.html/ws' do |req|
+  fs = FsNotify.new("cgi-#{Process.pid}")  # 默认 root = /tmp/notify_fs
+  fs.notify(:chat) do |msg|
+    Q.write "[#{msg.name}] #{msg.text}\n"
+  end
+  req.on_data do |val|
+    fs.emit(:chat, "fs:#{val}")
+    nil
+  end
+  fs.stop
 end

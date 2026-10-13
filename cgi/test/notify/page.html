@@ -12,7 +12,7 @@
 </head>
 <body>
   <h1>ws + notify demo</h1>
-  <p>ws://<span id="host"></span>/test/notify/ws</p>
+  <p>ws://<span id="host"></span><span id="ws-path"></span></p>
 
   <div class="row">
     <input id="msg" type="text" placeholder="message" style="width:60%">
@@ -24,17 +24,22 @@
 
   <script>
     var hostEl = document.getElementById('host');
+    var pathEl = document.getElementById('ws-path');
     var logEl = document.getElementById('log');
     var msgEl = document.getElementById('msg');
     var sendBtn = document.getElementById('send');
     var statusEl = document.getElementById('status');
 
     hostEl.textContent = location.host;
+    // 页面 URL 是 .../<name>.html → ws 路径是 .../<name>/ws
+    var base = location.pathname.replace(/\.html$/, '');
+    var wsPath = base + '/ws';
+    pathEl.textContent = wsPath;
 
     // ws wire format 跟 spider (生产者) 协议对齐。
     // 本 CGI 假设 spider 直接透传裸 user message，每条消息用换行分隔（demo 简化）。
     // 实际生产请按 spider 文档实现 length-prefix / frame 边界等。
-    var ws = new WebSocket('ws://' + location.host + '/test/notify/ws');
+    var ws = new WebSocket('ws://' + location.host + wsPath);
 
     ws.onopen = function () {
       statusEl.textContent = 'connected';
