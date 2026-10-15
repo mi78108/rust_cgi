@@ -1,0 +1,28 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/notes/read — GET /root/notes/read/<slug>
+#
+# 跟 /root/posts/read 完全同构 (复用同一个 _read_tpl.rb)。
+# page.html 的 notes widget 抽屉走 iframe → 这个端点,
+# 主页不需要引 markdown-it / notes.js。
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+require_relative '../posts/_read_tpl'
+
+Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
+  slug = req.named(:slug)
+  note = find_note(slug)
+  if note.nil?
+    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_html('note', slug)).finish
+    next
+  end
+
+  html = render_read_page_html(
+    kind:    'notes',
+    slug:    slug,
+    title:   esc_html(note[:title]),
+    excerpt: esc_html(excerpt_from_body(note[:body])),
+  )
+  rsp.type('text/html; charset=utf-8').body(html).finish
+end

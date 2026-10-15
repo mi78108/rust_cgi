@@ -1,0 +1,29 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/posts/read — GET /root/posts/read/<slug>
+#
+# 独立阅读页 (单链 URL):
+#   https://.../root/posts/read/<slug>
+# 后端只 SSR <title>/<meta>/<header>; 正文/编辑/分页都走客户端 posts.js 接管。
+# HTML 模板跟 /root/notes/read 共用 _read_tpl.rb。
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+require_relative '_read_tpl'
+
+Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
+  slug = req.named(:slug)
+  post = find_post(slug)
+  if post.nil?
+    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_html('post', slug)).finish
+    next
+  end
+
+  html = render_read_page_html(
+    kind:    'posts',
+    slug:    slug,
+    title:   esc_html(post[:title]),
+    excerpt: esc_html(excerpt_from_body(post[:body])),
+  )
+  rsp.type('text/html; charset=utf-8').body(html).finish
+end

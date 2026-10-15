@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/notes/get — GET /root/notes/get/<slug>
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+
+Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
+  slug = req.named(:slug)
+  note = find_note(slug)
+  if note.nil?
+    rsp.code(404).status('Not Found').ok_json({ ok: false, error: "note not found", data: { slug: slug } }).finish
+    next
+  end
+  rsp.ok_json({ ok: true, data: with_prev_next(slug, note) }).finish
+end

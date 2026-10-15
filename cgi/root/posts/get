@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/posts/get — GET /root/posts/get/<slug>
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+
+Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
+  slug = req.named(:slug)
+  post = find_post(slug)
+  if post.nil?
+    rsp.code(404).status('Not Found').ok_json({ ok: false, error: "post not found", data: { slug: slug } }).finish
+    next
+  end
+  rsp.ok_json({ ok: true, data: post_with_prev_next(slug, post) }).finish
+end

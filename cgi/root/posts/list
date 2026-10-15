@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/posts/list — GET /api/v1/posts
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+
+Q.get '/*' do |_req, rsp|
+  list = all_posts.map { |p| serialize_post_list(p) }
+  rsp.ok_json({ ok: true, data: { posts: list, count: list.size, generated_at: Time.now.utc.iso8601 } }).finish
+end

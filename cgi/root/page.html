@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hawk / personal site — notes, posts, stack</title>
+<style>
+  /* ---------- tokens ---------- */
+  :root{
+    --bg:#f4f1de;
+    --bg-2:#ecead7;
+    --grid:#e6e2c8;
+    --ink:#0f0f12;
+    --ink-2:#2a2a30;
+    --muted:#5a5a64;
+    --rule:#1a1a1f;
+    --lime:#c4f542;
+    --lime-ink:#0f0f12;
+    --yellow:#ffd84a;
+    --red:#ff4d4d;
+    --cyan:#22c7d6;
+    --term-bg:#0f0f12;
+    --term-fg:#e8e8e0;
+    --term-dim:#7a7a82;
+    --term-lime:#c4f542;
+    --term-amber:#ffd84a;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Inter","Helvetica Neue",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    font-size:16px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:"JetBrains Mono","IBM Plex Mono","Menlo","Courier New",ui-monospace,monospace}
+  a{color:inherit;text-decoration:none}
+
+  body::before{
+    content:"";
+    position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background-image:
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size:48px 48px;
+    background-position:-1px -1px;
+    mask-image:radial-gradient(ellipse at 50% 30%, #000 50%, transparent 95%);
+  }
+
+  .wrap{max-width:1180px;margin:10px auto;padding:0 28px;}
+
+  /* ---------- nav ---------- */
+  .nav{
+    display:flex;align-items:center;gap:28px;
+    padding:18px 0;border-bottom:1px solid var(--rule);
+  }
+  .brand{
+    display:flex;align-items:center;gap:10px;
+    font-weight:700;font-size:18px;letter-spacing:-.01em;
+  }
+  .brand .logo{
+    width:34px;height:34px;display:grid;place-items:center;
+    background:var(--ink);color:var(--lime);
+    font-family:"JetBrains Mono",monospace;font-weight:800;font-size:18px;
+  }
+  .nav-links{display:flex;gap:22px;margin-left:14px}
+  .nav-links a{font-weight:500;font-size:15px;color:var(--ink-2)}
+  .nav-links a:hover{color:var(--ink);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:4px}
+  .nav-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .nav-right .sign{font-weight:500;font-size:15px}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:10px 18px;font-weight:600;font-size:15px;
+    background:var(--ink);color:var(--bg);
+    border:1px solid var(--ink);cursor:pointer;
+    transition:transform .08s ease;
+  }
+  .btn:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--ink)}
+  .btn.primary{background:var(--lime);color:var(--lime-ink)}
+  .btn.primary:hover{box-shadow:4px 4px 0 var(--ink)}
+  .btn.ghost{background:transparent;color:var(--ink)}
+
+  /* ---------- hero ---------- */
+  .hero{
+    display:grid;grid-template-columns:1.05fr .95fr;
+    gap:32px;align-items:center;
+    padding:64px 0 56px;
+  }
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:10px;
+    border:1px solid var(--ink);
+    background:var(--bg);
+    padding:8px 14px;
+    font-family:"JetBrains Mono",monospace;font-weight:600;font-size:12px;
+    letter-spacing:.14em;text-transform:uppercase;
+    box-shadow:3px 3px 0 var(--ink);
+  }
+  .eyebrow .sq{width:10px;height:10px;background:var(--lime);display:inline-block}
+  h1{
+    font-size:clamp(48px, 6.6vw, 92px);
+    line-height:.96;letter-spacing:-.035em;
+    font-weight:800;margin:22px 0 18px;
+  }
+  h1 em{font-style:normal;background:var(--lime);padding:0 .12em;box-shadow:6px 6px 0 var(--ink);display:inline-block;transform:translate(-2px,-2px)}
+  .hero p.lede{
+    font-size:19px;color:var(--ink-2);max-width:520px;margin:0 0 28px;
+  }
+  .hero p.lede strong{font-weight:600;color:var(--ink)}
+
+  .check{
+    display:flex;align-items:stretch;
+    border:1px solid var(--ink);
+    background:var(--bg);
+    box-shadow:4px 4px 0 var(--ink);
+    margin:10px 0 14px;
+  }
+  .check .pre{
+    padding:14px 14px;background:var(--ink);color:var(--lime);
+    font-family:"JetBrains Mono",monospace;font-weight:600;font-size:11px;
+    letter-spacing:.12em;display:flex;flex-direction:column;justify-content:center;gap:2px;
+    border-right:1px solid var(--ink);min-width:140px;
+  }
+  .check .pre span{display:block;color:#fff;opacity:.5;font-weight:500}
+  .check input{
+    flex:1;border:0;outline:0;background:transparent;
+    font:600 20px "JetBrains Mono",monospace;color:var(--ink);
+    padding:0 14px;min-width:0;
+  }
+  .check .dot{
+    display:flex;align-items:center;gap:10px;padding:0 16px;
+    border-left:1px solid var(--ink);
+    font-family:"JetBrains Mono",monospace;color:var(--ink-2);font-size:14px;
+  }
+  .check button{
+    border:0;border-left:1px solid var(--ink);
+    background:var(--lime);color:var(--lime-ink);
+    font:700 14px "JetBrains Mono",monospace;letter-spacing:.14em;
+    padding:0 28px;cursor:pointer;
+  }
+  .check button:hover{background:var(--yellow)}
+  /* 移动端: search box 改为垂直堆叠, 否则 .pre/dot/button 固定宽度挤掉 input */
+  @media (max-width: 640px){
+    .check{flex-wrap:wrap;box-shadow:none}
+    .check .pre{flex:0 0 auto;border-right:0;border-bottom:1px solid var(--ink);min-width:0;width:100%}
+    .check input{flex:1 1 100%;min-height:42px;padding:10px 14px;font-size:16px}
+    .check .dot{display:none}
+    .check button{flex:1 1 100%;border-left:0;border-top:1px solid var(--ink);padding:12px}
+  }
+  .preview{
+    font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--muted);
+    margin:4px 0 22px;
+  }
+  .preview b{color:var(--ink);font-weight:600}
+
+  .hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+
+  /* ---------- terminal mockup card ---------- */
+  .console{
+    position:relative;
+    background:var(--term-bg);color:var(--term-fg);
+    border:1px solid var(--ink);
+    box-shadow:8px 8px 0 var(--ink);
+    font-family:"JetBrains Mono",monospace;font-size:13px;
+  }
+  .console .ctitle{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 14px;border-bottom:1px solid #1f1f24;
+    background:#14141a;
+  }
+  .console .ctitle .dots{display:flex;gap:6px}
+  .console .ctitle .dots i{width:11px;height:11px;display:inline-block}
+  .console .ctitle .dots i:nth-child(1){background:var(--red)}
+  .console .ctitle .dots i:nth-child(2){background:var(--yellow)}
+  .console .ctitle .dots i:nth-child(3){background:var(--lime)}
+  .console .ctitle .label{margin-left:auto;font-size:11px;letter-spacing:.18em;color:#7a7a82;text-transform:uppercase}
+  .console .cbody{display:grid;grid-template-columns:1.5fr 1fr;gap:0}
+  .console .cbody > div{border-right:1px solid #1f1f24;padding:18px 18px 22px}
+  .console .cbody > div:last-child{border-right:0}
+  .cmdl{font-family:"JetBrains Mono",monospace;font-size:12.5px;line-height:1.55;color:var(--term-dim)}
+  .cmdl .cmd{color:var(--term-fg)}
+  .cmdl .cmd .y{color:var(--term-amber)}
+  .cmdl .cmd .g{color:var(--term-lime)}
+  .cmdl .caret{display:inline-block;width:7px;height:14px;background:var(--term-lime);vertical-align:-2px;animation:blink 1.05s steps(2,start) infinite;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+  .big{
+    font-family:"Inter",sans-serif;font-weight:800;
+    font-size:30px;letter-spacing:-.02em;color:#fff;
+    margin:18px 0 18px;line-height:1.05;
+  }
+  .big .tld{color:var(--term-lime)}
+  .rows{display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px;align-items:center;font-size:11.5px;color:#7a7a82}
+  .rows .k{color:#9a9aa3;font-family:"JetBrains Mono",monospace;letter-spacing:.14em;text-transform:uppercase}
+  .rows .v{color:#fff;font-family:"JetBrains Mono",monospace}
+  .rows .v em{font-style:normal;color:var(--term-lime);background:rgba(196,245,66,.12);padding:1px 6px;border:1px solid rgba(196,245,66,.4)}
+  .rows .v em.amber{color:var(--term-amber);background:rgba(255,216,74,.1);border-color:rgba(255,216,74,.4)}
+  .badge-live{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--lime);color:var(--ink);
+    font-weight:800;font-size:11px;letter-spacing:.16em;padding:3px 8px;
+    font-family:"JetBrains Mono",monospace;
+  }
+  .badge-live::before{
+    content:"";width:6px;height:6px;background:var(--ink);border-radius:50%;
+    animation:pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse{50%{opacity:.45}}
+  .right-col h4{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.18em;color:#7a7a82;margin:0 0 12px;font-weight:500}
+  .stack{display:grid;gap:8px}
+  .row-rec{
+    border:1px solid #1f1f24;padding:10px 12px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+    font-family:"JetBrains Mono",monospace;font-size:12px;color:#cfcfcf;
+  }
+  .row-rec .tag{
+    background:#1d1d23;color:#fff;font-weight:700;font-size:11px;padding:3px 7px;letter-spacing:.1em;
+  }
+  .row-rec .meta{color:#7a7a82;font-size:11px}
+  .row-rec .ok{color:var(--term-lime);font-weight:700;font-size:11px;letter-spacing:.14em}
+
+  .console-wrap{position:relative}
+  .console-wrap::before,
+  .console-wrap::after{
+    content:"";position:absolute;inset:8px -8px -8px 8px;
+    background:var(--yellow);z-index:-1;
+  }
+  .console-wrap::after{background:var(--cyan);inset:16px -16px -16px 16px;z-index:-2}
+
+  /* fastfetch 风格 (左 logo ASCII, 右 key/value) */
+  .ff-body{display:grid;grid-template-columns:auto 1fr;gap:18px;padding:18px;font-family:"JetBrains Mono",monospace;font-size:12.5px;line-height:1.55}
+  .ff-logo{
+    margin:0;color:var(--term-lime);text-shadow:0 0 6px rgba(196,245,66,.5);
+    white-space:pre;font-size:11px;line-height:1.05;
+    align-self:start;
+  }
+  .ff-info{
+    margin:0;display:grid;grid-template-columns:max-content 1fr;gap:0 12px;align-content:start;
+    color:var(--term-fg);
+  }
+  .ff-info dt{
+    color:var(--term-amber);font-weight:600;letter-spacing:.04em;text-transform:lowercase;
+    padding-right:4px;
+  }
+  .ff-info dt::after{content:":"}
+  .ff-info dd{margin:0;color:var(--term-fg)}
+  .ff-info dd .hl{color:var(--term-lime)}
+  .ff-info dd .dim{color:var(--term-dim)}
+  @media (max-width:880px){.ff-body{grid-template-columns:1fr}}
+
+  /* ---------- mount containers (notes/posts strips) ---------- */
+  .strip-section{
+    /* margin removed to align with header/footer */
+  }
+  .strip-section header{
+    display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;
+  }
+  .strip-section h2{
+    margin:0;font-size:20px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);
+    font-family:"JetBrains Mono",monospace;
+  }
+  .strip-section h2 .dim{color:var(--muted);font-weight:500}
+  .strip-section .item-list{display:flex;flex-direction:column;margin-left:-28px;margin-right:-28px}
+  /* 移动端 wrap padding 缩小, item-list 的 -28px margin 会让 item 边框溢出 strip-section */
+  @media (max-width: 880px){
+    .strip-section .item-list{margin-left:0;margin-right:0}
+  }
+  .strip-section .item{
+    border:1px solid var(--ink);background:var(--bg);
+    padding:22px 28px 24px;margin-bottom:-1px;
+    display:flex;flex-direction:column;gap:10px;min-height:200px;
+    cursor:pointer;
+  }
+  .strip-section .item:first-child{border-radius:4px 4px 0 0}
+  .strip-section .item:last-child{border-radius:0 0 4px 4px}
+  .strip-section .item:hover{background:var(--bg-2)}
+  .strip-section .item .m{
+    font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;color:var(--muted);
+    text-transform:uppercase;
+  }
+  .strip-section .item h4{
+    margin:2px 0 4px;font-size:19px;font-weight:700;letter-spacing:-.015em;line-height:1.2;color:var(--ink);
+  }
+  .strip-section .item .e{font-size:14px;color:var(--ink-2);margin:0;line-height:1.5;flex:1}
+  .strip-section .item .tg{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
+  .strip-section .item .tg span{
+    font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.1em;
+    padding:2px 7px;border:1px solid var(--ink);color:var(--ink);text-transform:lowercase;
+  }
+  .strip-section .state{padding:48px 28px;color:var(--muted);font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.1em;text-align:left}
+
+  /* system strip (live ws push) */
+  .sys-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink);border-left:1px solid var(--ink)}
+  .sys-card{
+    border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);
+    padding:18px 24px 20px;background:var(--bg);
+    display:flex;flex-direction:column;gap:6px;min-height:120px;
+  }
+  .sys-card:hover{background:var(--bg-2)}
+  .sys-card .k{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+  .sys-card .v{font-family:"Inter",sans-serif;font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;color:var(--ink)}
+  .sys-card .v .u{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);font-weight:500;margin-left:4px;letter-spacing:.08em}
+  @media (max-width:880px){.sys-grid{grid-template-columns:1fr}}
+  /* 3-col grid on wide screens */
+  @media (min-width:880px){
+    .strip-section .item-list{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink);margin:0 -28px}
+    .strip-section .item{border-radius:0;border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);border-left:0;min-height:200px;padding:22px 28px 24px}
+  }
+
+  /* ---------- stats ---------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(2,1fr);
+    border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);
+    /*margin:48px 0 0;*/
+  }
+  .stat{padding:32px 0;text-align:left;border-right:1px solid var(--ink)}
+  .stat:last-child{border-right:0}
+  .stat .n{font-family:"Inter",sans-serif;font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:1}
+  .stat .lbl{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);letter-spacing:.18em;text-transform:uppercase;margin-top:8px}
+  .stat .n sup{font-size:18px;color:var(--muted);font-weight:600;margin-left:4px;vertical-align:super}
+
+  /* ---------- features ---------- */
+  .features{padding:88px 0 64px}
+  .features .head{display:grid;grid-template-columns:1.1fr .9fr;gap:32px;align-items:end;margin-bottom:36px}
+  .features h2{
+    font-size:clamp(36px,4.4vw,58px);font-weight:800;letter-spacing:-.03em;line-height:1.02;margin:0;
+  }
+  .features .head p{color:var(--ink-2);margin:0;font-size:16px;max-width:380px}
+  .grid6{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink);border-left:1px solid var(--ink)}
+  .card{
+    border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);
+    padding:28px 26px 30px;background:var(--bg);
+    display:flex;flex-direction:column;gap:14px;min-height:230px;
+    position:relative;
+  }
+  .card:hover{background:var(--bg-2)}
+  .card .num{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .card h3{font-size:24px;font-weight:700;letter-spacing:-.02em;margin:0;line-height:1.15}
+  .card p{margin:0;color:var(--ink-2);font-size:14.5px}
+  .card .ico{
+    width:36px;height:36px;display:grid;place-items:center;
+    border:1px solid var(--ink);background:var(--lime);
+    font-family:"JetBrains Mono",monospace;font-weight:800;font-size:14px;
+  }
+  .card .ico.a{background:var(--yellow)}
+  .card .ico.b{background:#fff}
+  .card .ico.c{background:var(--ink);color:var(--lime)}
+  .card .ico.d{background:var(--cyan);color:var(--ink)}
+  .card .ico.e{background:var(--red);color:#fff}
+  .card .ico.f{background:var(--bg);color:var(--ink)}
+
+  /* ---------- support ---------- */
+  .support{
+    background:var(--ink);color:var(--bg);
+    padding:72px 0;
+    position:relative;overflow:hidden;
+  }
+  .support::before{
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.04) 1px, transparent 1px);
+    background-size:48px 100%;
+    pointer-events:none;
+  }
+  .support .tag{font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.18em;color:var(--lime);text-transform:uppercase}
+  .support h2{
+    font-size:clamp(36px,4.4vw,58px);font-weight:800;letter-spacing:-.03em;line-height:1.05;
+    margin:12px 0 18px;max-width:760px;
+  }
+  .support p{color:#cfcfd6;max-width:640px;font-size:16px;margin:0 0 26px}
+  .support .btn{background:var(--lime);color:var(--ink)}
+  .support .row{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--ink);padding:48px 0 24px;background:var(--bg)}
+  .fgrid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:36px;margin-bottom:36px}
+  .fbrand .logo{margin-bottom:14px}
+  .fbrand p{color:var(--ink-2);font-size:14px;max-width:280px;margin:0 0 12px}
+  .fbrand .x{font-family:"JetBrains Mono",monospace;color:var(--ink);font-weight:700}
+  .fcol h4{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.18em;color:var(--ink);margin:0 0 14px;text-transform:uppercase}
+  .fcol ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+  .fcol li a{color:var(--ink-2);font-size:14px}
+  .fcol li a:hover{color:var(--ink);text-decoration:underline}
+  .flegal{
+    display:flex;justify-content:space-between;align-items:center;
+    padding-top:18px;border-top:1px solid var(--ink);
+    font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);
+  }
+  .flegal .status{display:flex;align-items:center;gap:8px}
+  .flegal .dot{width:8px;height:8px;background:var(--lime);display:inline-block}
+
+  @media (max-width: 880px){
+    .hero{grid-template-columns:1fr;gap:40px;padding:40px 0}
+    .features .head{grid-template-columns:1fr;gap:12px}
+    .grid6{grid-template-columns:1fr 1fr}
+    .stats{grid-template-columns:1fr 1fr}
+    .stat{border-right:0;border-bottom:1px solid var(--ink)}
+    .stat:nth-child(2n){border-right:0}
+    .fgrid{grid-template-columns:1fr 1fr}
+    .console .cbody{grid-template-columns:1fr}
+    .console .cbody > div{border-right:0;border-bottom:1px solid #1f1f24}
+    .nav-links{display:none}
+  }
+
+  /* 移动端 (<=640px): 进一步单列化, header 紧凑, drawer 全屏 */
+  @media (max-width: 640px){
+    body{overflow-x:hidden}     /* 兜底: 任何子元素溢出都不会出横向滚动条 */
+    .wrap{padding:0 16px}
+    .nav{padding:12px 16px;gap:10px}
+    .brand{font-size:14px}
+    .nav-right .sign{font-size:13px}
+    .nav-right .btn.primary{padding:6px 10px;font-size:13px}
+    .hero{padding:24px 0 32px;gap:24px}
+    h1{font-size:clamp(34px, 11vw, 56px);margin:14px 0 12px}
+    .hero p.lede{font-size:16px;margin:0 0 18px}
+    .hero-cta{gap:10px}
+    .grid6{grid-template-columns:1fr}
+    .stats{grid-template-columns:1fr 1fr}
+    .stat{padding:16px 12px}
+    .stat .n{font-size:36px}
+    .fgrid{grid-template-columns:1fr;gap:24px}
+    .fbrand{margin-bottom:0}
+    .features{grid-template-columns:1fr;gap:18px}
+    .features .head{grid-template-columns:1fr;gap:14px}
+    .features .card{padding:14px}
+    .sys-grid{grid-template-columns:1fr}
+    .sys-card{padding:14px 16px}
+    .console .cbody{grid-template-columns:1fr}
+    .console .ctitle{padding:10px 14px}
+    .console .cbody > div{padding:14px 16px;font-size:12px}
+    .strip-section{padding:24px 16px}
+    .strip-section .item{padding:14px 16px}
+    .strip-section .item .t{font-size:16px}
+    .strip-section .item .e{font-size:13px}
+    .support{padding:32px 16px}
+    .support h2{font-size:24px}
+    .flegal{flex-direction:column;align-items:flex-start;gap:10px}
+    /* drawer 在窄屏全屏 (避开全屏按钮, 默认就是全屏) */
+    .dr{width:100vw;left:0}
+    .dr.posts{width:100vw}
+    .dr-head{padding:10px 14px}
+    .dr-body{padding:18px 18px 28px}
+    /* 移动端隐藏 fullscreen toggle (drawer 已是 100vw 全屏) */
+    #notes-drawer-fs,#posts-drawer-fs{display:none}
+    /* drawer 适配 iPhone 底部 home indicator 安全区 */
+    .dr-body{padding-bottom:max(28px, env(safe-area-inset-bottom))}
+    /* 移动端取消 brutalist box-shadow 偏移, 防止元素溢出视口右边 */
+    .console{box-shadow:none}
+    .check{box-shadow:none}
+    .eyebrow{box-shadow:2px 2px 0 var(--ink)}
+    .hero-cta .btn{box-shadow:2px 2px 0 var(--ink)}
+    .hero-cta .btn:hover{box-shadow:2px 2px 0 var(--ink);transform:none}
+    h1 em{box-shadow:3px 3px 0 var(--ink);transform:translate(-1px,-1px)}
+  }
+  /* ---------- 移动端基础优化 (全局) ---------- */
+  /* 防止 iOS 在旋转 / 字号变化时缩放文本 */
+  html, body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  /* 避免点击蓝色高亮 + iOS callout */
+  a, button, .item, .sys-card, .stat, .feature { -webkit-tap-highlight-color: transparent; }
+  /* 触控元素至少 44px 高度 (Apple HIG) */
+  button { min-height: 44px; }
+  /* iOS 输入框需要 ≥16px 否则自动放大 */
+  input, textarea, select { font-size: 16px; }
+
+  /* 极窄屏 (<=480px): 进一步紧凑, 适合 iPhone SE / 旧 Android */
+  @media (max-width: 480px){
+    .wrap{padding:0 12px}
+    .nav{padding:10px 12px}
+    .nav-right .sign{display:none}            /* RSS 链接极窄屏隐藏, 留空间给主 CTA */
+    .nav-right .btn.primary{padding:5px 10px;font-size:12px}
+    .hero{padding:20px 0 24px;gap:18px}
+    h1{font-size:clamp(28px, 10vw, 40px)}
+    .hero p.lede{font-size:14px;margin:0 0 14px}
+    .eyebrow{font-size:10px;padding:6px 10px;box-shadow:2px 2px 0 var(--ink)}
+    .hero-cta .btn{padding:7px 12px;font-size:13px}
+    .features .head h2{font-size:18px}
+    .features .head p{font-size:13px}
+    .features .card{padding:12px;gap:8px}
+    .grid6 .cell{padding:12px;font-size:13px}
+    .stats .stat .n{font-size:30px}
+    .stats .stat .lbl{font-size:10px}
+    .support{padding:24px 12px}
+    .support h2{font-size:20px}
+    .support p{font-size:14px}
+    .fbrand p{font-size:13px}
+    .fgrid{gap:18px}
+    .fbrand{gap:14px}
+    .fbrand .logo{width:32px;height:32px;font-size:18px}
+    .strip-section{padding:20px 12px}
+    .strip-section header h2{font-size:18px}
+    .strip-section .item{padding:12px 14px}
+    .strip-section .item .t{font-size:15px}
+    .strip-section .item .e{font-size:12.5px}
+    .sys-card .v{font-size:14px}
+    .console .ctitle .label{display:none}     /* header label 隐藏, 节省宽度 */
+    .console .cbody > div{padding:10px 12px}
+    .footer{padding:36px 12px 28px}
+    .flegal{font-size:10.5px}
+    /* drawer 极窄屏: 关闭按钮更大, 适配手指 */
+    .dr-head button{min-height:36px}
+    .dr-body{padding:14px 14px 22px}
+    .dr-body h1{font-size:22px}
+    .dr-body .meta{font-size:10px;gap:8px}
+    .dr-body .body{font-size:15px;line-height:1.65}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .caret,.badge-live::before{animation:none}
+  }
+
+  /* ---------- drawer (mounted from page.html, hosts notes/posts readers) ---------- */
+  .dr-mask{
+    position:fixed;inset:0;background:rgba(15,15,18,.4);z-index:9000;
+    opacity:0;pointer-events:none;transition:opacity .18s ease;
+  }
+  .dr-mask.open{opacity:1;pointer-events:auto}
+  .dr{
+    position:fixed;top:0;right:0;bottom:0;width:min(620px, 92vw);z-index:9100;
+    background:var(--bg);border-left:1px solid var(--ink);
+    box-shadow:-12px 0 0 var(--ink);
+    transform:translateX(100%);transition:transform .22s cubic-bezier(.2,.7,.2,1);
+    display:flex;flex-direction:column;
+  }
+  /* hidden attribute 默认 UA 是 display:none, 但 .dr{display:flex} 优先级更高覆盖了它
+     -> drawer hidden=true 时仍然渲染(只是 transform 出视口外). 在窄屏 viewport=1280, drawer 默认 width:min(620, 92vw)=620
+     + transform translateX(100%)=620px -> left=1280, right=1900 (整个在视口外). 但 box-shadow -12px 0 0 让阴影向左画 12px
+     -> 阴影在 left=1268~1280 之间 -> 刚好 12px 落在视口右边露出 */
+  .dr[hidden]{display:none}
+  .dr-mask[hidden]{display:none}
+  .dr.posts{width:min(720px, 92vw)}
+  .dr.open{transform:translateX(0)}
+  .dr.fullscreen{width:100vw;left:0;right:0;box-shadow:none;
+    transition:width .22s cubic-bezier(.2,.7,.2,.2), left .22s cubic-bezier(.2,.7,.2,.2)}
+  .dr.fullscreen:not(.open){transform:translateX(100%)}
+  .dr-head{
+    display:flex;align-items:center;gap:10px;
+    padding:14px 18px;border-bottom:1px solid var(--ink);
+    background:var(--bg-2);
+  }
+  .dr-head .dots{display:flex;gap:6px}
+  .dr-head .dots i{width:11px;height:11px;display:inline-block}
+  .dr-head .dots i:nth-child(1){background:var(--red)}
+  .dr-head .dots i:nth-child(2){background:var(--yellow)}
+  .dr-head .dots i:nth-child(3){background:var(--lime)}
+  .dr-head .title{
+    font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.18em;
+    color:var(--ink);text-transform:uppercase;flex:1;text-align:center;
+  }
+  .dr-head button{
+    background:transparent;border:1px solid var(--ink);font-family:"JetBrains Mono",monospace;
+    font-weight:700;font-size:12px;padding:4px 10px;cursor:pointer;color:var(--ink);
+  }
+  .dr-head button:hover{background:var(--ink);color:var(--bg)}
+  .dr-body{overflow-y:auto;flex:1;padding:24px 28px 36px}
+  .dr-body h1{font-size:32px;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:6px 0 12px}
+  .dr-body .meta{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;padding-bottom:14px;border-bottom:1px solid var(--ink);margin-bottom:18px}
+  .dr-body .meta .badge{background:var(--lime);color:var(--ink);padding:2px 7px;letter-spacing:.16em}
+  .dr-body .body{font-size:16px;line-height:1.7;color:var(--ink-2)}
+  .dr-body .body p{margin:0 0 14px}
+  .dr-body .body h2{font-size:22px;font-weight:700;letter-spacing:-.01em;margin:24px 0 10px;color:var(--ink)}
+  .dr-body .body h3{font-size:18px;font-weight:700;margin:18px 0 8px;color:var(--ink)}
+  .dr-body .body ul,.dr-body .body ol{margin:0 0 14px;padding-left:22px}
+  .dr-body .body li{margin:4px 0}
+  .dr-body .body code{font-family:"JetBrains Mono",monospace;font-size:13.5px;background:var(--bg-2);padding:1px 6px;border:1px solid var(--ink)}
+  .dr-body .body pre{background:var(--ink);color:var(--bg);padding:14px 16px;font-family:"JetBrains Mono",monospace;font-size:13px;line-height:1.55;overflow-x:auto;margin:0 0 18px}
+  .dr-body .body pre code{background:transparent;border:0;padding:0;color:var(--bg)}
+  .dr-body .body blockquote{border-left:4px solid var(--lime);padding:4px 14px;margin:0 0 14px;background:var(--bg-2);color:var(--ink)}
+  .dr-body .body table{border-collapse:collapse;margin:0 0 14px;width:100%;font-size:14px}
+  .dr-body .body th,.dr-body .body td{border:1px solid var(--ink);padding:6px 10px;text-align:left}
+  .dr-body .body th{background:var(--bg-2);font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.06em}
+  .dr-body .body a{color:var(--ink);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+  .dr-body .body strong{font-weight:700;color:var(--ink)}
+  .dr-body .body em{font-style:italic}
+  .dr-body .pnav{margin-top:24px;padding-top:16px;border-top:1px solid var(--ink);display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .dr-body .pnav .pn{border:1px solid var(--ink);padding:12px 14px;display:flex;flex-direction:column;gap:4px;text-decoration:none;color:var(--ink);background:var(--bg)}
+  .dr-body .pnav .pn:hover{background:var(--bg-2)}
+  .dr-body .pnav .pn.next{text-align:right}
+  .dr-body .pnav .pn .l{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .dr-body .pnav .pn .v{font-weight:600;font-size:14.5px;line-height:1.25}
+  .dr-body .pnav .pn.disabled{opacity:.35;pointer-events:none}
+  .dr-body .state{padding:24px;text-align:center;font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.1em;color:var(--muted)}
+  .dr-body .state.err{color:var(--red)}
+  .strip-section .item{cursor:pointer}
+</style>
+</head>
+<body>
+
+<header class="wrap nav">
+  <a class="brand" href="/root">
+    <span class="logo">H</span>
+    <span>hawk<span style="color:var(--muted)">/portfolio</span></span>
+  </a>
+  <nav class="nav-links">
+    <a href="/root/notes">Notes</a>
+    <a href="/root/posts">Posts</a>
+    <a href="/root/stack">Stack</a>
+    <a href="/root/now">Now</a>
+    <a href="/root/contact">Contact</a>
+  </nav>
+  <div class="nav-right">
+    <a href="/root/notes.rss" class="sign">RSS</a>
+    <a href="/root/notes" class="btn primary">Read notes →</a>
+  </div>
+</header>
+
+<main class="wrap hero">
+  <div>
+    <span class="eyebrow"><span class="sq"></span> HOBBYIST / BUILDER</span>
+    <h1>我造小巧、锋利的工具 &mdash; 也写它们教会我的事。</h1>
+    <p class="lede">
+      我是 <strong>hawk</strong> &mdash; 在 Gentoo 上跑一套 <strong>Rust + Ruby</strong> 单文件网关,
+      在这里记录它什么时候崩、什么能用、下次我会换个什么做法。
+    </p>
+
+    <div class="check">
+      <div class="pre">
+        <span>JUMP</span>
+        TO SECTION
+      </div>
+      <input id="sub" type="text" placeholder="notes, sensors, chatroom…" autocomplete="off" spellcheck="false">
+      <div class="dot">↵ enter</div>
+      <button id="checkBtn">GO</button>
+    </div>
+    <p class="preview">→ <b id="preview">notes</b> <span id="status">— jump to first match</span></p>
+
+    <div class="hero-cta">
+      <a href="/root/notes" class="btn primary">读最新笔记</a>
+      <a href="/root/posts" class="btn ghost">看长文 →</a>
+    </div>
+  </div>
+
+  <div class="console-wrap">
+    <div class="console" role="img" aria-label="system info">
+      <div class="ctitle">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="mono" style="color:#cfcfcf;font-size:12px">hawk@gentoo — fastfetch</span>
+        <span class="label">SYSTEM</span>
+      </div>
+      <div class="ff-body">
+        <pre class="ff-logo" aria-hidden="true">       _,---.._
+      /_  __ \_
+       / /  \ \
+      / /    \ \
+     / /      \ \
+    / /        \ \_
+   /_/          \__\
+  hawk@gentoo</pre>
+        <dl class="ff-info" id="ff-info">
+          <dt>OS</dt><dd>Gentoo Linux x86_64</dd>
+          <dt>Kernel</dt><dd id="ff-kernel">6.18.35-gentoo-r1-hawk</dd>
+          <dt>Uptime</dt><dd id="ff-uptime">—</dd>
+          <dt>Shell</dt><dd>zsh 5.9</dd>
+          <dt>Resolution</dt><dd id="ff-res">—</dd>
+          <dt>DE</dt><dd>xterm</dd>
+          <dt>WM</dt><dd>i3</dd>
+          <dt>Terminal</dt><dd>st-256color</dd>
+          <dt>CPU</dt><dd>AMD Ryzen 9 7950X (16) @ 5.700GHz</dd>
+          <dt>GPU</dt><dd>AMD Radeon RX 7900 XTX</dd>
+          <dt>Memory</dt><dd id="ff-mem">—</dd>
+          <dt>Disk</dt><dd>2.0 TB / 4.0 TB (50%)</dd>
+          <dt>Network</dt><dd id="ff-net">192.168.7.1 / 1 GbE</dd>
+          <dt>Packages</dt><dd>1842 (portage)</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- latest notes (主页 widget: 自己 fetch /root/notes/list/all 渲染, 点击 → drawer iframe 复用单链页) -->
+<section class="wrap strip-section" aria-label="latest notes">
+  <header>
+    <h2><span class="dim">// </span>Latest notes</h2>
+    <a href="/root/notes" class="btn ghost" style="font-size:13px;padding:6px 12px">Open notes →</a>
+  </header>
+  <div id="notes-mount" data-prefix="notes">
+    <div class="state">loading notes…</div>
+  </div>
+</section>
+
+<!-- latest posts (同上, 数据源 /root/posts/list) -->
+<section class="wrap strip-section" aria-label="latest posts">
+  <header>
+    <h2><span class="dim">// </span>Latest posts</h2>
+    <a href="/root/posts" class="btn ghost" style="font-size:13px;padding:6px 12px">Open posts →</a>
+  </header>
+  <div id="posts-mount" data-prefix="posts">
+    <div class="state">loading posts…</div>
+  </div>
+</section>
+
+<section class="wrap stats" aria-label="numbers">
+  <div class="stat"><div class="n"><span id="stat-count">8</span></div><div class="lbl">total posts</div></div>
+  <div class="stat"><div class="n" id="stat-online">1</div><div class="lbl">online users</div></div>
+</section>
+<div class="wrap" style="margin-top:8px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase">names: <span id="stat-names" style="color:var(--ink)">—</span></div>
+
+<!-- live system info (ws push, 每 5s) -->
+<section class="wrap strip-section" aria-label="system info">
+  <header>
+    <h2><span class="dim">// </span>system</h2>
+    <span class="mono" id="sys-ts" style="font-size:11px;color:var(--muted);letter-spacing:.14em">—</span>
+  </header>
+  <div class="sys-grid" id="sys-grid">
+    <div class="sys-card">
+      <div class="k">load avg</div>
+      <div class="v"><span id="sys-load">—</span></div>
+    </div>
+    <div class="sys-card">
+      <div class="k">ram used</div>
+      <div class="v"><span id="sys-mem">—</span></div>
+    </div>
+    <div class="sys-card">
+      <div class="k">uptime</div>
+      <div class="v"><span id="sys-uptime">—</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="support" id="contact">
+  <div class="wrap row">
+    <div>
+      <div class="tag">// SAY HELLO</div>
+      <h2>想一起做点东西、修点 bug、或者就聊聊思路?</h2>
+      <p>邮件、Matrix、仓库 issue 都行。如果你有个小巧的主意和一周末,我大概率愿意一起玩;如果你有 deadline 和预算,也可以聊聊,我偶尔接活。</p>
+    </div>
+    <a href="mailto:mi78108@live.com" class="btn primary">发个邮件 →</a>
+  </div>
+</section>
+
+<footer id="stack">
+  <div class="wrap fgrid">
+    <div class="fbrand">
+      <a class="brand" href="/root"><span class="logo">H</span><span>hawk<span style="color:var(--muted)">/portfolio</span></span></a>
+      <p>A small, sharp personal site on Gentoo. Notes, posts, and the honest current state of the stack.</p>
+      <span class="x">hawk / portfolio</span>
+    </div>
+    <div class="fcol">
+      <h4>SITE</h4>
+      <ul>
+        <li><a href="/root/notes">Notes</a></li>
+        <li><a href="/root/posts">Posts</a></li>
+        <li><a href="/root/now">Now</a></li>
+        <li><a href="/root/sitemap">Sitemap</a></li>
+        <li><a href="/root/notes.rss">RSS</a></li>
+      </ul>
+    </div>
+    <div class="fcol">
+      <h4>ELSEWHERE</h4>
+      <ul>
+        <li><a href="#gh">GitHub</a></li>
+        <li><a href="#mastodon">Mastodon</a></li>
+        <li><a href="#matrix">Matrix</a></li>
+        <li><a href="#mail">Mail</a></li>
+      </ul>
+    </div>
+    <div class="fcol">
+      <h4>CONTACT</h4>
+      <ul>
+        <li><a href="/root/contact">Reach out</a></li>
+        <li><a href="#pgp">PGP key</a></li>
+        <li><a href="#collab">Collaborate</a></li>
+        <li><a href="#colophon">Colophon</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="wrap flegal">
+    <span>© 2026 HAWK / ALL RIGHTS RESERVED.</span>
+    <span class="status"><span class="dot"></span> SYSTEM STATUS · all routes up</span>
+  </div>
+</footer>
+
+<script>
+  /* ============ terminal mockup data (由 ws system snapshot 驱动) ============ */
+  /* 假数据心跳已废弃: 接 applySystem 写入 #uptimeVal / #loadVal / #servedVal / #lastSeenVal */
+  const uptimeEl = document.getElementById('uptimeVal');
+  const loadEl   = document.getElementById('loadVal');
+  const servedEl = document.getElementById('servedVal');
+  const lastEl   = document.getElementById('lastSeenVal');
+
+  /* stats: 总文章数 = notes + posts, 动态求和 */
+  Promise.all([
+    fetch('/root/notes/list/all').then(r => r.ok ? r.json() : {ok:false, data:{notes:[]}}).then(r => r.ok ? r.data.notes : []).catch(() => []),
+    fetch('/root/posts/list').then(r => r.ok ? r.json() : {ok:false, data:{posts:[]}}).then(r => r.ok ? r.data.posts : []).catch(() => []),
+  ]).then(([notes, posts]) => {
+    const total = (notes || []).length + (posts || []).length;
+    const el = document.getElementById('stat-count');
+    if (el) el.textContent = total;
+  });
+</script>
+
+<!-- 主页首屏不引 markdown-it / notes.js / posts.js (主页 widget drawer 不需要 markdown)。
+     首次点击 widget 抽屉时, 由 openInDrawer 动态注入 markdown-it + 对应的模块 JS,
+     之后用 window.{NotesApp,PostsApp}.articleTpl + renderMd 渲染。-->
+
+<!-- 主页面 drawer (from widget clicks, 不引 markdown-it / posts.js / notes.js 直到首次点击) -->
+<div id="notes-mask" class="dr-mask" hidden></div>
+<aside id="notes-drawer" class="dr" hidden aria-label="notes reader" role="dialog">
+  <div class="dr-head">
+    <span class="dots"><i></i><i></i><i></i></span>
+    <span class="title" id="notes-drawer-title">Notes</span>
+    <button id="notes-drawer-fs" type="button" aria-label="toggle fullscreen" title="全屏 / 恢复 (F)">⛶</button>
+    <button id="notes-drawer-close" type="button" aria-label="close">ESC ✕</button>
+  </div>
+  <div id="notes-drawer-body" class="dr-body"></div>
+</aside>
+
+<div id="posts-mask" class="dr-mask" hidden></div>
+<aside id="posts-drawer" class="dr posts" hidden aria-label="posts reader" role="dialog">
+  <div class="dr-head">
+    <span class="dots"><i></i><i></i><i></i></span>
+    <span class="title" id="posts-drawer-title">Posts</span>
+    <button id="posts-drawer-fs" type="button" aria-label="toggle fullscreen" title="全屏 / 恢复 (F)">⛶</button>
+    <button id="posts-drawer-close" type="button" aria-label="close">ESC ✕</button>
+  </div>
+  <div id="posts-drawer-body" class="dr-body"></div>
+</aside>
+
+<script>
+  /* ============ page.html widgets + drawer (lazy-load 模块 JS) ============
+     widget 自己 fetch list API 渲染 6 个 item. 点击 → drawer (dr-body 自己渲染).
+     首次点击某 prefix 的 widget 时, 动态注入 markdown-it CDN + /root/{prefix}/assets/{prefix}.js,
+     然后用 window.{NotesApp,PostsApp}.articleTpl + renderMd 渲染 article.
+     主页首屏因此不下载任何 markdown-it / posts.js / notes.js. */
+
+  const WIDGET_CONFIG = {
+    notes: { list: '/root/notes/list/all', mountId: 'notes-mount', limit: 6, asset: '/root/notes/assets/notes.js' },
+    posts: { list: '/root/posts/list',      mountId: 'posts-mount', limit: 6, asset: '/root/posts/assets/posts.js' },
+  };
+  const MARKDOWN_IT_SRC = 'https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js';
+  const fmtDateW = iso => {
+    try{
+      const d = new Date(iso);
+      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return M[d.getUTCMonth()] + ' ' + String(d.getUTCDate()).padStart(2,'0') + ', ' + d.getUTCFullYear();
+    }catch(e){ return iso; }
+  };
+  const escHtmlW = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function loadScriptOnce(src){
+    return new Promise((resolve, reject) => {
+      if ([...document.scripts].some(s => s.src === src)) return resolve();
+      const s = document.createElement('script');
+      s.src = src; s.async = false;
+      s.onload  = () => resolve();
+      s.onerror = () => reject(new Error('failed: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function ensureModuleLoaded(prefix){
+    const cfg = WIDGET_CONFIG[prefix];
+    const appKey = prefix === 'notes' ? 'NotesApp' : 'PostsApp';
+    if (window[appKey] && window[appKey].articleTpl && window[appKey].renderMd) return;
+    // markdown-it 先 (notes.js / posts.js 都会用它), 模块 JS 后
+    if (!window.markdownit) await loadScriptOnce(MARKDOWN_IT_SRC);
+    await loadScriptOnce(cfg.asset);
+  }
+
+  async function mountWidget(prefix){
+    const cfg = WIDGET_CONFIG[prefix];
+    if (!cfg) return;
+    const root = document.getElementById(cfg.mountId);
+    if (!root) return;
+    try{
+      const r = await fetch(cfg.list, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const raw = await r.json();
+      const data = (raw && raw.ok) ? raw.data : raw;
+      const items = (data.posts || data.notes || []).slice(0, cfg.limit);
+      root.innerHTML = '<div class="item-list">' + items.map(it => {
+        const tags = (it.tags || []).map(t => `<span>#${escHtmlW(t)}</span>`).join('');
+        const meta = `${escHtmlW(fmtDateW(it.updated_at || it.created_at))} · ${it.reading_min} min`;
+        return `
+          <div class="item" data-slug="${escHtmlW(it.slug)}" data-prefix="${prefix}">
+            <div class="m">${meta}</div>
+            <div class="t">${escHtmlW(it.title)}</div>
+            <div class="e">${escHtmlW(it.summary || it.excerpt || '')}</div>
+            <div class="tg">${tags}</div>
+          </div>
+        `;
+      }).join('') + '</div>';
+      root.querySelectorAll('.item').forEach(it => {
+        it.addEventListener('click', () => openInDrawer(it.dataset.prefix, it.dataset.slug));
+      });
+    } catch(err){
+      root.innerHTML = '<div class="state err">fetch failed: ' + escHtmlW(err.message) + '</div>';
+    }
+  }
+
+  function showDrawer(prefix){
+    const el  = document.getElementById(prefix + '-drawer');
+    const msk = document.getElementById(prefix + '-mask');
+    if (!el) return;
+    el.hidden = false; msk.hidden = false;
+    requestAnimationFrame(() => { el.classList.add('open'); msk.classList.add('open'); });
+  }
+  function hideDrawer(prefix){
+    const el  = document.getElementById(prefix + '-drawer');
+    const msk = document.getElementById(prefix + '-mask');
+    if (!el) return;
+    el.classList.remove('open'); msk.classList.remove('open');
+    setTimeout(() => { el.hidden = true; }, 240);
+  }
+  function toggleDrawerFs(prefix){
+    const el = document.getElementById(prefix + '-drawer');
+    if (!el) return;
+    const isFs = el.classList.toggle('fullscreen');
+    const btn = document.getElementById(prefix + '-drawer-fs');
+    if (btn){ btn.textContent = isFs ? '🗗' : '⛶'; btn.title = isFs ? '恢复 (F)' : '全屏 (F)'; }
+  }
+
+  async function openInDrawer(prefix, slug){
+    const titleEl = document.getElementById(prefix + '-drawer-title');
+    const bodyEl  = document.getElementById(prefix + '-drawer-body');
+    if (!bodyEl) return;
+    titleEl.textContent = (prefix === 'notes' ? 'Notes' : 'Posts') + ' · ' + slug;
+    bodyEl.innerHTML = '<div class="state">loading…</div>';
+    showDrawer(prefix);
+    try{
+      await ensureModuleLoaded(prefix);
+      const api = window[prefix === 'notes' ? 'NotesApp' : 'PostsApp'];
+      if (!api || !api.articleTpl){ bodyEl.innerHTML = '<div class="state err">module load failed</div>'; return; }
+      const r = await fetch(`/root/${prefix}/get/${encodeURIComponent(slug)}`, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const raw = await r.json();
+      const doc = (raw && raw.ok) ? raw.data : raw;
+      bodyEl.innerHTML = api.articleTpl(doc);
+      // prev/next 在主页 drawer 里要"原地切", 不跳独立页 (SPA 的 openArticle 找不到主页 drawer DOM 会 fallback)
+      bindDrawerPnav(bodyEl, prefix, doc.slug);
+    } catch(err){
+      bodyEl.innerHTML = '<div class="state err">fetch failed: ' + escHtmlW(err.message) + '</div>';
+    }
+  }
+
+  function bindDrawerPnav(scope, prefix, slug){
+    scope.querySelectorAll('.pn:not(.disabled)').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        openInDrawer(prefix, a.dataset.slug);
+      });
+    });
+  }
+
+  ['notes','posts'].forEach(prefix => {
+    document.getElementById(prefix + '-drawer-close')?.addEventListener('click', () => hideDrawer(prefix));
+    document.getElementById(prefix + '-drawer-fs')?.addEventListener('click', () => toggleDrawerFs(prefix));
+    document.getElementById(prefix + '-mask')?.addEventListener('click', () => hideDrawer(prefix));
+  });
+  document.addEventListener('keydown', e => {
+    for (const prefix of ['notes','posts']){
+      const el = document.getElementById(prefix + '-drawer');
+      if (!el || el.hidden) continue;
+      if (e.key === 'Escape'){ hideDrawer(prefix); return; }
+      if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleDrawerFs(prefix); return; }
+    }
+  });
+
+  mountWidget('notes');
+  mountWidget('posts');
+
+  /* ============ 主站 ws (实时更新入口) ============ */
+  const USERNAME_KEY = 'hawk.username';
+  function getUsername(){
+    try{ return localStorage.getItem(USERNAME_KEY); }catch(e){}
+    return null;
+  }
+  function setUsername(u){
+    try{ localStorage.setItem(USERNAME_KEY, u); }catch(e){}
+  }
+  function genUsername(){
+    return 'hawk-' + Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
+  }
+
+  // 后端推送的数据:
+  //   type:'update' data: [{id, last_seen, name}, ...]   在线 ws 进程列表
+  //   type:'system' data: {ts, uptime_s, load[3], mem:{...}, served, last_seen_s}
+  //   type:'pong'   data: {ts, system: {...}}             客户端发 pong 时附带 system
+  //   type:'ping'   data: {ts}                            服务端心跳
+  //   type:'hello'  data: {ts}                            握手回包
+  //   type:'error'  data: {msg}                          错误
+  // client 发:
+  //   {op:'set-name', name}  {op:'hello'}  {op:'pong'}
+
+  function pad2(n){ return String(n).padStart(2, '0'); }
+  function fmtClock(ts){
+    const d = new Date(ts * 1000);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  function fmtUptime(s){
+    if (!s || s < 0) return '—';
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return d > 0 ? `${d}d ${pad2(h)}h ${pad2(m)}m`
+         : h > 0 ? `${h}h ${pad2(m)}m`
+         : `${m}m`;
+  }
+  function fmtKb(kb){
+    if (!kb || kb <= 0) return '—';
+    if (kb >= 1048576) return (kb / 1048576).toFixed(1) + ' GB';
+    if (kb >= 1024) return Math.round(kb / 1024) + ' MB';
+    return kb + ' KB';
+  }
+
+  function applyProcs(list){
+    setText('stat-online', list.length);
+    setText('stat-names', list.map(p => p.name).join(', ') || '—');
+    if (list.length){
+      const newest = list.reduce((a, b) => (a.last_seen > b.last_seen ? a : b));
+      setText('sys-ts', fmtClock(newest.last_seen));
+    }
+  }
+  function applySystem(s){
+    if (!s || typeof s !== 'object') return;
+    // sys strip
+    if (s.load && s.load[0] != null){
+      setHtml('sys-load', `${s.load[0]} <span class="u">/ ${s.load[1]} / ${s.load[2]}</span>`);
+    }
+    if (s.mem){
+      const u = fmtKb(s.mem.used_kb) + (s.mem.used_pct != null ? ' <span class="u">' + s.mem.used_pct + '%</span>' : '');
+      setHtml('sys-mem', u);
+    }
+    const up = fmtUptime(s.uptime_s);
+    setText('sys-uptime', up);
+    // fastfetch terminal 字段
+    setText('ff-uptime', up);
+    if (s.mem){
+      const total = fmtKb(s.mem.total_kb), used = fmtKb(s.mem.used_kb);
+      setText('ff-mem', `${used} / ${total} (${s.mem.used_pct || 0}%)`);
+    }
+    if (s.last_seen_s > 0){
+      const d = Math.max(0, Math.floor(Date.now() / 1000 - s.last_seen_s));
+      setText('lastSeenVal', d <= 0 ? 'just now' : 'last ' + d + 's');
+    }
+    if (s.ts) setText('sys-ts', fmtClock(s.ts));
+  }
+  function setText(id, txt){ const el = document.getElementById(id); if (el) el.textContent = txt; }
+  function setHtml(id, txt){ const el = document.getElementById(id); if (el) el.innerHTML = txt; }
+
+  // viewport 分辨率 → fastfetch Resolution
+  setText('ff-res', `${window.innerWidth}x${window.innerHeight}`);
+
+  function startWs(){
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${location.host}/root/ws`;
+    let ws = null, retry = 0, stopped = false;
+
+    // 直接发送: 不串行/不 8ms 间隔/不断线清空
+    function wsSend(obj){
+      if (!ws || ws.readyState !== 1) return;
+      try{ ws.send(JSON.stringify(obj)); console.log('[root/ws] →', obj); }
+      catch(e){ console.warn('[root/ws] send fail:', e); }
+    }
+
+    function connect(){
+      try{ ws = new WebSocket(url); }
+      catch(e){ return scheduleRetry(); }
+      ws.addEventListener('open', () => {
+        retry = 0;
+        console.log('[root/ws] connected', url);
+        let name = getUsername() || (setUsername(genUsername()), getUsername());
+        wsSend({op:'set-name', name});
+        wsSend({op:'hello'});
+      });
+      ws.addEventListener('message', ev => {
+        let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+        if (!msg || !msg.type) return;
+        switch (msg.type){
+          case 'update': applyProcs(Array.isArray(msg.data) ? msg.data : []); break;
+          case 'system': applySystem(msg.data || {}); break;
+          case 'pong':   applySystem(msg.system || msg.data || {}); break;
+          case 'ping':   wsSend({op:'pong'}); break;
+          case 'hello':  /* 握手回包, 无 ui 更新 */ break;
+          case 'error':  console.warn('[root/ws] server error', msg.msg); break;
+        }
+      });
+      ws.addEventListener('close', () => { if (!stopped) scheduleRetry(); });
+      ws.addEventListener('error', () => { try{ ws.close(); }catch(e){} });
+    }
+    function scheduleRetry(){
+      retry = Math.min(retry + 1, 6);
+      const delay = Math.min(1000 * (2 ** retry), 30000);
+      setTimeout(() => { if (!stopped) connect(); }, delay);
+    }
+    connect();
+    window.addEventListener('beforeunload', () => { stopped = true; try{ ws.close(); }catch(e){} });
+  }
+  startWs();
+</script>
+
+</body>
+</html>

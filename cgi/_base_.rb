@@ -69,9 +69,9 @@
 
 require 'json'
 require 'uri'
-require 'pathname'      # Q::Body.wrap 智能识别 Pathname → FileBody
+require 'pathname' # Q::Body.wrap 智能识别 Pathname → FileBody
 require 'stringio'
-require 'cgi'           # CGI.unescape / CGI.parse（query / cookie 解析）
+require 'cgi' # CGI.unescape / CGI.parse（query / cookie 解析）
 
 # ============================================================
 # QEnv — ENV 工具（顶层 module，避免与 class Q 冲突）
@@ -102,39 +102,40 @@ end
 class Q
   # restful 段一次性冻结（按 Req_Argv_N 顺序）
   ARGV = ENV.keys
-          .select { |k| k =~ /\AReq_Argv_\d+\z/ }
-          .sort_by { |k| k.split('_').last.to_i }
-          .map { |k| QEnv.decode(ENV[k]) }
-          .freeze
+            .select { |k| k =~ /\AReq_Argv_\d+\z/ }
+            .sort_by { |k| k.split('_').last.to_i }
+            .map { |k| QEnv.decode(ENV[k]) }
+            .freeze
 
   # 最近一次命名捕获组 hash（regex 匹配后填充）
   MATCH = {}
 
-  CGI_ROOT        = QEnv.fetch('Cgi_Root', Dir.pwd).freeze
-  REQ_METHOD      = QEnv.fetch('Req_Method', 'GET').freeze
-  REQ_PATH        = QEnv.fetch('Req_Path', '/').freeze
-  REQ_PARAMS      = QEnv.fetch('Req_Params', '').freeze
-  REQ_VERSION     = QEnv.fetch('Req_Version', 'HTTP/1.1').freeze
-  BODY_METHOD     = QEnv.fetch('Req_Body_Method', 'HTTP').freeze
-  PEER_IP         = QEnv.fetch('Req_Peer_Ip', '').freeze
-  PEER_PORT       = QEnv.fetch_i('Req_Peer_Port', '0')
-  PEER_ADDR       = "#{PEER_IP}:#{PEER_PORT}".freeze
-  BUFFER_SIZE     = QEnv.fetch_i('Req_Buffer_Size', 131_072)
-  ARGV_COUNT      = QEnv.fetch_i('Req_Argv_Count', 0)
-  ARGV_PARAMS     = QEnv.fetch('Req_Argv_Params', '').freeze
-  MAP_PATH        = "/#{ARGV_PARAMS}"  # restful 部分（空时 = '/'），路由匹配基准
+  CGI_ROOT = QEnv.fetch('Cgi_Root', Dir.pwd).freeze
+  REQ_METHOD = QEnv.fetch('Req_Method', 'GET').freeze
+  REQ_PATH = QEnv.fetch('Req_Path', '/').freeze
+  REQ_PARAMS = QEnv.fetch('Req_Params', '').freeze
+  REQ_VERSION = QEnv.fetch('Req_Version', 'HTTP/1.1').freeze
+  BODY_METHOD = QEnv.fetch('Req_Body_Method', 'HTTP').freeze
+  PEER_IP = QEnv.fetch('Req_Peer_Ip', '').freeze
+  PEER_PORT = QEnv.fetch_i('Req_Peer_Port', '0')
+  PEER_ADDR = "#{PEER_IP}:#{PEER_PORT}".freeze
+  BUFFER_SIZE = QEnv.fetch_i('Req_Buffer_Size', 131_072)
+  ARGV_COUNT = QEnv.fetch_i('Req_Argv_Count', 0)
+  ARGV_PARAMS = QEnv.fetch('Req_Argv_Params', '').freeze
+  SCRIPT_DIR = QEnv.fetch('Req_Script_Dir', '').freeze
+  MAP_PATH = "/#{ARGV_PARAMS}" # restful 部分（空时 = '/'），路由匹配基准
 
   class Req
     attr_reader :method, :path, :query, :body_type, :body_length
 
     def initialize
-      @method      = Q::REQ_METHOD
-      @path        = Q::ARGV_PARAMS.empty? ? '/' : "/#{Q::ARGV_PARAMS}"  # restful 路径部分
-      @query       = Q::REQ_PARAMS
-      @body_type   = QEnv.fetch('content-type', '')
+      @method = Q::REQ_METHOD
+      @path = Q::ARGV_PARAMS.empty? ? '/' : "/#{Q::ARGV_PARAMS}" # restful 路径部分
+      @query = Q::REQ_PARAMS
+      @body_type = QEnv.fetch('content-type', '')
       @body_length = QEnv.fetch_i('content-length', 0)
-      @params      = nil
-      @cookies     = nil
+      @params = nil
+      @cookies = nil
       @on_data_cbk = nil
     end
 
@@ -199,7 +200,28 @@ class Q
           Q.write(ret) unless ret.nil?
         rescue EOFError
           Q.log("connection EOF")
-          #throw :q_resp_sent, :handled
+          # throw :q_resp_sent, :handled
+          break
+        end
+      end
+    end
+
+    def on_ws_data(&cbk)
+      value = String.new(encoding: Encoding::ASCII_8BIT)
+      loop do
+        begin
+          head = Q.read(8)
+          len = head[0, 4].unpack1('N')
+          rem = head[4, 4].unpack1('N')
+          Q.log ">>>>>>>>>>>>>> packet remainder #{rem} ready #{len}"
+          value << Q.read(len)
+          if rem == 0
+            ret = cbk.call(value) unless cbk.nil?
+            value.clear
+            Q.write(ret) unless ret.nil?
+          end
+        rescue EOFError
+          Q.log("connection EOF")
           break
         end
       end
@@ -239,10 +261,10 @@ class Q
     def method_missing(name, *_args)
       s = name.to_s
       return argv(s.split('_', 2).last.to_i) if s.start_with?('argv_')
-      return param(s.split('_', 2).last)     if s.start_with?('param_')
-      return header(s.split('_', 2).last)    if s.start_with?('header_')
-      return named(s.split('_', 2).last)     if s.start_with?('named_')
-      return cookie(s.split('_', 2).last)    if s.start_with?('cookie_')
+      return param(s.split('_', 2).last) if s.start_with?('param_')
+      return header(s.split('_', 2).last) if s.start_with?('header_')
+      return named(s.split('_', 2).last) if s.start_with?('named_')
+      return cookie(s.split('_', 2).last) if s.start_with?('cookie_')
       super
     end
 
@@ -281,8 +303,13 @@ class Q
   module Body
     # 抽象基类
     class Base
-      def size;        raise NotImplementedError, "#{self.class}#size";        end
-      def each_chunk(chunk_size = Q::BUFFER_SIZE, &block); raise NotImplementedError, "#{self.class}#each_chunk"; end
+      def size
+        raise NotImplementedError, "#{self.class}#size";
+      end
+
+      def each_chunk(chunk_size = Q::BUFFER_SIZE, &block)
+        ; raise NotImplementedError, "#{self.class}#each_chunk";
+      end
     end
 
     # 工厂方法：根据 v 的类型自动包成对应 Q::Body 子类
@@ -298,12 +325,12 @@ class Q
       return TextBody.new('') if v.nil? && block.nil?
 
       case v
-      when Base        then v
+      when Base then v
       when String
         # 如果 string 路径指向真实文件，当 FileBody（不复制内容）
         File.file?(v) ? FileBody.new(v) : TextBody.new(v)
-      when Pathname    then FileBody.new(v.to_s)
-      when Proc        then StreamBody.new(&v)
+      when Pathname then FileBody.new(v.to_s)
+      when Proc then StreamBody.new(&v)
       when IO, StringIO
         # IO / File / Socket / StringIO 任何"可读字节流"对象都当 StreamBody：
         # each_chunk 时按 BUFFER_SIZE 读，yield 数据块。size 未知 → chunked。
@@ -324,10 +351,22 @@ class Q
 
     # 内存字符串 body。
     class TextBody < Base
-      def initialize(str); @str = str.to_s; end
-      def size; @str.bytesize; end
-      def each_chunk(chunk_size = Q::BUFFER_SIZE); yield @str; end
-      def to_s; @str; end
+      def initialize(str)
+        ; @str = str.to_s;
+      end
+
+      def size
+        @str.bytesize;
+      end
+
+      def each_chunk(chunk_size = Q::BUFFER_SIZE)
+        ; yield @str;
+      end
+
+      def to_s
+        @str;
+      end
+
       alias_method :bytes, :to_s
     end
 
@@ -356,7 +395,10 @@ class Q
         @cbk = cbk
       end
 
-      def size; nil; end
+      def size
+        nil;
+      end
+
       def each_chunk(chunk_size = Q::BUFFER_SIZE, &emit)
         @cbk.call(emit, chunk_size)
       end
@@ -370,7 +412,7 @@ end
 class Q
   class Rsp
     DEFAULT_HEADERS = {
-      'Connection'   => 'close',
+      'Connection' => 'close',
       'Content-Type' => 'text/html; charset=utf-8',
     }.freeze
 
@@ -421,21 +463,38 @@ class Q
     # end
 
     def initialize
-      @code        = 200
-      @status      = 'OK'
-      @body        = Q::Body::TextBody.new('')
-      @header      = DEFAULT_HEADERS.dup
-      @sent        = false
-      @chunking   = false
+      @code = 200
+      @status = 'OK'
+      @body = Q::Body::TextBody.new('')
+      @header = DEFAULT_HEADERS.dup
+      @sent = false
+      @chunking = false
     end
 
     # --- Content-Type 快捷 ---
-    def type(v);  @header['Content-Type'] = v; self; end
-    def type_json; type('application/json; charset=utf-8'); self; end
-    def type_html; type('text/html; charset=utf-8');     self; end
-    def type_text; type('text/plain; charset=utf-8');    self; end
-    def type_xml;  type('application/xml; charset=utf-8'); self; end
-    def type_bin(mime = 'application/octet-stream'); type(mime); self; end
+    def type(v)
+      ; @header['Content-Type'] = v; self;
+    end
+
+    def type_json
+      type('application/json; charset=utf-8'); self;
+    end
+
+    def type_html
+      type('text/html; charset=utf-8'); self;
+    end
+
+    def type_text
+      type('text/plain; charset=utf-8'); self;
+    end
+
+    def type_xml
+      type('application/xml; charset=utf-8'); self;
+    end
+
+    def type_bin(mime = 'application/octet-stream')
+      ; type(mime); self;
+    end
 
     # 文件相关 header 快捷：设 Content-Type + Content-Disposition。
     # 文件不存在时返 404 + "file not found: <path>" 文本。
@@ -466,9 +525,9 @@ class Q
     # Set-Cookie（多次调用会累加成多个 Set-Cookie header）
     def cookie_set(name, value, max_age: nil, path: '/', httponly: false, secure: false, samesite: nil)
       parts = ["#{name}=#{value}", "Path=#{path}"]
-      parts << "Max-Age=#{max_age}"  if max_age
-      parts << 'HttpOnly'             if httponly
-      parts << 'Secure'               if secure
+      parts << "Max-Age=#{max_age}" if max_age
+      parts << 'HttpOnly' if httponly
+      parts << 'Secure' if secure
       parts << "SameSite=#{samesite}" if samesite
       cookie_field = parts.join('; ')
       existing = @header['Set-Cookie']
@@ -483,23 +542,50 @@ class Q
       code(200).status('OK').body(body_str)
       self
     end
-    def ok_html(text); type_html; ok(text); end
+
+    def ok_html(text)
+      ; type_html; ok(text);
+    end
+
     def ok_json(obj)
       type_json
       ok(obj.nil? ? '' : JSON.generate(obj))
     end
-    def ok_text(text); type_text; ok(text); end
-    def ok_xml(text);  type_xml;  ok(text); end
+
+    def ok_text(text)
+      ; type_text; ok(text);
+    end
+
+    def ok_xml(text)
+      ; type_xml; ok(text);
+    end
 
     # --- 错误状态构造器（无 body / 无默认 type —— 由调用方链 type_xxx + body）---
     #   rsp.fail_404.type_json.body({error: 'not found'}.to_json)
     #   rsp.fail_500.type_html.body('<h1>boom</h1>')
-    def fail_400; code(400).status('Bad Request');                 self; end
-    def fail_403; code(403).status('Forbidden');                   self; end
-    def fail_404; code(404).status('Not Found');                   self; end
-    def fail_405; code(405).status('Method Not Allowed');          self; end
-    def fail_500; code(500).status('Internal Server Error');       self; end
-    def fail_501; code(501).status('Not Implemented');             self; end
+    def fail_400
+      code(400).status('Bad Request'); self;
+    end
+
+    def fail_403
+      code(403).status('Forbidden'); self;
+    end
+
+    def fail_404
+      code(404).status('Not Found'); self;
+    end
+
+    def fail_405
+      code(405).status('Method Not Allowed'); self;
+    end
+
+    def fail_500
+      code(500).status('Internal Server Error'); self;
+    end
+
+    def fail_501
+      code(501).status('Not Implemented'); self;
+    end
 
     # 重定向（默认 302）
     def redirect_to(loc, code: 302, body: '')
@@ -532,13 +618,13 @@ class Q
     #   3) rsp.stream                              # 无 block：单纯切 chunked 模式
     #      headers 发出去，body 留空给 finish 时通过 each_chunk yield。
     def stream(chunk_size = BUFFER_SIZE, &block)
-        return self if @chunking
+      return self if @chunking
 
       # 切 chunked 模式：发 headers + 标记 streaming
       @header.delete('Content-Length')
       @header['Transfer-Encoding'] = 'chunked'
       Q.write_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
-        @chunking = true
+      @chunking = true
       unless block
         @body.each_chunk(chunk_size) do |chunk|
           Q.write_chunk(chunk)
@@ -595,7 +681,7 @@ class Q
     #
     # @<{}> 内的 eval 被 Q.capture_stdout 包住，模板内 puts/print 输出会进入 body。
     def render(**vars_hash)
-      #Q.log(@body.to_s)
+      # Q.log(@body.to_s)
       ctx = binding
       instance_variables.each do |iv|
         name = iv.to_s.delete_prefix('@')
@@ -673,20 +759,33 @@ end
 # ============================================================
 class Q
   ONCLOSE_CBS = []
-  STATE     = { responded: false }
+  STATE = { responded: false }
   WEBSOCKET = 'WEBSOCKET'.freeze
+
   class << self
     # --- 脚本定位 ---
-    def script_name;     ENV.fetch('Req_Script_Name', nil);     end
-    def script_basename; ENV.fetch('Req_Script_Basename', nil); end
-    def script_path;     ENV.fetch('Req_Script_Path', nil);     end
-    def script_dir;      ENV.fetch('Req_Script_Dir', nil);      end
+    def script_name
+      ENV.fetch('Req_Script_Name', nil);
+    end
+
+    def script_basename
+      ENV.fetch('Req_Script_Basename', nil);
+    end
+
+    def script_path
+      ENV.fetch('Req_Script_Path', nil);
+    end
+
+    def script_dir
+      ENV.fetch('Req_Script_Dir', nil);
+    end
 
     # 脚本工作目录：脚本所在 dir（不是 URL 上的 restful 路径）
     def script_cwd
       dir = ENV['Req_Script_Dir']
       dir unless dir.nil? || dir.empty?
     end
+
     alias_method :cwd, :script_cwd
 
     # --- I/O ---
@@ -824,7 +923,7 @@ class Q
 
     # --- 路由匹配 ---
 
-# pattern 写法（必须以 '/' 开头或为 Regexp，对照 Q::MAP_PATH）：
+    # pattern 写法（必须以 '/' 开头或为 Regexp，对照 Q::MAP_PATH）：
     #   '/'            匹配 restful 为空（脚本本身调用，无 restful 段）
     #   '/info'        匹配 MAP_PATH="/info"
     #   '/*'           通配所有非空 MAP_PATH
@@ -838,11 +937,11 @@ class Q
       Q::MATCH.clear
 
       result = case pattern
-               when nil      then true
-               when String   then match_string(pattern, MAP_PATH)
-               when Regexp   then match_regexp(pattern, MAP_PATH)
-               when Proc     then pattern.call(MAP_PATH, REQ_PATH) == true
-               else               false
+               when nil then true
+               when String then match_string(pattern, MAP_PATH)
+               when Regexp then match_regexp(pattern, MAP_PATH)
+               when Proc then pattern.call(MAP_PATH, REQ_PATH) == true
+               else false
                end
 
       log_match(pattern, MAP_PATH, result)
@@ -858,6 +957,7 @@ class Q
       STDERR.puts ">>[#{Process.pid}]> LOG <#{caller_line}> #{msg}"
       STDERR.flush
     end
+
     private :log_match
 
     # 字符串 pattern 匹配逻辑
@@ -888,6 +988,7 @@ class Q
         pattern == REQ_PATH
       end
     end
+
     private :match_string
 
     # Regexp pattern 匹配逻辑
@@ -902,6 +1003,7 @@ class Q
       Q::MATCH.replace(m.named_captures.transform_keys(&:to_sym))
       true
     end
+
     private :match_regexp
 
     private
@@ -910,7 +1012,9 @@ class Q
     def exec_route_block(block)
       rsp = Rsp.new
       begin
-        instance_exec(Req.new, rsp, &block)
+        Dir.chdir(SCRIPT_DIR) do
+          instance_exec(Req.new, rsp, &block)
+        end
       rescue StandardError => e
         log "#{e.class}: #{e.message}"
         log((e.backtrace || []).first(5).map { |b| "  #{b}" })
