@@ -13,6 +13,7 @@ use tokio::{
     },
     sync::Mutex,
 };
+use crate::tcp_class::http_file_func::WWWFile;
 
 #[derive(Debug)]
 pub struct Tcp {
@@ -122,7 +123,9 @@ pub async fn handle(stream: Tcp) -> Result<bool, Error> {
         }
         stream if Http::matches(&stream).await => {
             let http = Http::handle(stream).await?;
-            if Websocket::matches(&http).await {
+            if let Ok(_) = WWWFile::reader(&http).await {
+                true
+            }else if Websocket::matches(&http).await {
                 call_script(Websocket::handle(http).await?).await
             } else {
                 call_script(http).await

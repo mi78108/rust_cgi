@@ -6,7 +6,10 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, io::Error, sync::atomic::AtomicUsize};
 use tokio::io::AsyncBufReadExt;
+use tokio::task::spawn_blocking;
 use urlencoding::decode;
+use std::fmt::Write;
+use std::ops::Add;
 
 #[derive(Debug)]
 pub struct Http {
@@ -100,6 +103,24 @@ fn parse_req_path(req_path: String) -> (PathBuf, Vec<String>) {
     }
 }
 
+impl Http {
+    pub async fn write_header(
+        &self,
+        code: &str,
+        status: &str,
+        header: &HashMap<String, String>,
+    ) -> Result<String, Error> {
+        let mut headers = format!("HTTP/1.1 {} {}\r\n", code, status);
+        header.iter().fold(&mut headers, |acc, (k, v)| {
+            write!(acc, "{}: {}\r\n", k, v).unwrap();
+            acc
+        });
+        headers.push_str("\r\n");
+        self.write(headers.as_bytes()).await?;
+        Ok(headers)
+    }
+}
+
 impl Handle<Tcp> for Http {
     // fn name() -> &'static str {
     //     "HTTP"
@@ -152,10 +173,7 @@ impl Handle<Tcp> for Http {
             String::from("Req_Peer_Addr"),
             format!("{}:{}", &peer_ip, &peer_port),
         );
-        req_headers.insert(
-            "Req_By".into(),
-            "HTTP".to_string(),
-        );
+        req_headers.insert("Req_By".into(), "HTTP".to_string());
         req_headers.insert(String::from("Req_Peer_Ip"), peer_ip);
         req_headers.insert(String::from("Req_Peer_Port"), peer_port);
         req_headers.insert(String::from("Req_Body_Method"), String::from("HTTP"));

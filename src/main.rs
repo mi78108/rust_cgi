@@ -28,10 +28,12 @@ struct Opt {
     verbose: u8,
     #[arg(short = 'k', long, required = false)]
     key: Option<Vec<String>>,
-    #[arg(short = 'o', long, required = false)]
+    #[arg(short = 'o', long, required = false, action = clap::ArgAction::Append)]
     output: Option<Option<PathBuf>>,
     #[arg(short = 'i', long, required = false, action = clap::ArgAction::Append)]
     input: Option<Vec<String>>,
+    #[arg(short = 'w', long, required = false, default_missing_value = "/tmp:/pub",num_args = 0..=1)]
+    www: Option<String>,
 }
 
 pub static SCRIPT_DIR: OnceLock<PathBuf> = OnceLock::new();
