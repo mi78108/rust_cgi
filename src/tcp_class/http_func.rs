@@ -44,6 +44,11 @@ impl Req for Http {
         })
     }
 
+    fn remainder(&self) -> Option<usize> {
+        None
+        //Some(self.req_content_length - self.req_content_read.load(std::sync::atomic::Ordering::Acquire))
+    }
+
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         self.base_on.write(data).await
     }
@@ -146,6 +151,10 @@ impl Handle<Tcp> for Http {
         req_headers.insert(
             String::from("Req_Peer_Addr"),
             format!("{}:{}", &peer_ip, &peer_port),
+        );
+        req_headers.insert(
+            "Req_By".into(),
+            "HTTP".to_string(),
         );
         req_headers.insert(String::from("Req_Peer_Ip"), peer_ip);
         req_headers.insert(String::from("Req_Peer_Port"), peer_port);

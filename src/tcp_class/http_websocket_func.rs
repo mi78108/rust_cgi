@@ -262,6 +262,10 @@ impl Req for Websocket {
         }
     }
 
+    fn remainder(&self) -> Option<usize> {
+       Some(self.remainder.load(Ordering::Relaxed))
+    }
+
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         // 默认 文本末包
         let rst = self.write_with_opcode(0b10000001, data).await;

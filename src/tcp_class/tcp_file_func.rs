@@ -3,7 +3,7 @@ use std::{
     io::{Error, ErrorKind},
     path::PathBuf,
 };
-
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
@@ -18,8 +18,8 @@ pub struct FileSync {
     file_writer: Mutex<BufWriter<File>>,
     // file_path: PathBuf,
     // file_key: Option<String>,
-    // file_lenght: u64,
-    // file_processed: AtomicUsize,
+    file_length: usize,
+    file_processed: AtomicUsize,
     file_header: HashMap<String, String>,
 }
 
@@ -34,8 +34,14 @@ impl Req for FileSync {
                 if len == 0 {
                     return Ok(None);
                 }
+                self.file_processed.fetch_add(len,Ordering::Relaxed);
                 Ok(Some(len))
             })
+    }
+
+    fn remainder(&self) -> Option<usize> {
+        //Some(self.file_length - self.file_processed.load(Ordering::Relaxed))
+        None
     }
 
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
@@ -135,17 +141,18 @@ impl FileSync {
         let file = File::open(&file_path).await?;
         let reader = file.try_clone().await?;
         let writer = file.try_clone().await?;
+        let mut env = req.env().clone();
+        env.insert("Req_Body_Method".to_string(), "TCP_FILE".to_string());
+        env.insert("Req_File_Key".to_string(), file_key.to_string());
+
         Ok(FileSync {
             file_reader: Mutex::new(BufReader::new(reader)),
             file_writer: Mutex::new(BufWriter::new(writer)),
             // file_path: file_path,
             // file_key: Some(String::from(&file_key)),
-            // file_lenght: file.metadata().await?.len(),
-            // file_processed: AtomicUsize::new(0),
-            file_header: HashMap::from([
-                ("Req_Buffer_Size".to_string(), (1024 * 128).to_string()),
-                ("Req_File_Key".to_string(), file_key.to_string()),
-            ]),
+            file_length: file.metadata().await?.len() as usize,
+            file_processed: AtomicUsize::new(0),
+            file_header: env,
         })
     }
 
