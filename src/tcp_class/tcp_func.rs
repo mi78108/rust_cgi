@@ -123,12 +123,18 @@ pub async fn handle(stream: Tcp) -> Result<bool, Error> {
         }
         stream if Http::matches(&stream).await => {
             let http = Http::handle(stream).await?;
-            if let Ok(_) = WWWFile::reader(&http).await {
-                true
-            }else if Websocket::matches(&http).await {
-                call_script(Websocket::handle(http).await?).await
-            } else {
-                call_script(http).await
+            match WWWFile::handle(http).await {
+                Ok(rf) => {
+                    rf.send_file().await?;
+                    true
+                }
+                Err(http) => {
+                    if Websocket::matches(&http).await {
+                        call_script(Websocket::handle(http).await?).await
+                    } else {
+                        call_script(http).await
+                    }
+                }
             }
         }
         _ => call_script(stream).await,
