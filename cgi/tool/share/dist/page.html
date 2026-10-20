@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>share · 文件分享</title>
+  <style>
+:root {
+  --bg: #0f0f12; --bg-2: #1a1a1f; --bg-3: #25252d;
+  --ink: #e8e8ea; --ink-2: #a0a0a8; --muted: #5a5a64;
+  --rule: #2a2a30; --lime: #c4f542; --lime-ink: #0f0f12;
+  --red: #ff5e5e; --green: #66d49e;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%;background:var(--bg);color:var(--ink);
+  font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;font-size:13px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:32px 16px 60px}
+
+header{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+header h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.04em}
+header h1::before{content:"//";color:var(--lime);margin-right:8px;font-weight:400}
+header .spacer{flex:1}
+
+.card{background:var(--bg-2);border:1px solid var(--rule);padding:22px;margin-bottom:16px}
+.card h2{margin:0 0 4px;font-size:14px;letter-spacing:.06em;color:var(--ink)}
+.card .sub{margin:0 0 18px;color:var(--muted);font-size:11px}
+
+label{display:block;margin:0 0 5px;color:var(--muted);font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase}
+input[type=text],input[type=password],input[type=number],select{
+  width:100%;background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:9px 11px;font:inherit;font-size:13px}
+input:focus,select:focus{outline:none;border-color:var(--lime)}
+.field{margin-bottom:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:520px){.grid2{grid-template-columns:1fr}}
+
+button{font:inherit;cursor:pointer}
+.btn{background:var(--lime);color:var(--lime-ink);border:1px solid var(--lime);
+  padding:10px 20px;font-weight:700;letter-spacing:.04em;width:100%}
+.btn:hover:not(:disabled){filter:brightness(1.12)}
+.btn:disabled{background:var(--bg-3);color:var(--muted);border-color:var(--rule);cursor:default}
+.btn.ghost{background:var(--bg-2);color:var(--ink);border-color:var(--rule);width:auto}
+.btn.ghost:hover{border-color:var(--lime);color:var(--lime)}
+
+.drop{border:1px dashed var(--rule);background:var(--bg-3);padding:26px 16px;
+  text-align:center;cursor:pointer;margin-bottom:14px;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--lime);background:rgba(196,245,66,.04)}
+.drop .ico{font-size:26px;line-height:1;margin-bottom:6px}
+.drop .name{color:var(--ink);word-break:break-all}
+.drop .hint{color:var(--muted);font-size:11px;margin-top:4px}
+
+.share-url{background:var(--bg);border:1px solid var(--lime);color:var(--lime);
+  padding:11px 13px;word-break:break-all;font-size:12px;margin:10px 0}
+.linkrow{display:flex;gap:8px;margin:8px 0}
+.linkrow input{flex:1;font-size:12px}
+.linkrow button{white-space:nowrap}
+
+.kv{display:flex;gap:8px;padding:3px 0;font-size:12px}
+.kv .k{color:var(--muted);flex:0 0 88px}
+.kv .v{color:var(--ink);word-break:break-all}
+
+.note{color:var(--muted);font-size:11px;margin-top:14px;line-height:1.7}
+.note b{color:var(--ink-2);font-weight:600}
+.err{color:var(--red);font-size:12px;margin-top:8px;min-height:16px}
+.ok{color:var(--green)}
+
+.tag{display:inline-block;padding:1px 6px;font-size:10px;border:1px solid var(--lime);
+  color:var(--lime);vertical-align:middle;white-space:nowrap}
+.tag.red{border-color:var(--red);color:var(--red)}
+.tag.gray{border-color:var(--muted);color:var(--muted)}
+
+.item{display:flex;align-items:center;gap:12px;padding:10px 12px;
+  background:var(--bg-3);border:1px solid var(--rule);margin-bottom:8px}
+.item .fico{font-size:20px;flex:0 0 auto}
+.item .meta{flex:1;min-width:0}
+.item .fname{color:var(--ink);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .fmeta{color:var(--muted);font-size:10px;display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.item .acts{display:flex;gap:6px;flex:0 0 auto}
+.item button{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
+  padding:4px 9px;font:inherit;font-size:11px;cursor:pointer}
+.item button:hover{border-color:var(--lime);color:var(--lime)}
+.item.expired{opacity:.5}
+.item a.act{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
+  padding:4px 9px;font:inherit;font-size:11px;text-decoration:none;display:inline-block}
+.item a.act:hover{border-color:var(--lime);color:var(--lime)}
+
+.mpbar{height:3px;background:var(--bg);border:1px solid var(--rule);margin-top:6px;overflow:hidden}
+.mpfill{height:100%;background:var(--lime)}
+.mptext{color:var(--muted);font-size:10px;margin-top:3px}
+
+#opts{border-top:1px solid var(--rule);padding-top:14px;margin-top:14px}
+.seg{display:flex;gap:0;border:1px solid var(--rule)}
+.seg button{flex:1;background:var(--bg-3);color:var(--ink-2);border:0;padding:7px 0;
+  font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--lime);color:var(--lime-ink);font-weight:700}
+.hint-line{color:var(--muted);font-size:10px;margin-top:5px;min-height:14px}
+.hint-line b{color:var(--lime)}
+
+.matrix-wrap{margin-bottom:14px}
+.mlabel{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+.mlabel .spacer{flex:1}
+.mlegend{display:flex;align-items:center;gap:4px;letter-spacing:0;text-transform:none;
+  font-size:10px;flex-wrap:wrap}
+.mlegend i{display:inline-block;width:7px;height:7px;margin-left:6px;margin-right:1px}
+.matrix{display:grid;grid-template-columns:repeat(auto-fill,9px);gap:2px;
+  padding:10px;background:var(--bg);border:1px solid var(--rule);max-height:140px;
+  overflow-y:auto}
+.matrix i{width:9px;height:9px;display:block;background:var(--bg-3);cursor:default}
+.matrix i.d-pending{background:#3a3a42}
+.matrix i.d-active{background:var(--lime);animation:pulse .8s ease-in-out infinite}
+.matrix i.d-ok{background:var(--green)}
+.matrix i.d-fail{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+#prog{margin-top:14px}
+.pbar{height:6px;background:var(--bg-3);border:1px solid var(--rule);overflow:hidden}
+.pfill{height:100%;width:0;background:var(--lime);transition:width .15s linear}
+.pmeta{display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--muted)}
+.pmeta .spacer{flex:1}
+#pspeed{color:var(--lime)}
+.pchunk{margin-top:8px;max-height:150px;overflow-y:auto;background:var(--bg);
+  border:1px solid var(--rule);padding:6px 8px;font-size:10px;line-height:1.55;
+  display:flex;flex-direction:column-reverse;gap:1px}
+.pchunk:empty{display:none}
+.pchunk div{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pchunk .l-ok{color:var(--green)}
+.pchunk .l-fail{color:var(--red)}
+.pchunk .l-active{color:var(--lime)}
+.pchunk .l-info{color:var(--ink-2)}
+
+.filerow{display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-3);
+  border:1px solid var(--rule);margin-bottom:16px}
+.filerow .fico{font-size:26px}
+.filerow .meta{flex:1;min-width:0}
+.filerow .fname{color:var(--ink);word-break:break-all}
+.filerow .fsize{color:var(--muted);font-size:11px}
+
+footer{color:var(--muted);font-size:11px;text-align:center;margin-top:32px}
+footer a{color:var(--lime);text-decoration:none}
+footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px solid var(--rule)}
+.empty-main{color:var(--muted);font-size:12px;margin:28px auto;text-align:center}
+[hidden]{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>share</h1>
+    <div class="spacer"></div>
+    <a href="/tool/share" style="color:var(--muted);text-decoration:none;font-size:11px">home</a>
+  </header>
+
+  <!-- ══════════ 上传 ══════════ -->
+  <section id="v-upload">
+    <div class="card">
+      <h2>上传文件</h2>
+      <p class="sub">设置下载次数上限、有效期和分享密码，生成短链分享给别人</p>
+
+      <div class="drop" id="drop">
+        <div class="ico">⬆</div>
+        <div class="name" id="drop-name">点击选择文件，或拖到这里</div>
+        <div class="hint">不限大小</div>
+      </div>
+      <input type="file" id="file" hidden>
+
+      <div id="opts" hidden>
+        <div class="field">
+          <label>上传方式</label>
+          <div class="seg">
+            <button class="on" data-way="post">http</button>
+            <button data-way="ws">websocket</button>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label for="chunk">分片大小（KB，0 = 不分片）</label>
+            <input type="number" id="chunk" value="0" min="0" step="1"
+                   placeholder="0 = 一次性上传">
+          </div>
+          <div class="field">
+            <label for="threads">上传线程（并发数）</label>
+            <input type="number" id="threads" value="1" min="1" max="16" step="1">
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="hint-line" id="chunk-hint"></div>
+        </div>
+
+        <div id="matrix-wrap" class="matrix-wrap" hidden>
+          <div class="mlabel">
+            <span>chunk 状态</span>
+            <span class="spacer"></span>
+            <span class="mlegend">
+              <i class="d-pending"></i>待传
+              <i class="d-active"></i>上传中
+              <i class="d-ok"></i>完成
+              <i class="d-fail"></i>失败
+            </span>
+          </div>
+          <div id="matrix" class="matrix"></div>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label for="max">下载次数上限</label>
+            <input type="number" id="max" value="10" min="0" max="100000" placeholder="0 = 无限">
+          </div>
+          <div class="field">
+            <label for="exp">有效期（小时，0 = 永久）</label>
+            <input type="number" id="exp" value="24" min="0" max="87600" step="1">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="pw">分享密码（可空）</label>
+          <input type="text" id="pw" placeholder="留空 = 免密" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <button class="btn" id="btn-upload" disabled>上传并生成分享链接</button>
+      <div class="err" id="up-err"></div>
+
+      <div id="prog" hidden>
+        <div class="pbar"><div class="pfill" id="pfill"></div></div>
+        <div class="pmeta">
+          <span id="ptext">0 B / 0 B</span>
+          <span class="spacer"></span>
+          <span id="pspeed"></span>
+        </div>
+        <div class="pchunk" id="pchunk"></div>
+      </div>
+    </div>
+
+    <!-- 我的分享（含未完成的续传） -->
+    <div class="card">
+      <h2>我的分享 <span class="sub" id="list-count" style="float:right"></span></h2>
+      <p class="sub">本浏览器上传过的（未完成的可以续传）</p>
+      <div id="my-list"><div class="empty-main">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 成功 ══════════ -->
+  <section id="v-done" hidden>
+    <div class="card">
+      <h2>分享链接已生成</h2>
+      <p class="sub">把这个链接发给对方</p>
+      <div class="share-url" id="done-url"></div>
+      <div class="linkrow">
+        <input type="text" id="done-copy" readonly>
+        <button class="btn ghost" id="btn-copy">复制</button>
+      </div>
+      <div class="kv"><span class="k">文件名</span><span class="v" id="done-name"></span></div>
+      <div class="kv"><span class="k">大小</span><span class="v" id="done-size"></span></div>
+      <div class="kv"><span class="k">次数上限</span><span class="v" id="done-max"></span></div>
+      <div class="kv"><span class="k">有效期</span><span class="v" id="done-exp"></span></div>
+      <div class="kv"><span class="k">密码</span><span class="v" id="done-pw"></span></div>
+      <div class="note" id="done-note"></div>
+      <div style="margin-top:18px">
+        <button class="btn ghost" id="btn-again">← 再传一个</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 下载 (?t=<token>) ══════════ -->
+  <section id="v-dl" hidden>
+    <div class="card">
+      <div class="filerow">
+        <div class="fico" id="dl-ico">📄</div>
+        <div class="meta">
+          <div class="fname" id="dl-name">…</div>
+          <div class="fsize" id="dl-size"></div>
+        </div>
+        <span class="tag" id="dl-tag" hidden></span>
+      </div>
+
+      <div id="dl-pwbox" hidden>
+        <div class="field">
+          <label for="dl-pw">访问密码</label>
+          <input type="password" id="dl-pw" placeholder="请输入分享密码" autocomplete="off">
+        </div>
+      </div>
+
+      <button class="btn" id="btn-dl">下载文件</button>
+      <div class="err" id="dl-err"></div>
+      <div class="note" id="dl-note"></div>
+    </div>
+    <div style="text-align:center">
+      <a href="/tool/share" style="color:var(--lime);text-decoration:none;font-size:11px">
+        ← 我要上传文件
+      </a>
+    </div>
+  </section>
+
+  <footer>数据存 <code>$SPIDER_DATA</code>（默认 <code>/tmp/share</code>）</footer>
+</div>
+
+<script>
+'use strict';
+
+const API = {
+  CREATE: '/tool/share/create',
+  UPLOAD: '/tool/share/upload',
+  FINISH: '/tool/share/finish',
+  LIST:   '/tool/share/list',
+  DELETE: '/tool/share/delete',
+  INFO:   '/tool/share/download',
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- utils ---------- */
+
+function debounce(fn, ms) {
+  let t = 0;
+  return function (...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+function fmtSize(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+function ico(type, name) {
+  if (/^image\//.test(type)) return '🖼';
+  if (/^video\//.test(type)) return '🎬';
+  if (/^audio\//.test(type)) return '🎵';
+  if (/pdf/.test(type)) return '📕';
+  if (/zip|tar|gzip|rar|7z/.test(type)) return '🗜';
+  if (/\.(zip|tar|gz|rar|7z)$/i.test(name || '')) return '🗜';
+  return '📄';
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function ago(t) {
+  const s = Math.floor(Date.now() / 1000 - t);
+  if (s < 60) return '刚刚';
+  if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+  if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+  return Math.floor(s / 86400) + ' 天前';
+}
+
+function fmtExp(expAt) {
+  if (!expAt) return '永久';
+  const h = (expAt - Date.now() / 1000) / 3600;
+  if (h <= 0) return '已过期';
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + ' 分钟后过期';
+  if (h < 48) return Math.round(h) + ' 小时后过期';
+  return Math.round(h / 24) + ' 天后过期';
+}
+
+async function jfetch(url, opts) {
+  const res = await fetch(url, opts);
+  let j = null;
+  try {
+    j = await res.clone().json();
+  } catch (e) {
+    try { j = JSON.parse(await res.text()); } catch (e2) { j = null; }
+  }
+  return { status: res.status, json: j };
+}
+
+function myId() {
+  let id = localStorage.getItem('share.cid');
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    localStorage.setItem('share.cid', id);
+  }
+  return id;
+}
+
+/* ---------- 视图切换 ---------- */
+
+let TOKEN = new URLSearchParams(location.search).get('t');
+let RESUME = new URLSearchParams(location.search).get('resume');
+
+function show(v) {
+  $('v-upload').hidden = (v !== 'upload');
+  $('v-done').hidden   = (v !== 'done');
+  $('v-dl').hidden     = (v !== 'dl');
+}
+
+/* ---------- chunk 计划 + 状态矩阵 ---------- */
+
+let picked = null;
+let way = 'post';
+let resumeTarget = null;
+let chunkPlan = null;
+const chunkState = [];
+let cells = [];
+
+function planOf(file, chunkKB) {
+  if (!chunkKB || chunkKB <= 0) return { parts: 1, chunk: 0 };
+  const chunk = chunkKB * 1024;
+  return { parts: Math.max(1, Math.ceil(file.size / chunk)), chunk };
+}
+
+function updateChunkHint() {
+  if (!picked) return;
+  const chunkKB = parseInt($('chunk').value, 10) || 0;
+  const threads = Math.max(1, parseInt($('threads').value, 10) || 1);
+  const p = planOf(picked, chunkKB);
+  chunkPlan = p;
+
+  const ptext = p.parts === 1
+    ? `不分片 · 一次性上传 <b>${fmtSize(picked.size)}</b>（线程数无效）`
+    : `<b>${p.parts}</b> 片 × ${fmtSize(p.chunk)} · <b>${threads}</b> 并发 ` +
+      `≈ ${p.parts % threads ? Math.ceil(p.parts / threads) : p.parts / threads} 轮`;
+  $('chunk-hint').innerHTML = ptext;
+
+  const heavy = p.parts > 800;
+  if (heavy) $('chunk-hint').innerHTML = '计算中…';
+  const paint = () => { $('chunk-hint').innerHTML = ptext; buildMatrix(p.parts); };
+  heavy ? setTimeout(paint, 16) : paint();
+}
+
+function buildMatrix(parts) {
+  const wrap = $('matrix-wrap');
+  const box = $('matrix');
+  if (parts <= 1) { wrap.hidden = true; cells = []; chunkState.length = 0; return; }
+  if (cells.length === parts) return;
+
+  wrap.hidden = false;
+  box.innerHTML = '';
+  cells = [];
+  chunkState.length = parts;
+  for (let i = 0; i < parts; i++) {
+    chunkState[i] = 'pending';
+    const c = document.createElement('i');
+    c.className = 'd-pending';
+    c.title = `chunk ${i} · 待传`;
+    box.appendChild(c);
+    cells.push(c);
+  }
+}
+
+function setChunkState(n, st, note) {
+  chunkState[n] = st;
+  const c = cells[n];
+  if (!c) return;
+  c.className = 'd-' + st;
+  const label = { pending: '待传', active: '上传中', ok: '完成', fail: '失败' }[st];
+  c.title = `chunk ${n} · ${label}` + (note ? ` · ${note}` : '');
+}
+
+/* ---------- 选文件 ---------- */
+
+function setFile(f) {
+  if (!f) return;
+
+  if (resumeTarget) {
+    if (f.name !== resumeTarget.name || f.size !== resumeTarget.size) {
+      $('up-err').textContent =
+        `不是同一个文件（期望「${resumeTarget.name}」${fmtSize(resumeTarget.size)}，` +
+        `当前「${f.name}」${fmtSize(f.size)}）`;
+      return;
+    }
+    $('chunk').value = Math.round((resumeTarget.chunk || 0) / 1024);
+  }
+
+  picked = f;
+  $('drop-name').textContent = f.name + '  (' + fmtSize(f.size) + ')';
+  $('prog').hidden = true;
+  $('opts').hidden = false;
+  chunkPlan = null; cells = []; chunkState.length = 0;
+  $('matrix-wrap').hidden = true;
+  updateChunkHint();
+  $('btn-upload').disabled = false;
+  $('btn-upload').textContent = resumeTarget ? '续传并完成' : '上传并生成分享链接';
+}
+
+$('drop').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => setFile(e.target.files[0]));
+
+['dragenter', 'dragover'].forEach(ev =>
+  $('drop').addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.add('over'); })
+);
+['dragleave', 'drop'].forEach(ev =>
+  $('drop').addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.remove('over'); })
+);
+$('drop').addEventListener('drop', (e) => setFile(e.dataTransfer.files[0]));
+
+document.querySelectorAll('.seg button').forEach((b) => {
+  b.addEventListener('click', () => {
+    way = b.dataset.way;
+    document.querySelectorAll('.seg button').forEach((x) => x.classList.toggle('on', x === b));
+    $('up-err').textContent = (way === 'ws') ? '⚠ websocket 上传后端还没上线，当前会自动走 http' : '';
+  });
+});
+
+$('chunk').addEventListener('input', debounce(updateChunkHint, 250));
+$('chunk').addEventListener('keydown', (e) => { if (e.key === 'Enter') updateChunkHint(); });
+$('threads').addEventListener('input', debounce(updateChunkHint, 250));
+$('threads').addEventListener('keydown', (e) => { if (e.key === 'Enter') updateChunkHint(); });
+
+/* ---------- 上传 ---------- */
+
+function xhrPost(url, body) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.responseType = 'json';
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) showProgress(e.loaded, e.total); };
+    xhr.onload = () => {
+      let j = xhr.response;
+      if (typeof j === 'string') { try { j = JSON.parse(j); } catch (_) {} }
+      if (!j) { try { j = JSON.parse(xhr.responseText); } catch (_) {} }
+      resolve({ status: xhr.status, json: j });
+    };
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.send(body);
+  });
+}
+
+function xhrPutChunk(token, n, blob, start, end, total) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `${API.UPLOAD}?token=${token}&n=${n}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) showProgress(start + e.loaded, total);
+    };
+    xhr.onload = () => {
+      let j = xhr.response;
+      if (typeof j === 'string') { try { j = JSON.parse(j); } catch (_) {} }
+      if (!j) { try { j = JSON.parse(xhr.responseText); } catch (_) {} }
+      resolve({ status: xhr.status, json: j });
+    };
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.send(blob);
+  });
+}
+
+let lastT = 0, lastB = 0, ema = 0;
+function showProgress(done, total) {
+  const now = performance.now();
+  if (lastT) {
+    const dt = (now - lastT) / 1000;
+    const db = done - lastB;
+    if (dt > 0.05) {
+      const inst = db / dt;
+      ema = ema ? ema * 0.7 + inst * 0.3 : inst;
+      $('pspeed').textContent = fmtSize(ema) + '/s';
+    }
+  }
+  lastT = now; lastB = done;
+  const pct = total ? Math.min(100, (done / total) * 100) : 0;
+  $('pfill').style.width = pct.toFixed(1) + '%';
+  $('ptext').textContent = `${fmtSize(done)} / ${fmtSize(total)} · ${pct.toFixed(0)}%`;
+}
+
+function resetProgress() {
+  lastT = 0; lastB = 0; ema = 0;
+  $('pfill').style.width = '0%';
+  $('ptext').textContent = '0 B / 0 B';
+  $('pspeed').textContent = '';
+  $('prog').hidden = false;
+  $('pchunk').innerHTML = '';
+  for (let i = 0; i < chunkState.length; i++) setChunkState(i, 'pending');
+}
+
+let logSeq = 0;
+function logChunk(kind, text) {
+  const box = $('pchunk');
+  const el = document.createElement('div');
+  el.className = 'l-' + kind;
+  el.textContent = `#${++logSeq} ` + text;
+  box.insertBefore(el, box.firstChild);
+  while (box.childNodes.length > 300) box.removeChild(box.lastChild);
+}
+
+async function uploadChunked(q, skipParts) {
+  let chunk = chunkPlan.chunk;
+  let parts = chunkPlan.parts;
+  const threads = Math.max(1, parseInt($('threads').value, 10) || 1);
+
+  let token = resumeTarget ? resumeTarget.token : null;
+  if (!token) {
+    const iq = new URLSearchParams(q);
+    iq.set('size', picked.size);
+    iq.set('chunk', chunk);
+    if (picked.type) iq.set('type', picked.type);
+    if (!resumeTarget) iq.set('name', picked.name);
+
+    const { status: rs, json: ij } = await jfetch(`${API.CREATE}?${iq}`, { method: 'POST' });
+    if (!ij || !ij.ok) throw new Error('create failed: ' + ((ij && ij.error) || ('HTTP ' + rs)));
+    token = ij.data.token;
+    if (ij.data.total_parts !== parts) {
+      parts = ij.data.total_parts;
+      chunk = ij.data.chunk;
+      chunkPlan = { parts, chunk };
+      buildMatrix(parts);
+    }
+  }
+
+  const skip = new Set(skipParts || []);
+  const todo = [];
+  for (let i = 0; i < parts; i++) if (!skip.has(i)) todo.push(i);
+  for (const i of skip) setChunkState(i, 'ok');
+
+  let cursor = 0, ok = 0, fail = 0;
+  const t0 = performance.now();
+  logChunk('info', `create ok — ${parts}片 × ${Math.round(chunk/1024)}KB · ${threads}并发`);
+  if (skip.size) logChunk('info', `跳过已收 ${skip.size} 片`);
+
+  const worker = async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= todo.length) return;
+      const n = todo[i];
+      const start = n * chunk;
+      const end = Math.min(start + chunk, picked.size) - 1;
+      setChunkState(n, 'active');
+      const t1 = performance.now();
+      try {
+        const blob = picked.slice(start, end + 1);
+        const { status, json } = await xhrPutChunk(token, n, blob, start, end, picked.size);
+        if (!json || !json.ok) throw new Error(json ? json.error : 'HTTP ' + status);
+        setChunkState(n, 'ok');
+        ok++;
+        logChunk('ok', `chunk ${n} ok ${Math.round(performance.now()-t1)}ms · ${json.data.got}/${parts}`);
+      } catch (e) {
+        fail++;
+        setChunkState(n, 'fail', e.message);
+        logChunk('fail', `chunk ${n} fail: ${e.message}`);
+        throw e;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: threads }, worker));
+  const ms = Math.round(performance.now() - t0);
+  logChunk('info', `全部 PUT 完成 — ok ${ok} / fail ${fail} · ${ms}ms`);
+
+  const t2 = performance.now();
+  const { status: fs, json: dj } = await jfetch(`${API.FINISH}?token=${token}`, { method: 'POST' });
+  const fok = dj && dj.ok;
+  logChunk(fok ? 'ok' : 'fail',
+    `finish ${fok ? 'ok' : 'fail'} ${Math.round(performance.now()-t2)}ms — ` +
+    (fok ? 'merged ' + fmtSize(dj.data.merged) : ((dj && dj.error) || ('HTTP ' + fs))));
+  if (!fok) throw new Error('merge failed: ' + ((dj && dj.error) || ('HTTP ' + fs)));
+
+  return dj.data;
+}
+
+$('btn-upload').addEventListener('click', async () => {
+  if (!picked) return;
+  const btn = $('btn-upload');
+  btn.disabled = true;
+  btn.textContent = '上传中…';
+  $('up-err').textContent = '';
+  resetProgress();
+
+  try {
+    const q = new URLSearchParams();
+    q.set('max', $('max').value || '0');
+    q.set('exp', $('exp').value || '0');
+    q.set('c', myId());
+    if ($('pw').value) q.set('pw', $('pw').value);
+
+    let d;
+    if (chunkPlan && chunkPlan.parts > 1) {
+      d = await uploadChunked(q, resumeTarget ? (resumeTarget.got_parts || []) : []);
+    } else {
+      logChunk('info', `不分片 — multipart POST ${fmtSize(picked.size)}`);
+      const fd = new FormData();
+      fd.append('file', picked, picked.name);
+      const { status, json } = await xhrPost(`${API.UPLOAD}?${q}`, fd);
+      if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
+      logChunk('ok', `上传完成 — ${fmtSize(picked.size)}`);
+      d = json.data;
+    }
+
+    showProgress(picked.size, picked.size);
+    $('pspeed').textContent = '';
+    $('btn-upload').textContent = '✓ 完成';
+    for (let i = 0; i < chunkState.length; i++) setChunkState(i, 'ok');
+    resumeTarget = null;
+
+    const full = `${location.origin}/tool/share/download/info/${d.token}`;
+    $('done-url').textContent = full;
+    $('done-copy').value = full;
+    $('done-name').textContent = d.name;
+    $('done-size').textContent = fmtSize(d.size);
+    $('done-max').textContent = d.max > 0 ? d.max + ' 次' : '不限';
+    $('done-exp').textContent = fmtExp(d.exp_at);
+    $('done-pw').textContent = d.has_pw ? $('pw').value : '无（免密）';
+    $('done-note').innerHTML =
+      (d.max > 0 ? '每成功下载一次扣 1 次，用完后链接失效。' : '不限次数。') +
+      (d.exp_at ? ' 到期后链接自动失效。' : '') + ' 密码错不扣次数。';
+    show('done');
+    loadList();
+  } catch (e) {
+    $('up-err').textContent = '上传失败: ' + e.message;
+    $('btn-upload').textContent = '上传并生成分享链接';
+    for (let i = 0; i < chunkState.length; i++) {
+      if (chunkState[i] !== 'ok') setChunkState(i, 'fail', e.message);
+    }
+    loadList();
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('btn-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('done-copy').value);
+    $('btn-copy').textContent = '已复制';
+  } catch {
+    $('done-copy').select();
+    $('btn-copy').textContent = '请手动复制';
+  }
+  setTimeout(() => { $('btn-copy').textContent = '复制'; }, 1500);
+});
+
+$('btn-again').addEventListener('click', () => {
+  picked = null;
+  $('file').value = '';
+  $('drop-name').textContent = '点击选择文件，或拖到这里';
+  $('btn-upload').disabled = true;
+  $('btn-upload').textContent = '上传并生成分享链接';
+  $('up-err').textContent = '';
+  $('prog').hidden = true;
+  show('upload');
+});
+
+/* ---------- 我的分享 ---------- */
+
+async function loadList() {
+  const box = $('my-list');
+  try {
+    const { status: rs, json } = await jfetch(`${API.LIST}?c=${encodeURIComponent(myId())}`);
+    const items = (json && json.data) || [];
+    const pending = items.filter((x) => !x.done).length;
+    $('list-count').textContent = items.length ? `${items.length} 项${pending ? ` · ${pending} 未完成` : ''}` : '';
+
+    if (!items.length) {
+      box.innerHTML = '<div class="empty-main">还没上传过</div>';
+      return;
+    }
+
+    box.innerHTML = '';
+    for (const it of items) {
+      const el = document.createElement('div');
+      el.className = 'item' + (it.expired ? ' expired' : '');
+      const quota = it.max > 0 ? `${it.left}/${it.max} 次` : '不限';
+
+      let bar = '', acts;
+      if (!it.done) {
+        const got = (it.got_parts || []).length;
+        const total = it.total_parts || 1;
+        const pct = Math.round((got / total) * 100);
+        bar = `<div class="mpbar"><div class="mpfill" style="width:${pct}%"></div></div>` +
+              `<div class="mptext">${got}/${total} 片 · ${pct}% · ${it.chunk ? Math.round(it.chunk/1024) + ' KB/片' : '不分片'}</div>`;
+        acts = `<button data-act="resume" data-tok="${it.token}">续传</button>` +
+               `<button data-act="del" data-tok="${it.token}">丢弃</button>`;
+      } else {
+        acts = `<button data-act="copy" data-url="${it.url}">复制链接</button>` +
+               `<a class="act" href="${location.origin}/tool/share/download/info/${it.token}">打开</a>`;
+      }
+
+      el.innerHTML =
+        `<div class="fico">${ico(it.type, it.name)}</div>` +
+        `<div class="meta">` +
+          `<div class="fname">${escapeHtml(it.name)}</div>` +
+          `<div class="fmeta">` +
+            `<span>${fmtSize(it.size)}</span>` +
+            `<span>${quota}</span>` +
+            (it.exp_at ? `<span>${escapeHtml(fmtExp(it.exp_at))}</span>` : '') +
+            (it.has_pw ? `<span class="tag gray">密码</span>` : '') +
+            (it.expired ? `<span class="tag red">已耗尽</span>` : '') +
+            `<span>${ago(it.at)}</span>` +
+          `</div>` + bar +
+        `</div>` +
+        `<div class="acts">${acts}</div>`;
+      box.appendChild(el);
+    }
+
+    box.querySelectorAll('button[data-act]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const act = b.dataset.act;
+        if (act === 'resume') {
+          location.href = `/tool/share?resume=${b.dataset.tok}`;
+          return;
+        }
+        if (act === 'del') {
+          if (!confirm('丢弃这个未完成的上传？已传的片段会被删除。')) return;
+          try {
+            const { json: j } = await jfetch(`${API.DELETE}/${b.dataset.tok}`, { method: 'DELETE' });
+            if (!j || !j.ok) throw new Error((j && j.error) || 'delete failed');
+            loadList();
+          } catch (e) { alert('丢弃失败: ' + e.message); }
+          return;
+        }
+        const url = location.origin + b.dataset.url;
+        try {
+          await navigator.clipboard.writeText(url);
+          const old = b.textContent;
+          b.textContent = '已复制';
+          setTimeout(() => { b.textContent = old; }, 1400);
+        } catch { prompt('复制这个链接：', url); }
+      });
+    });
+  } catch (e) {
+    box.innerHTML = `<div class="err" style="margin:12px 0">加载失败: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+/* ---------- 下载视图 ---------- */
+
+async function initDownload(t) {
+  show('dl');
+  try {
+    const { status: ds, json } = await jfetch(`${API.INFO}/info/${t}`);
+    if (!json || !json.ok) {
+      $('dl-err').textContent = (json && json.error) || ('HTTP ' + ds);
+      $('btn-dl').disabled = true;
+      return;
+    }
+    const d = json.data;
+    $('dl-name').textContent = d.name;
+    $('dl-size').textContent = fmtSize(d.size);
+    $('dl-ico').textContent = ico(d.type, d.name);
+
+    if (d.has_pw) { $('dl-pwbox').hidden = false; $('dl-pw').focus(); }
+
+    const bits = [];
+    if (d.max > 0) bits.push(`剩 ${d.left}/${d.max} 次`);
+    if (d.exp_at) {
+      const h = (d.exp_at - Date.now() / 1000) / 3600;
+      if (h <= 0) bits.push('已过期');
+      else if (h <= 24) bits.push(fmtExp(d.exp_at));
+    }
+    if (bits.length) {
+      const tag = $('dl-tag');
+      tag.hidden = false;
+      tag.textContent = bits.join(' · ');
+      tag.className = 'tag' + ((d.max > 0 && d.left <= 2) ||
+        (d.exp_at && (d.exp_at - Date.now()/1000) <= 86400) ? ' red' : '');
+    }
+    $('dl-note').innerHTML =
+      (d.max > 0 ? `剩余 <b>${d.left}</b> / ${d.max} 次下载机会。` : '不限下载次数。') +
+      (d.exp_at ? `<br>${escapeHtml(fmtExp(d.exp_at))}。` : '');
+  } catch (e) {
+    $('dl-err').textContent = '加载失败: ' + e.message;
+    $('btn-dl').disabled = true;
+  }
+}
+
+$('btn-dl').addEventListener('click', () => {
+  const q = new URLSearchParams();
+  if ($('dl-pw').value) q.set('p', $('dl-pw').value);
+  const url = `${API.INFO}/f/${TOKEN}` + (q.toString() ? '?' + q : '');
+  const a = document.createElement('a');
+  a.href = url; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+$('dl-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-dl').click(); });
+
+/* ---------- boot ---------- */
+
+async function initResume(tok) {
+  try {
+    const { json } = await jfetch(`${API.LIST}/${tok}`);
+    if (!json || !json.ok || !json.data) throw new Error('未找到这个上传');
+    resumeTarget = json.data;
+    const got = (resumeTarget.got_parts || []).length;
+    $('opts').hidden = false;
+    $('up-err').textContent =
+      `续传「${resumeTarget.name}」— 已收 ${got}/${resumeTarget.total_parts} 片，请重新选择同一个文件`;
+    $('drop-name').textContent = '点击选择原文件继续';
+    $('btn-upload').disabled = true;
+    $('btn-upload').textContent = '选好文件后点此续传';
+    if (resumeTarget.chunk) $('chunk').value = Math.round(resumeTarget.chunk / 1024);
+  } catch (e) {
+    $('up-err').textContent = '续传失败: ' + e.message;
+  }
+}
+
+if (TOKEN) {
+  initDownload(TOKEN);
+} else {
+  show('upload');
+  loadList();
+  if (RESUME) initResume(RESUME);
+}
+</script>
+</body>
+</html>

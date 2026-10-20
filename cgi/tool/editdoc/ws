@@ -31,13 +31,9 @@ FRAME_MAX = 60 * 1024
 Q.ws do |req|
   mcast = SocketNotify.new("cgi-editdoc-#{Process.pid}")
 
-  mcast.notify(:editdoc) do |msg|
-    next if msg.pid.to_i == Process.pid # 自我回环 (自己 emit 的收不到)
-    begin
-      Q.write(msg.data, true)
-    rescue => e
-      Q.log("[editdoc/ws] mcast->ws err: #{e.message}")
-    end
+  mcast.notify(:editdoc, false) do |msg|
+    # false = 不回环，跳过自己发的
+    Q.write(msg.data, true)
   end
 
   Q.log('[editdoc/ws] + client')
@@ -52,8 +48,8 @@ Q.ws do |req|
       if chunk.bytesize > FRAME_MAX
         Q.log "[editdoc/ws] frame too big: #{chunk.bytesize}"
       else
-        # fmt=bin 原样透传字节 + echo 回自己 (weavo join 需要)
-        mcast.notify(:editdoc, chunk, fmt: :bin)
+        # 原样透传字节 + echo 回自己 (weavo join 需要)
+        mcast.notify(:editdoc, chunk)
         Q.write(chunk, true)
         Q.log "notify #{chunk.bytesize}"
         sleep 0.001

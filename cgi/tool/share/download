@@ -1,0 +1,167 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/share/download — 文件分享：元信息 + 下载
+#
+#   GET  /tool/share/download/info/<token>            元信息（下载页用）
+#   GET  /tool/share/download/f/<token>?p=<password>  下载（计一次次数）
+#   GET  /tool/share/download                         状态
+#
+# 上传在 tool/share/upload（POST multipart），不在这里。
+# 所有下载相关的接口都在本文件：info（元信息）+ f（实际下载）。
+#
+# 为什么密码走 URL query 而不是 cookie/session：
+#   分享链接常常直接贴给别人（IM / 邮件），带密码的 URL 本身即凭证，
+#   对方点开就能下。密码错时不消耗下载次数。
+#
+# 失效策略（次数耗尽 或 到期）—— 懒清理，不依赖定时器：
+#   第 1 次碰到失效 → 返回 410 Gone，meta.json 里打 dead 标记（文件仍在）
+#   第 2 次再碰到 → FileUtils.rm_rf 整个 token 目录（物理删除）
+#   这样"标记失效"和"清理"分开：误判一次不会立刻丢数据，
+#   真正清理发生在下一次访问，且不需要后台 cron。
+#
+# 存储布局（每个分享一个文件夹）:
+#   $SPIDER_DATA/<token>/meta.json   元信息 {name,type,size,max,left,pw,by,exp,exp_at,at,dead}
+#   $SPIDER_DATA/<token>/data        原始字节
+#   SPIDER_DATA 未设置时默认 /tmp/share（部署时用环境变量改，不用改代码）
+#   token = SecureRandom.hex(8) → 16 位 hex，短链好记又难猜
+#
+# 下载次数：成功开始传输时扣 1（扣减 + 发文件在同一进程内完成，
+#   单机 CGI 每请求独立进程，正常不会并发写同一个 token；
+#   真要并发可以给 meta.json 加 flock）。
+
+require_relative '../../_base_'
+require 'fileutils'
+
+# 全局数据目录，可用 SPIDER_DATA 环境变量覆盖
+SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
+
+FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
+
+# ---------- helpers ----------
+
+def dir_of(token)   = File.join(SHARE_ROOT, token)
+def meta_path(token) = File.join(dir_of(token), 'meta.json')
+def data_path(token) = File.join(dir_of(token), 'data')
+
+def load_meta(token)
+  p = meta_path(token)
+  return nil unless File.file?(p)
+  JSON.parse(File.read(p)) rescue nil
+end
+
+def save_meta(token, m)
+  File.write(meta_path(token), m.to_json)
+end
+
+def json(rsp, code, payload)
+  rsp.code(code).type_json.body(payload.to_json).finish
+end
+
+def sanitize_name(str)
+  n = str.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip
+  n.empty? ? 'file' : n
+end
+
+# 分享是否已失效（次数耗尽 或 已到期）。返回 :none / :quota / :expired
+def dead_reason(m)
+  return :quota if m['max'].to_i > 0 && m['left'].to_i <= 0
+  exp_at = m['exp_at'].to_i
+  return :expired if exp_at > 0 && Time.now.to_i >= exp_at
+  :none
+end
+
+# 懒清理：第一次碰到失效打 dead 标记，第二次直接物理删除。
+# 返回 true 表示"已物理删除，调用方应该回 404"。
+def reap_if_dead(token, m)
+  if m['dead']
+    FileUtils.rm_rf(dir_of(token))
+    return true
+  end
+  return false unless dead_reason(m) != :none
+  m['dead'] = true
+  m['dead_at'] = Time.now.to_i
+  save_meta(token, m)
+  false
+end
+
+# ---------- GET: 元信息（下载页用） ----------
+
+Q.get %r{^/info/(?<token>[a-f0-9]{16})$} do |req, rsp|
+  token = req.named(:token)
+  m = load_meta(token)
+  return json(rsp, 404, ok: false, error: 'not found') if m.nil?
+
+  if reap_if_dead(token, m)
+    return json(rsp, 404, ok: false, error: 'not found')
+  end
+
+  reason = dead_reason(m)
+  if reason != :none
+    return json(rsp, 410, ok: false,
+                error: (reason == :quota ? '次数已用完' : '链接已过期'),
+                data: { name: m['name'], size: m['size'] })
+  end
+
+  return json(rsp, 404, ok: false, error: 'file gone') unless File.file?(data_path(token))
+
+  json(rsp, 200, ok: true, data: {
+    name:   m['name'],
+    type:   m['type'],
+    size:   m['size'],
+    max:    m['max'],
+    left:   m['left'],
+    has_pw: !m['pw'].to_s.empty?,
+    exp_at: m['exp_at'].to_i,
+    at:     m['at']
+  })
+end
+
+# ---------- GET: 下载 ----------
+
+Q.get %r{^/f/(?<token>[a-f0-9]{16})$} do |req, rsp|
+  token = req.named(:token)
+  m = load_meta(token)
+  return json(rsp, 404, ok: false, error: 'not found') if m.nil?
+
+  if reap_if_dead(token, m)
+    return json(rsp, 404, ok: false, error: 'not found')
+  end
+
+  reason = dead_reason(m)
+  if reason != :none
+    return json(rsp, 410, ok: false,
+                error: (reason == :quota ? '次数已用完' : '链接已过期'),
+                data: { name: m['name'], size: m['size'] })
+  end
+
+  # 密码校验（密码错的不消耗下载次数）
+  want = m['pw'].to_s
+  unless want.empty?
+    got = req.param('p').to_s
+    return json(rsp, 401, ok: false, error: '密码错误',
+                data: { name: m['name'], size: m['size'], has_pw: true }) if got != want
+  end
+
+  path = data_path(token)
+  return json(rsp, 404, ok: false, error: 'file gone') unless File.file?(path)
+
+  # 扣次数（发出响应前落盘）
+  if m['max'].to_i > 0
+    m['left'] = m['left'].to_i - 1
+    save_meta(token, m)
+  end
+
+  mime = m['type'].to_s
+  mime = 'application/octet-stream' if mime.empty?
+  safe = sanitize_name(m['name']).gsub(/"/, '')
+  rsp.header_field('Content-Disposition', %(attachment; filename="#{safe}"))
+  rsp.header_field('X-Share-Left', m['max'].to_i > 0 ? m['left'].to_s : 'inf')
+  rsp.type(mime).body(path).finish
+end
+
+# ---------- GET / : 状态 ----------
+
+Q.get '/' do |_req, rsp|
+  n = Dir.glob(File.join(SHARE_ROOT, '*')).count { |d| File.directory?(d) }
+  rsp.type_json.body({ ok: true, shares: n, root: SHARE_ROOT }.to_json).finish
+end

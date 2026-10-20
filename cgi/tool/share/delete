@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/share/delete — 删除分享
+#
+#   DELETE /tool/share/delete/<token>[?pw=<密码>]
+#
+# 只允许删两种：
+#   1. 未完成的上传（done=0）—— 丢弃半成品，直接 rm -rf 整个目录
+#   2. 已完成的分享 —— 必须提供正确密码（防枚举/误删）
+#
+# 为什么要密码才能删已完成的：
+#   token 只有 16 位 hex，短链本来就能被人猜到/捡到（分享出去的链接）。
+#   如果裸 token 就能删，任何拿到链接的人都能把别人的分享删掉。
+#   密码是分享者自己设的，只有他才知道 —— 用它做删除授权。
+#   未完成的没有对外发过链接（没 done 就没 token 可分享），所以不需要。
+#
+# → 200 {ok:true, data:{token, deleted:true}}
+
+require_relative '../../_base_'
+require 'fileutils'
+
+SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
+
+FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
+
+def json(rsp, code, payload)
+  rsp.code(code).type_json.body(payload.to_json).finish
+end
+
+Q.delete %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
+  token = req.named(:token)
+  dir = File.join(SHARE_ROOT, token)
+  mp = File.join(dir, 'meta.json')
+  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(mp)
+
+  m = (JSON.parse(File.read(mp)) rescue nil)
+  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
+
+  # 已完成的分享必须验密码
+  if m['done'].to_i != 0
+    want = m['pw'].to_s
+    got  = req.param('pw').to_s
+    if want.empty?
+      # 没设密码的分享：不允许远程删（没有凭证能证明是所有者）
+      return json(rsp, 403, ok: false, error: '该分享未设密码，无法远程删除')
+    end
+    if got != want
+      return json(rsp, 401, ok: false, error: '密码错误')
+    end
+  end
+
+  FileUtils.rm_rf(dir)
+  json(rsp, 200, ok: true, data: { token: token, deleted: true })
+end
+
+# 用错方法时给提示
+Q.get '/' do |_req, rsp|
+  json(rsp, 405, ok: false, error: 'DELETE /tool/share/delete/<token>')
+end

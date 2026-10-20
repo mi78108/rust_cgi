@@ -269,7 +269,7 @@ impl Req for Websocket {
     }
 
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
-        // 默认 文本末包
+        // 默认 文本末包hdu
         // let rst = if data[0] == 0b10000010 {
         //    self.write_with_opcode(0b10000010, &data[1..]).await
         // }else{

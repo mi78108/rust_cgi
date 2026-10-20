@@ -54,7 +54,7 @@ end
 # ============================================================
 Q.ws '/page/ws' do |req|
   m = SocketNotify.new("cgi-#{Process.pid}").notify(:chat) do |msg|
-    Q.write "[#{msg.name}] #{msg.text}\n"
+    Q.write "[#{msg.name}] #{msg.data.force_encoding('UTF-8')}\n"
   end
   req.on_data do |val|
     m.emit(:chat, "mm #{val}")
@@ -71,7 +71,7 @@ end
 Q.ws '/fs.html/ws' do |req|
   fs = FsNotify.new("cgi-#{Process.pid}")  # 默认 root = /tmp/notify_fs
   fs.notify(:chat) do |msg|
-    Q.write "[#{msg.name}] #{msg.text}\n"
+    Q.write "[#{msg.name}] #{msg.data.force_encoding('UTF-8')}\n"
   end
   req.on_data do |val|
     fs.emit(:chat, "fs:#{val}")

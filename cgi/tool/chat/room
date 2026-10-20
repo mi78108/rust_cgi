@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/chat/room — 房间名 path 段 → query 的 302 跳转
+#
+#   GET /tool/chat/room/abc   → /tool/chat?room=abc
+#   GET /tool/chat/room       → /tool/chat?room=default
+#   GET /tool/chat/room/a/b   → /tool/chat?room=a      （多余段丢弃）
+#
+# 为什么要有这个：
+#   chat/index 是 symlink 到 cgi/pub，pub 只认 '/' 和 '/'+静态文件名，
+#   无法把「房间名段」和「静态资源」区分开。所以房间名走 path 段的请求
+#   （/tool/chat/room/abc，比较好记、比较好分享）由本脚本拦下来，
+#   302 到 query 形式（/tool/chat?room=abc）交给 index + 前端解析。
+#   最终渲染只有一条路径：pub 静态 serve dist/index.html。
+#
+# MAP_PATH（spider 剥掉脚本名后剩下的路径）：
+#   /tool/chat/room          →  /
+#   /tool/chat/room/abc      →  /abc
+#   /tool/chat/room/a/b      →  /a/b
+#
+# 房间名白名单 [A-Za-z0-9_-]{1,32}，跟 chat/ws 端点的清洗规则一致。
+# 不合法的当 default，避免拼出坏 URL / open redirect。
+
+require_relative '../../_base_'
+
+ROOM_MAX     = 32
+DEFAULT_ROOM = 'default'
+CHAT_URL     = '/tool/chat'
+
+def sanitize(str)
+  s = str.to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, ROOM_MAX]
+  s.empty? ? DEFAULT_ROOM : s
+end
+
+def to_chat(room)
+  "#{CHAT_URL}?room=#{room}"
+end
+
+# /tool/chat/room/a/b —— 取第一段做房间名，多余段丢弃
+Q.get %r{^/(?<room>[^/]+)} do |req, rsp|
+  rsp.redirect_to(to_chat(sanitize(req.named(:room)))).finish
+end
+
+# /tool/chat/room —— default 房间
+Q.get '/' do |_req, rsp|
+  rsp.redirect_to(to_chat(DEFAULT_ROOM)).finish
+end

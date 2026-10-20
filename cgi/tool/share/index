@@ -1,0 +1,65 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/share/index — 文件分享页面 + 分享链接重定向
+#
+#   GET /tool/share                        → dist/page.html（上传 + 我的分享）
+#   GET /tool/share?t=<token>              → 302 /tool/share/download?t=<token>
+#   GET /tool/share/<token>                → 302 /tool/share/download/info/<token>
+#
+# 页面本身是纯 HTML/CSS/JS（无框架，单文件内联），存在 dist/page.html 里，
+# 本脚本只负责端出来。
+#
+# 为什么 ?t=<token> 要重定向而不是直接渲染页面：
+#   分享链接是「给人点的」（对方要看文件名、输密码、点下载），
+#   而 /tool/share/download?t= 是给程序用的（直接吐文件 / 返回 401/410 JSON）。
+#   两者语义不同：页面走 query，接口走 download 脚本。
+#   早期版本让 page.html 自己判断 ?t= 切下载视图，现在统一交给 download，
+#   页面专心做上传。
+#
+# 为什么 /tool/share/<token> 也重定向到 info：
+#   短链形式更好记（/s/a1b2c3d4），info 返回元信息 JSON 让调用方自己决定怎么展示。
+#   值必须是 32 位 hex（跟 share 的 token 格式一致），避免误吞其他路径段。
+#
+# API 端点（每个独立脚本）：
+#   POST   /tool/share/create   分片第一步：建 token
+#   POST   /tool/share/upload   不分片 multipart 上传
+#   PUT    /tool/share/upload   分片上传（?token=&n=，Content-Range）
+#   POST   /tool/share/finish   分片合并收尾
+#   GET    /tool/share/list     列表 / 单条详情（续传入口）
+#   DELETE /tool/share/delete   丢弃未完成 / 删除
+#   GET    /tool/share/download 元信息 / 下载
+
+require_relative '../../_base_'
+require 'uri'
+
+PAGE   = 'dist/page.html'
+TOKEN  = /\A[a-f0-9]{16}\z/
+DL     = '/tool/share/download'
+
+# 302 到实际下载端点，保留 ?p=（分享密码）?d=（强制下载）等 query
+def to_download(rsp, token, extra = {})
+  q = extra.transform_keys(&:to_s).reject { |_k, v| v.nil? || v.to_s.empty? }
+  loc = q.empty? ? "#{DL}/f/#{token}" : "#{DL}/f/#{token}?#{URI.encode_www_form(q)}"
+  rsp.redirect_to(loc).finish
+end
+
+# ── /tool/share?t=<token> → 下载端点 ────────────────────────
+Q.get '/' do |req, rsp|
+  t = req.param('t').to_s
+  if t =~ TOKEN
+    # 密码通过 ?p= 传（页面表单提交时带的），其余 query 也带上
+    extra = {}
+    %w[p d].each { |k| extra[k] = req.param(k) unless req.param(k).nil? }
+    return to_download(rsp, t, extra)
+  end
+
+  unless File.file?(PAGE)
+    return rsp.fail_404.type_text.body("#{PAGE} not found").finish
+  end
+  rsp.type_html.body(PAGE).finish
+end
+
+# ── /tool/share/<token> → 下载端点 ──────────────────────────
+Q.get %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
+  to_download(rsp, req.named(:token))
+end

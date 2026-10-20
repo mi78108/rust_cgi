@@ -1,0 +1,186 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/share/upload — 文件上传
+#
+#   POST /tool/share/upload            multipart 上传（不分片）
+#       query: max=<n>   下载次数上限（0 = 无限）
+#             pw=<pass>  分享密码（可空）
+#             exp=<h>    有效期小时数（0 = 永久）
+#             name=<..>  可选，覆盖原文件名
+#             c=<id>     上传者 clientId（前端 localStorage 生成，list 按它查）
+#       →  200 {ok:true, data:{token, url, name, size, type, max, has_pw, exp_at}}
+#
+#   PUT  /tool/share/upload?token=<t>&n=<seq>    分片上传（裸 bytes body）
+#       Header: Content-Range: bytes <start>-<end>/<total>
+#       body:   这一片的原始字节
+#       →  200 {ok:true, data:{token, n, got, total_parts, all_parts:[...]}}
+#
+# 分片全流程：
+#   1) POST /tool/share/create?c=&name=&type=&size=&max=&exp=&pw=&chunk=<字节>
+#        → {token, total_parts, chunk, got_parts:[]}
+#   2) PUT  /tool/share/upload?token=&n=0..N  （并发数由前端控制，可重复传同一 n 幂等覆盖）
+#   3) POST /tool/share/finish?token=         → 合并 part/* → data，done=1，返回分享链接
+#
+# 为什么分片单独存成 part/<n> 而不是 append 到 data：
+#   append 的重传会导致内容重复（幂等性靠客户端串行保证，一断就错位）。
+#   每片一个文件重传直接覆盖，天然幂等；done 时按序合并，多一次 IO 但正确性有保障。
+#
+# Content-Range 解析（标准格式 bytes start-end/total）：
+#   必填，缺了直接 400 —— 客户端必须显式声明这一片在文件里的位置，
+#   服务端不靠"下一个 n 是多少"推断（并发时顺序不可控）。
+#
+# 存储布局（每个分享一个文件夹）:
+#   $SPIDER_DATA/<token>/meta.json   元信息（含 by = clientId, done, chunk, total_parts）
+#   $SPIDER_DATA/<token>/data        原始字节（不分片直接写；分片在 done 时合并）
+#   $SPIDER_DATA/<token>/part/<n>    分片（仅分片上传，done 后删除）
+#   SPIDER_DATA 未设置时默认 /tmp/share
+#
+# 下载次数扣减在 tool/share/download 的 GET /f/<token> 里做（上传端不涉及）。
+
+require_relative '../../_base_'
+require_relative '../../_ext_form_'
+require 'securerandom'
+require 'fileutils'
+
+SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
+
+FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
+
+def dir_of(token)   = File.join(SHARE_ROOT, token)
+def sanitize_name(s) = (s.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip.then { |n| n.empty? ? 'file' : n })
+
+def json(rsp, code, payload)
+  rsp.code(code).type_json.body(payload.to_json).finish
+end
+
+def meta_path(token) = File.join(dir_of(token), 'meta.json')
+
+def load_meta(token)
+  p = meta_path(token)
+  return nil unless File.file?(p)
+  JSON.parse(File.read(p)) rescue nil
+end
+
+def save_meta(token, m)
+  File.write(meta_path(token), m.to_json)
+end
+
+# 扫已收到的分片 part/<n> → [0, 2, 5]（升序）
+def got_parts(token)
+  pdir = File.join(dir_of(token), 'part')
+  return [] unless File.directory?(pdir)
+  Dir.children(pdir).select { |f| f =~ /\A\d+\z/ }.map(&:to_i).sort
+end
+
+Q.post '/' do |req, rsp|
+  max = req.param('max').to_i
+  max = 0 if max.negative?
+  max = 100_000 if max > 100_000          # 防手滑
+  pw = req.param('pw').to_s[0, 64]
+  by = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]   # clientId
+
+  # 有效期：小时数，0 = 永久。上限 10 年，防手滑。
+  exp_h = req.param('exp').to_i
+  exp_h = 0 if exp_h.negative?
+  exp_h = 87_600 if exp_h > 87_600
+
+  form = req.body_form_data
+  return json(rsp, 400, ok: false, error: 'not multipart/form-data') if form.nil?
+
+  item = form.items.find(&:file?)
+  return json(rsp, 400, ok: false, error: 'no file field') if item.nil?
+
+  content = item.content
+  return json(rsp, 400, ok: false, error: 'empty file') if content.empty?
+
+  token = SecureRandom.hex(8)
+  FileUtils.mkdir_p(dir_of(token))
+  File.binwrite(File.join(dir_of(token), 'data'), content)
+
+  now = Time.now.to_i
+  name = sanitize_name(req.param('name').to_s.empty? ? item.filename : req.param('name'))
+  File.write(File.join(dir_of(token), 'meta.json'), {
+    'name'   => name,
+    'type'   => item.content_type.to_s[0, 100],
+    'size'   => content.bytesize,
+    'max'    => max,
+    'left'   => max,                       # 0 = 无限
+    'pw'     => pw,
+    'by'     => by,                         # 上传者 clientId（list 按它过滤）
+    'exp'    => exp_h,                      # 有效期小时数（0 = 永久）
+    'exp_at' => (exp_h > 0 ? now + exp_h * 3600 : 0),  # 到期时间戳，0 = 不过期
+    'at'     => now,
+    'done'   => 1,                          # 1=已完成（旧接口一次性上传）
+    'chunk'  => 0,                          # 0=不分片
+    'total_parts' => 1,
+    'got_parts'  => []
+  }.to_json)
+
+  json(rsp, 200, ok: true, data: {
+    token:  token,
+    url:    "/tool/share/download/f/#{token}",
+    name:   name,
+    size:   content.bytesize,
+    type:   item.content_type,
+    max:    max,
+    has_pw: !pw.empty?,
+    exp_at: (exp_h > 0 ? now + exp_h * 3600 : 0)
+  })
+end
+
+# 误用 GET 时给个提示
+Q.get '/' do |_req, rsp|
+  json(rsp, 405, ok: false, error: 'POST multipart/form-data here (see tool/share/download)')
+end
+
+# ── PUT: 分片上传 ───────────────────────────────────────────
+Q.put '/' do |req, rsp|
+  token = req.param('token').to_s
+  return json(rsp, 400, ok: false, error: 'missing token') unless token =~ /\A[a-f0-9]{16}\z/
+  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(meta_path(token))
+
+  m = load_meta(token)
+  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
+  return json(rsp, 409, ok: false, error: 'already done') if m['done'].to_i != 0
+
+  n = req.param('n').to_i
+  total = m['total_parts'].to_i
+  return json(rsp, 400, ok: false, error: "bad n: #{req.param('n')}") if n.negative? || n >= total
+
+  # Content-Range: bytes <start>-<end>/<total>  —— 必填
+  cr = req.header('content-range', '')
+  md = cr.to_s.match(%r{\Abytes\s+(\d+)-(\d+)/(\d+)\z})
+  unless md
+    return json(rsp, 400, ok: false,
+                error: "bad or missing Content-Range: #{cr.inspect} (want 'bytes 0-1023/#{m['size']}')")
+  end
+  start, finish, cr_total = md[1].to_i, md[2].to_i, md[3].to_i
+
+  return json(rsp, 400, ok: false, error: "range end < start") if finish < start
+  return json(rsp, 400, ok: false, error: "total mismatch: #{cr_total} != #{m['size']}") if cr_total != m['size'].to_i
+
+  # n 与字节位置必须自洽（chunk 大小 × n == start，最后一片允许短）
+  chunk = m['chunk'].to_i
+  if chunk > 0 && start != n * chunk
+    return json(rsp, 400, ok: false, error: "start #{start} != n*chunk #{n * chunk}")
+  end
+
+  content = req.body.to_s
+  want = finish - start + 1
+  if content.bytesize != want
+    return json(rsp, 400, ok: false,
+                error: "body size #{content.bytesize} != range length #{want}")
+  end
+
+  pdir = File.join(dir_of(token), 'part')
+  FileUtils.mkdir_p(pdir)
+  File.binwrite(File.join(pdir, n.to_s), content)
+
+  got = got_parts(token)
+  json(rsp, 200, ok: true, data: {
+    token: token, n: n,
+    got: got.length, total_parts: total,
+    all_parts: got,
+    complete: got.length >= total
+  })
+end

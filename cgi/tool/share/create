@@ -1,0 +1,85 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# tool/share/create — 分片上传第一步：建 token
+#
+#   POST /tool/share/create?c=<clientId>&name=&type=&size=<字节>&max=&exp=<h>&pw=&chunk=<字节>
+#
+#   chunk 单位是字节（前端把 KB 乘 1024 后传上来）。
+#   chunk=0 表示不分片 —— 服务端建一个空 data 文件并标记 done=1，
+#   等价于一次普通上传（前端仍走 multipart POST /upload，不该用到这里）。
+#
+#   → 200 {ok:true, data:{token, total_parts, chunk, got_parts:[]}}
+#
+# 为什么要 create：token 要在传第一个分片之前就确定，浏览器才有地方续传
+# （刷新页面后拿 token + 重新选文件，从已收的分片继续）。
+#
+# 完整分片流程：
+#   1) POST /tool/share/create?...        → token
+#   2) PUT  /tool/share/upload?token=&n=  → 每一片
+#   3) POST /tool/share/finish?token=     → 合并 part/* → data，返回分享链接
+#
+# 存储布局（跟 /upload 一致，只是多一个 part/ 目录）:
+#   $SPIDER_DATA/<token>/meta.json   {done:0, chunk, total_parts, ...}
+#   $SPIDER_DATA/<token>/part/<n>     每个分片一个文件（幂等：重传直接覆盖）
+#   $SPIDER_DATA/<token>/data         finish 时按序合并而成
+
+require_relative '../../_base_'
+require 'securerandom'
+require 'fileutils'
+
+SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
+
+FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
+
+def dir_of(token)    = File.join(SHARE_ROOT, token)
+def meta_path(token) = File.join(dir_of(token), 'meta.json')
+def sanitize_name(s) = (s.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip.then { |n| n.empty? ? 'file' : n })
+
+def json(rsp, code, payload)
+  rsp.code(code).type_json.body(payload.to_json).finish
+end
+
+Q.post '/' do |req, rsp|
+  size = req.param('size').to_i
+  return json(rsp, 400, ok: false, error: "bad size: #{req.param('size')}") if size <= 0
+
+  chunk = req.param('chunk').to_i
+  return json(rsp, 400, ok: false, error: "bad chunk: #{req.param('chunk')}") if chunk.negative?
+  total = chunk > 0 ? (size + chunk - 1) / chunk : 1
+
+  max = req.param('max').to_i
+  max = 0 if max.negative?
+  max = 100_000 if max > 100_000
+  exp_h = req.param('exp').to_i
+  exp_h = 0 if exp_h.negative?
+  exp_h = 87_600 if exp_h > 87_600
+
+  token = SecureRandom.hex(8)
+  FileUtils.mkdir_p(File.join(dir_of(token), 'part'))
+
+  now = Time.now.to_i
+  File.write(meta_path(token), {
+    'name'   => sanitize_name(req.param('name')),
+    'type'   => req.param('type').to_s[0, 100],
+    'size'   => size,
+    'max'    => max,
+    'left'   => max,
+    'pw'     => req.param('pw').to_s[0, 64],
+    'by'     => req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40],
+    'exp'    => exp_h,
+    'exp_at' => (exp_h > 0 ? now + exp_h * 3600 : 0),
+    'at'     => now,
+    'done'   => 0,
+    'chunk'  => chunk,
+    'total_parts' => total
+  }.to_json)
+
+  json(rsp, 200, ok: true, data: {
+    token: token, total_parts: total, chunk: chunk, got_parts: []
+  })
+end
+
+Q.get '/' do |_req, rsp|
+  json(rsp, 405, ok: false,
+       error: 'POST /tool/share/create?c=&name=&type=&size=&max=&exp=&pw=&chunk=')
+end
