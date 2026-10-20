@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>json · tool</title>
+  <link rel="stylesheet" href="json/style.css">
+</head>
+<body>
+  <script type="module" src="json/app.js"></script>
+  <header class="toolbar">
+    <div class="group">
+      <button id="btn-open" title="打开本地 .json 文件">open</button>
+      <button id="btn-download" class="primary" title="下载当前 JSON 为文件">download</button>
+      <button id="btn-copy" title="复制到剪贴板">copy</button>
+      <button id="btn-clear" title="清空">clear</button>
+      <button id="btn-sample" title="加载示例">sample</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <span class="label" style="font-size: 11px; color: var(--muted)">drop .json to load</span>
+    </div>
+  </header>
+  <div id="editor"></div>
+  <input type="file" id="file-input" accept=".json,application/json" style="display:none">
+  <div id="dropzone" class="dropzone-hint">drop .json file</div>
+  <footer class="statusbar">
+    <span id="stat-bytes">0 B</span>
+    <span id="stat-keys">0 keys</span>
+    <span id="stat-err" class="ok">ok</span>
+    <span class="spacer"></span>
+    <span style="color: var(--muted)">jsoneditor · hawk</span>
+  </footer>
+  <div id="toast" class="toast"></div>
+</body>
+</html>

@@ -1,0 +1,279 @@
+:root {
+      /* 主站暗色 token */
+      --bg: #0f0f12;
+      --bg-2: #1a1a1f;
+      --bg-3: #25252d;
+      --ink: #e8e8ea;
+      --ink-2: #a0a0a8;
+      --muted: #5a5a64;
+      --rule: #2a2a30;
+      --rule-2: #3a3a44;
+      --lime: #c4f542;
+      --lime-dim: #a8d337;
+      --lime-ink: #0f0f12;
+      --red: #ff5e5e;
+      --amber: #ffb84a;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    /* ============================================================
+       jse 配色 — 基于 https://unpkg.com/vanilla-jsoneditor/themes/jse-theme-dark.css
+       改用主站 lime 强调色. 设到 :root 让 modal (不在 .jse-main 里) 也能继承.
+       变量名 / 语义与官方 1:1 对齐, 改色方便.
+       ============================================================ */
+    :root {
+      --jse-theme: dark;
+
+      /* over all fonts, sizes, and colors */
+      --jse-theme-color: var(--bg-2);                  /* 官方 #2f6dd0 蓝 → 暗灰 */
+      --jse-theme-color-highlight: var(--lime);        /* 官方 #467cd2 → lime */
+      --jse-background-color: var(--bg);                /* 官方 #1e1e1e → 主站黑 */
+      --jse-text-color: var(--ink);                     /* 官方 #d4d4d4 → 主站浅 */
+      --jse-text-color-inverse: var(--lime-ink);
+
+      /* main, menu, modal */
+      --jse-main-border: 1px solid var(--rule);
+      /* jse 内部用 --jse-menu-color 当 selected 按钮的 bg (反色) —
+         官方 dark 设 #fff (白底) 在暗主题刺眼. 我们让 selected 跟随主题色 lime 强调. */
+      --jse-menu-color: var(--lime);
+      --jse-modal-background: var(--bg-2);
+      --jse-modal-overlay-background: rgba(0, 0, 0, 0.5);
+      --jse-modal-code-background: var(--bg-2);
+
+      /* tooltip in text mode */
+      --jse-tooltip-color: var(--ink);
+      --jse-tooltip-background: var(--bg-3);
+      --jse-tooltip-border: 1px solid var(--rule-2);
+      --jse-tooltip-action-button-color: inherit;
+      --jse-tooltip-action-button-background: var(--rule-2);
+
+      /* panels: navigation bar, gutter, search box */
+      --jse-panel-background: var(--bg-2);
+      --jse-panel-background-border: 1px solid var(--rule);
+      --jse-panel-color: var(--ink);
+      --jse-panel-color-readonly: var(--muted);
+      --jse-panel-border: 1px solid var(--rule);
+      --jse-panel-button-color-highlight: var(--ink);
+      --jse-panel-button-background-highlight: var(--rule-2);
+
+      /* navigation-bar (已关) */
+      --jse-navigation-bar-background: var(--rule-2);
+      --jse-navigation-bar-background-highlight: var(--rule);
+      --jse-navigation-bar-dropdown-color: var(--ink);
+
+      /* context menu */
+      --jse-context-menu-background: var(--bg-3);
+      --jse-context-menu-background-highlight: var(--rule);
+      --jse-context-menu-separator-color: var(--rule);
+      --jse-context-menu-color: var(--ink);
+      --jse-context-menu-pointer-background: var(--rule-2);
+      --jse-context-menu-pointer-background-highlight: var(--rule);
+      --jse-context-menu-pointer-color: var(--jse-context-menu-color);
+
+      /* contents: json key and values */
+      --jse-key-color: #9cdcfe;
+      --jse-value-color: var(--ink);
+      --jse-value-color-number: #b5cea8;
+      --jse-value-color-boolean: #569cd6;
+      --jse-value-color-null: #569cd6;
+      --jse-value-color-string: #ce9178;
+      --jse-value-color-url: #ce9178;
+      --jse-delimiter-color: var(--ink-2);
+      --jse-edit-outline: 2px solid var(--lime);
+
+      /* contents: selected or hovered */
+      --jse-selection-background-color: rgba(196, 245, 66, 0.25);
+      --jse-selection-background-inactive-color: rgba(255, 255, 255, 0.08);
+      --jse-hover-background-color: var(--rule);
+      --jse-active-line-background-color: rgba(255, 255, 255, 0.06);
+      --jse-search-match-background-color: var(--rule);
+
+      /* contents: section of collapsed items in an array */
+      --jse-collapsed-items-background-color: var(--bg-2);
+      --jse-collapsed-items-selected-background-color: var(--rule-2);
+      --jse-collapsed-items-link-color: var(--ink-2);
+      --jse-collapsed-items-link-color-highlight: #ec8477;
+
+      /* contents: highlighting of search results */
+      --jse-search-match-color: #724c27;
+      --jse-search-match-outline: 1px solid #966535;
+      --jse-search-match-active-color: #9f6c39;
+      --jse-search-match-active-outline: 1px solid #bb7f43;
+
+      /* contents: inline tags inside the JSON document */
+      --jse-tag-background: var(--rule-2);
+      --jse-tag-color: var(--ink);
+
+      /* contents: table */
+      --jse-table-header-background: var(--bg-2);
+      --jse-table-header-background-highlight: var(--rule);
+      --jse-table-row-odd-background: rgba(255, 255, 255, 0.04);
+
+      /* controls in modals: inputs, buttons, and `a` */
+      --jse-input-background: var(--bg-3);
+      --jse-input-border: var(--rule);
+      --jse-input-border-focus: 1px solid var(--lime);
+      --jse-button-background: var(--rule-2);
+      --jse-button-background-highlight: var(--rule);
+      --jse-button-color: var(--ink);
+      --jse-button-primary-background: var(--lime);
+      --jse-button-primary-background-highlight: var(--lime-dim);
+      --jse-button-primary-background-disabled: var(--muted);
+      --jse-button-primary-color: var(--lime-ink);
+      --jse-button-secondary-background: var(--rule-2);
+      --jse-button-secondary-background-highlight: var(--rule);
+      --jse-button-secondary-background-disabled: var(--muted);
+      --jse-button-secondary-color: var(--ink);
+      --jse-a-color: var(--lime);
+      --jse-a-color-highlight: var(--lime-dim);
+
+      /* svelte-select (jse 内部用 svelte-select 库做下拉) */
+      --jse-svelte-select-background: var(--bg-3);
+      --jse-svelte-select-border: 1px solid var(--rule);
+      --list-background: var(--bg-2);
+      --list-color: var(--ink);
+      --list-border: 1px solid var(--rule);
+      --item-color: var(--ink);
+      --item-hover-color: var(--lime-ink);
+      --item-hover-bg: var(--rule);
+      --item-active-background: var(--lime);
+      --item-active-color: var(--lime-ink);
+      --item-selected-background: var(--rule);
+      --item-selected-color: var(--ink);
+      --placeholder-color: var(--muted);
+      --input-color: var(--ink);
+      --input-background: var(--bg);
+      --input-border: 1px solid var(--rule);
+      --multi-item-color: var(--ink);
+      --multi-item-bg: var(--rule);
+      --multi-item-border: 1px solid var(--rule-2);
+      --multi-clear-bg: var(--rule-2);
+      --multi-item-clear-icon-color: var(--ink);
+      --multi-item-outline: 1px solid var(--rule-2);
+      --list-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+      --clear-color: var(--ink-2);
+
+      /* color picker */
+      --jse-color-picker-background: var(--rule-2);
+      --jse-color-picker-border-box-shadow: var(--rule) 0 0 0 1px;
+    }
+    /* <dialog> 浏览器默认白底, 强覆盖 */
+    dialog.jse-modal { background-color: var(--bg-2) !important; color: var(--ink) !important; }
+    /* jse menu / modal-inner 蓝底蓝hover 强覆盖 */
+    .jse-menu, .jse-modal-inner { background: var(--bg-2) !important; color: var(--ink) !important; }
+    .jse-menu .jse-button:hover,
+    .jse-menu .jse-button.jse-group-button:hover,
+    .jse-menu .jse-button:focus,
+    .jse-menu .jse-button.jse-group-button:focus,
+    .jse-header .jse-button:hover {
+      background: var(--lime) !important;
+      color: var(--lime-ink) !important;
+    }
+    .jse-main, .jse-modal-inner, .jse-menu, .jse-text-mode, .jse-contents { border-color: var(--rule) !important; }
+    /* checkbox 勾用 lime (在暗背景下默认 UA 蓝) */
+    input[type="checkbox"] { accent-color: var(--lime); }
+    header.toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--rule);
+      flex: 0 0 auto;
+    }
+    header.toolbar .group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 8px;
+      border-right: 1px solid var(--rule);
+    }
+    header.toolbar .group:last-child { border-right: 0; }
+    header.toolbar button {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--rule);
+      padding: 4px 10px;
+      font: inherit;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    header.toolbar button:hover { background: var(--rule); border-color: var(--ink-2); }
+    header.toolbar button:active { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
+    header.toolbar button.primary { border-color: var(--lime); color: var(--lime); }
+    header.toolbar button.primary:hover { background: var(--lime); color: var(--lime-ink); }
+    header.toolbar .spacer { flex: 1; }
+    header.toolbar .label { color: var(--muted); padding: 0 4px; }
+    #editor {
+      flex: 1 1 auto;
+      margin: 0;
+      width: 100%;
+      min-height: 0;
+      border-top: 0;
+    }
+    .dropzone-hint {
+      position: fixed;
+      inset: 0;
+      background: rgba(196, 245, 66, 0.08);
+      border: 3px dashed var(--lime);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      color: var(--lime);
+      letter-spacing: 0.2em;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .dropzone-hint.show { display: flex; }
+    footer.statusbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 6px 12px;
+      background: var(--bg-2);
+      border-top: 1px solid var(--rule);
+      color: var(--ink-2);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      flex: 0 0 auto;
+    }
+    footer.statusbar .err { color: var(--red); }
+    footer.statusbar .warn { color: #ffb84a; }
+    footer.statusbar .ok { color: var(--lime); }
+    footer.statusbar .spacer { flex: 1; }
+    .toast {
+      position: fixed;
+      bottom: 36px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--lime);
+      color: var(--lime-ink);
+      padding: 6px 14px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    @media (max-width: 640px) {
+      header.toolbar { padding: 6px; gap: 4px; }
+      header.toolbar .group { padding-right: 4px; }
+      header.toolbar button { padding: 4px 7px; font-size: 12px; }
+      header.toolbar .label { display: none; }
+    }

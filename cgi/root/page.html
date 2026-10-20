@@ -703,15 +703,15 @@
   <div class="sys-grid" id="sys-grid">
     <div class="sys-card">
       <div class="k">load avg</div>
-      <div class="v"><span id="sys-load">—</span></div>
+      <div class="v"><span id="sys-load">@<{v[:load][0]}></span></div>
     </div>
     <div class="sys-card">
       <div class="k">ram used</div>
-      <div class="v"><span id="sys-mem">—</span></div>
+      <div class="v"><span id="sys-mem">@<{v[:mem][:used_pct]}></span></div>
     </div>
     <div class="sys-card">
       <div class="k">uptime</div>
-      <div class="v"><span id="sys-uptime">—</span></div>
+      <div class="v"><span id="sys-uptime">@<{v[:uptime_s] / 60 / 60}> h</span></div>
     </div>
   </div>
 </section>
@@ -1010,6 +1010,7 @@
     }
   }
   function applySystem(s){
+    console.log(s,typeof s)
     if (!s || typeof s !== 'object') return;
     // sys strip
     if (s.load && s.load[0] != null){
@@ -1060,17 +1061,22 @@
         let name = getUsername() || (setUsername(genUsername()), getUsername());
         wsSend({op:'set-name', name});
         wsSend({op:'hello'});
+
+        setInterval(()=>{
+          wsSend({op:'ping'})
+        },30*1000)
       });
       ws.addEventListener('message', ev => {
         let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+        console.log(msg)
         if (!msg || !msg.type) return;
         switch (msg.type){
           case 'update': applyProcs(Array.isArray(msg.data) ? msg.data : []); break;
-          case 'system': applySystem(msg.data || {}); break;
-          case 'pong':   applySystem(msg.system || msg.data || {}); break;
+          case 'system': applySystem(msg.data || msg.value|| {}); break;
+          case 'pong':   applySystem(msg.system  || msg.data || msg.value || {}); break;
           case 'ping':   wsSend({op:'pong'}); break;
           case 'hello':  /* 握手回包, 无 ui 更新 */ break;
-          case 'error':  console.warn('[root/ws] server error', msg.msg); break;
+          case 'error':  console.warn('[root/ws] server error', msg); break;
         }
       });
       ws.addEventListener('close', () => { if (!stopped) scheduleRetry(); });

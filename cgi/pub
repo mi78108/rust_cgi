@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+
+require_relative '_base_'
+
+MIME = {
+  '.html' => 'text/html; charset=utf-8',
+  '.htm'  => 'text/html; charset=utf-8',
+  '.js'   => 'text/javascript; charset=utf-8',
+  '.mjs'  => 'text/javascript; charset=utf-8',
+  '.css'  => 'text/css; charset=utf-8',
+  '.json' => 'application/json; charset=utf-8',
+  '.map'  => 'application/json; charset=utf-8',
+  '.svg'  => 'image/svg+xml',
+  '.png'  => 'image/png',
+  '.jpg'  => 'image/jpeg',
+  '.jpeg' => 'image/jpeg',
+  '.gif'  => 'image/gif',
+  '.webp' => 'image/webp',
+  '.ico'  => 'image/x-icon',
+  '.woff' => 'font/woff',
+  '.woff2'=> 'font/woff2',
+  '.txt'  => 'text/plain; charset=utf-8',
+}.freeze
+
+PUB_ROOT = 'dist'
+
+def serve_file(rsp, real_path, mime)
+  rsp.type(mime).body(real_path).finish
+end
+
+def reject(rsp, msg)
+  rsp.fail_404.type_text.body(msg).finish
+end
+
+Q.get '/' do |_req, rsp|
+  path = File.join(PUB_ROOT, 'index.html')
+  if File.file?(path)
+    serve_file(rsp, path, MIME['.html'])
+  else
+    reject(rsp, "index.html not found")
+  end
+end
+
+# 限定: 段内字符 [A-Za-z0-9._-], 不含 ..  /  \  :  ;  等
+Q.get %r{^/(?<file>(?!.*\.\.)[A-Za-z0-9._/-]{1,128})$} do |req, rsp|
+  path = req.named(:file)
+  if path.include?('..')
+    return reject(rsp, "invalid path: #{rel}")
+  end
+  full = File.join(PUB_ROOT, path)
+  unless File.file?(full)
+    return reject(rsp, "#{rel} not a file")
+  end
+  ext = File.extname(full).downcase
+  mime = MIME[ext] or return reject(rsp, "unsupported extension: #{ext}")
+  serve_file(rsp, full, mime)
+end

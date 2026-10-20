@@ -6,11 +6,12 @@ use base64::engine::general_purpose::STANDARD;
 use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 pub struct Websocket {
+    last_op: AtomicU8,
     base_on: Http,
     processed: AtomicUsize,
     remainder: AtomicUsize,
@@ -104,6 +105,7 @@ impl Websocket {
         }
         debug!("websocket read package mask {:?}", plymask);
         // frame read done
+       self.last_op.store(bytes[0], Ordering::Release);
         match bytes[0] {
             // h  if h == 0b10000000 => {
             //     continues frame
@@ -268,7 +270,12 @@ impl Req for Websocket {
 
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         // 默认 文本末包
-        let rst = self.write_with_opcode(0b10000001, data).await;
+        // let rst = if data[0] == 0b10000010 {
+        //    self.write_with_opcode(0b10000010, &data[1..]).await
+        // }else{
+        //     self.write_with_opcode(0b10000001, data).await
+        // };
+        let rst = self.write_with_opcode(self.last_op.load(Ordering::Relaxed), data).await;
         if rst.is_ok() {
             if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {}
         };
@@ -319,6 +326,7 @@ impl Handle<Http> for Websocket {
             }
         }
         Ok(Websocket {
+            last_op: AtomicU8::new(0b10000001),
             base_on: stream,
             processed: AtomicUsize::new(0),
             remainder: AtomicUsize::new(0),

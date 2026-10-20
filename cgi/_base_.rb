@@ -211,10 +211,14 @@ class Q
       loop do
         begin
           head = Q.read(8)
+          # STDIN.read(n) 在 EOF 时返回 nil（不是 ""），必须先判空
+          break if head.nil? || head.bytesize < 8
           len = head[0, 4].unpack1('N')
           rem = head[4, 4].unpack1('N')
           Q.log ">>>>>>>>>>>>>> packet remainder #{rem} ready #{len}"
-          value << Q.read(len)
+          body = Q.read(len)
+          break if body.nil?
+          value << body
           if rem == 0
             ret = cbk.call(value) unless cbk.nil?
             value.clear
@@ -1011,16 +1015,16 @@ class Q
     # 跑用户 block；rescue → 500 响应
     def exec_route_block(block)
       rsp = Rsp.new
-      begin
-        Dir.chdir(SCRIPT_DIR) do
+      Dir.chdir(SCRIPT_DIR) do
+        begin
           instance_exec(Req.new, rsp, &block)
+        rescue StandardError => e
+          log "#{e.class}: #{e.message}"
+          log((e.backtrace || []).first(5).map { |b| "  #{b}" })
+          rsp.code(500).body("#{e.class}: #{e.message}").finish
         end
-      rescue StandardError => e
-        log "#{e.class}: #{e.message}"
-        log((e.backtrace || []).first(5).map { |b| "  #{b}" })
-        rsp.code(500).body("#{e.class}: #{e.message}").finish
+        rsp.finish unless rsp.sent
       end
-      rsp.finish unless rsp.sent
     end
   end
 end

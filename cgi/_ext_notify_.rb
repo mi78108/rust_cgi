@@ -25,20 +25,40 @@
 #   4) trap 上下文不能 acquire Mutex（ThreadError），所以 stop() 必须是
 #      主线程同步调用。
 #
-# 协议：HEADER 行 + "\n" + BODY (UTF-8 JSON)
-#   HEADER 字段：kind=msg|hb  seq=N  id=host:pid  name=...  body_len=N
-#   BODY：{"text":"...","ch":"chat",...}        (msg 才需要 body)
+# 协议：HEADER 行 + "\n" + PAYLOAD
+#   HEADER 字段：kind=msg|hb  ch=<channel>  fmt=json|text|bin  seq=N
+#                id=host:pid  name=...  body_len=N
+#   PAYLOAD：按 fmt 分派，SocketNotify 不解释内容 —— 格式由上层决定。
+#     fmt=json  → 任意可 JSON 序列化的对象 (Hash / Array / 标量)
+#     fmt=text  → UTF-8 文本 (String)，原样透传
+#     fmt=bin   → 任意字节 (ASCII-8BIT String)，原样透传
+#
+#   上层分派规则（Notify#send_msg）：
+#     Hash / Array          → fmt=json
+#     nil                   → fmt=json（body 为 {}）
+#     String (UTF-8 有效)    → fmt=text
+#     String (含非法 UTF-8)  → fmt=bin
+#   也可显式指定：notify(:ch, payload, fmt: :bin)
+#
+#   Message 字段：
+#     fmt      — 'json' | 'text' | 'bin'
+#     data     — fmt=json 时是解析后的 Ruby 对象；fmt=text/bin 时是原始 String
+#     raw      — 始终是原始 payload bytes (ASCII-8BIT)，与 fmt 无关
+#     text     — 兼容字段：data 是 String 时等于 data，否则 data.to_s
+#     body     — 兼容字段：fmt=json 时的 Hash（含 meta），否则 {}
 #
 # 用法：
-#   m = SocketNotify.new('alice')         # 自动 start
-#   m.notify(:chat) { |msg| puts msg.text }  # 订阅
-#   m.notify(:chat, 'hi')                   # 发
-#   m.emit(:chat, 'hi')                      # 同上，更明确的"广播"语义
+#   m = SocketNotify.new('alice')              # 自动 start
+#   m.notify(:chat) { |msg| puts msg.data }    # 订阅
+#   m.notify(:chat, 'hi')                       # 发文本 → fmt=text
+#   m.notify(:chat, {a: 1})                    # 发 JSON → fmt=json
+#   m.notify(:chat, binary_bytes, fmt: :bin)   # 发二进制 → fmt=bin
+#   m.emit(:chat, 'hi')                          # 同上，更明确的"广播"语义
 #   ...
 #   m.stop
 #
 #   f = FsNotify.new('/tmp/notify')
-#   f.notify(:file) { |msg| puts "[#{msg.body['kind']}] #{msg.text}" }
+#   f.notify(:file) { |msg| puts "[#{msg.fmt}] #{msg.data}" }  # 订阅
 #   f.emit(:chat, 'hi')                    # 写到 /tmp/notify/chat/<token>
 #   ...
 #   f.stop                                 # 删自己的 token 文件
@@ -46,6 +66,7 @@
 require 'socket'
 require 'ipaddr'
 require 'json'
+require 'base64'
 require 'fileutils'
 
 # ============================================================
@@ -53,10 +74,28 @@ require 'fileutils'
 # ============================================================
 class Notify
   Message = Struct.new(:kind, :id, :name, :host, :pid, :seq, :from,
-                       :channel, :text, :body,
-                       keyword_init: true)
+                       :channel, :fmt, :data, :raw,
+                       keyword_init: true) do
+    # fmt=json 且 data 是 Hash 时返回它, 否则空 Hash (兼容旧的 msg.body 用法)
+    def body
+      fmt == 'json' && data.is_a?(Hash) ? data : {}
+    end
+
+    # 兼容字段: data 是 String 就原样给, 否则 to_s
+    def text
+      data.is_a?(String) ? data : data.to_s
+    end
+
+    # 便捷: 原始 bytes (ASCII-8BIT)
+    def bytes
+      raw || (data.is_a?(String) ? data.dup.force_encoding(Encoding::ASCII_8BIT) : nil)
+    end
+  end
 
   attr_reader :name
+
+  # 显式 fmt 白名单
+  FORMATS = %w[json text bin].freeze
 
   def initialize(name)
     @name       = name
@@ -69,19 +108,18 @@ class Notify
 
   def running?; @running; end
 
-  # 公共 API：订阅（带 block）或发送（无 block + text）
-  def notify(channel, text = nil, **meta, &blk)
+  # 公共 API：订阅（带 block）或发送（无 block + payload）
+  def notify(channel, payload = nil, **meta, &blk)
     if blk
       @notify_lock.synchronize { (@subs[coerce(channel)] ||= []) << blk }
     else
-      raise ArgumentError, 'send requires text (no block)' if text.nil?
-      send_msg(coerce(channel), text, meta)
+      send_msg(coerce(channel), payload, meta)
     end
     self
   end
 
-  def emit(channel, text, **meta)
-    send_msg(coerce(channel), text, meta)
+  def emit(channel, payload, **meta)
+    send_msg(coerce(channel), payload, meta)
   end
 
   def stop
@@ -93,13 +131,10 @@ class Notify
 
   # ----- 子类实现 -----
   protected
-
   def do_send_packet(_bytes); raise NotImplementedError, 'emit not supported by this impl'; end
   def do_stop;              end   # 默认 no-op
   def parse_packet(_data, _addr); raise NotImplementedError; end
   def header_fields;        []; end   # 默认空，emit 时 HEADER 至少含 kind/seq
-
-  # ----- 子类可用的工具 -----
 
   # 业务消息分发（receive 线程调）
   def dispatch_msg(msg)
@@ -109,21 +144,65 @@ class Notify
     end
   end
 
-  def send_msg(channel, text, meta)
-    body = { 'text' => text.to_s, 'ch' => channel.to_s }.merge(meta.transform_keys(&:to_s))
-    packet = build_packet(kind: 'msg', channel: channel, body: body)
+  # payload → [fmt, payload_bytes] 的自动分派。
+  # 上层想跳过自动判断就传 meta[:fmt]。
+  def encode_payload(payload)
+    fmt = nil
+    body = nil
+    case payload
+    when nil
+      fmt, body = 'json', '{}'
+    when Hash, Array, Integer, Float, TrueClass, FalseClass
+      fmt = 'json'
+      body = JSON.generate(payload)
+    when String
+      # 非法 UTF-8 → 二进制通道；合法 → 文本通道
+      if payload.encoding == Encoding::ASCII_8BIT && !payload.dup.force_encoding('UTF-8').valid_encoding?
+        fmt = 'bin'
+        body = payload.dup.force_encoding(Encoding::ASCII_8BIT)
+      elsif !payload.valid_encoding?
+        fmt = 'bin'
+        body = payload.dup.force_encoding(Encoding::ASCII_8BIT)
+      else
+        fmt = 'text'
+        body = payload.encode('UTF-8')
+      end
+    else
+      # 其他对象 → to_s 再走文本
+      fmt = 'text'
+      body = payload.to_s.encode('UTF-8')
+    end
+    [fmt, body]
+  end
+
+  def send_msg(channel, payload, meta = {})
+    meta = meta.transform_keys(&:to_s)
+    # 显式指定 fmt 时跳过自动分派
+    fmt = meta.delete('fmt')&.to_s
+    if fmt && FORMATS.include?(fmt)
+      body =
+        case fmt
+        when 'json' then JSON.generate(payload)
+        when 'text' then payload.to_s.encode('UTF-8')
+        when 'bin'  then payload.to_s.dup.force_encoding(Encoding::ASCII_8BIT)
+        end
+    else
+      fmt, body = encode_payload(payload)
+    end
+    packet = build_packet(kind: 'msg', channel: channel, fmt: fmt, body: body, meta: meta)
     @send_mutex.synchronize { do_send_packet(packet) }
   end
 
-  def build_packet(kind:, channel: nil, body: nil)
+  def build_packet(kind:, channel: nil, fmt: nil, body: nil, meta: nil)
     @seq += 1
     parts = ["kind=#{kind}", "seq=#{@seq}"] + header_fields
     parts << "ch=#{channel}" if channel
-    body_json = body ? JSON.generate(body) : nil
-    parts << "body_len=#{body_json.bytesize}" if body_json
+    parts << "fmt=#{fmt}" if fmt
+    parts << "body_len=#{body.bytesize}" if body
+    parts.concat(meta.map { |k, v| "#{k}=#{v}" }) if meta && !meta.empty?
     pkt = +''
     pkt << parts.join(' ') << "\n"
-    pkt << body_json if body_json
+    pkt << body if body
     pkt
   end
 
@@ -149,7 +228,9 @@ class SocketNotify < Notify
   DEFAULT_IFACE  = '0.0.0.0'
   DEFAULT_HB_SEC = 5
   HB_TTL         = 2
-  PACKET_LIMIT   = 8 * 1024
+  # UDP 单包上限 ~65507 字节 (IP 层). 8KB 太小: 大 payload (如 base64 编码的
+  # 二进制帧) 会被 recvfrom_nonblock 静默截断, 导致数据残缺.
+  PACKET_LIMIT   = 60 * 1024
 
   def initialize(name, group: DEFAULT_GROUP, port: DEFAULT_PORT,
                  iface: DEFAULT_IFACE, hb_interval: DEFAULT_HB_SEC)
@@ -187,6 +268,11 @@ class SocketNotify < Notify
     warn "[#{@name}] down"
   end
 
+  # 按 HEADER 的 fmt 字段分派 payload 解码 —— SocketNotify 不理解内容格式。
+  #   fmt=json → JSON.parse（失败则当原始文本，不丢消息）
+  #   fmt=text → 原始 UTF-8 String
+  #   fmt=bin  → 原始 ASCII-8BIT String
+  #   fmt 缺失 → 向后兼容：试 JSON，失败则当 text
   def parse_packet(data, from_addr)
     return nil if data.empty?
     nl = data.index("\n")
@@ -197,8 +283,28 @@ class SocketNotify < Notify
       body_bytes = body_bytes.byteslice(0, body_len)
     end
 
-    body_obj = body_bytes.empty? ? {} : (JSON.parse(body_bytes) rescue {})
-    body_obj = body_obj.is_a?(Hash) ? body_obj : { 'data' => body_obj }
+    fmt = parse_common_kv(header, 'fmt')
+
+    data_obj =
+      case fmt
+      when 'bin'
+        body_bytes.dup.force_encoding(Encoding::ASCII_8BIT)
+      when 'text'
+        body_bytes.dup.force_encoding(Encoding::UTF_8)
+      when 'json'
+        if body_bytes.empty?
+          {}
+        else
+          JSON.parse(body_bytes) rescue body_bytes.dup.force_encoding(Encoding::UTF_8)
+        end
+      else
+        # fmt 缺失（旧版本 peer）→ 尽量当 JSON，失败退回 text
+        if body_bytes.empty?
+          {}
+        else
+          JSON.parse(body_bytes) rescue body_bytes.dup.force_encoding(Encoding::UTF_8)
+        end
+      end
 
     Message.new(
       kind:    parse_common_kv(header, 'kind') || 'msg',
@@ -208,9 +314,10 @@ class SocketNotify < Notify
       pid:     parse_common_kv(header, 'pid')&.to_i,
       seq:     (parse_common_kv(header, 'seq') || 0).to_i,
       from:    from_addr,
-      channel: (body_obj['ch'] || 'default').to_sym,
-      text:    body_obj['text'].to_s,
-      body:    body_obj,
+      channel: (parse_common_kv(header, 'ch') || 'default').to_sym,
+      fmt:     fmt || (data_obj.is_a?(String) ? 'text' : 'json'),
+      data:    data_obj,
+      raw:     body_bytes.dup.force_encoding(Encoding::ASCII_8BIT),
     )
   rescue => e
     warn "[#{@name}] parse failed: #{e.class}: #{e.message}"
@@ -315,12 +422,17 @@ class FsNotify < Notify
     @running = true
   end
 
-  def emit(channel, text, **meta)
+  # FsNotify 的存储介质是"每行一条 JSON"，所以 payload 一律包成 JSON。
+  # 二进制 payload 在这里无法透明传输（会被 JSON 转义）—— 用 base64 自行处理。
+  # 走 SocketNotify 才支持任意二进制。
+  def emit(channel, payload, **meta)
     ch = coerce(channel)
     file = File.join(@root, ch.to_s, @token)
     FileUtils.mkdir_p(File.dirname(file))
+    fmt, encoded = encode_payload(payload)
     body = {
-      'text'  => text.to_s,
+      'fmt'   => fmt,
+      'data'  => (fmt == 'bin' ? Base64.strict_encode64(encoded) : encoded),
       'ch'    => ch.to_s,
       'name'  => @name,
       'pid'   => Process.pid,
@@ -381,6 +493,16 @@ class FsNotify < Notify
         next if line.empty?
         body = JSON.parse(line)
         peer_pid = basename.to_i if basename =~ /\A\d+\z/
+        fmt = body['fmt'] || 'text'
+        # 向后兼容: 旧 token 文件只有 'text' 字段（无 fmt/data）
+        payload = body.key?('data') ? body['data'] : body['text']
+        data =
+          case fmt
+          when 'bin'  then Base64.decode64(payload.to_s)
+          when 'json' then (JSON.parse(payload.to_s) rescue payload)
+          else            payload.to_s
+          end
+        data = data.dup.force_encoding(Encoding::ASCII_8BIT) if fmt == 'bin'
         msg = Message.new(
           kind:    'fs',
           id:      nil,
@@ -390,8 +512,9 @@ class FsNotify < Notify
           seq:     body['seq']&.to_i,
           from:    body['name'] || basename,
           channel: (body['ch'] || ch.to_s).to_sym,
-          text:    body['text'].to_s,
-          body:    body,
+          fmt:     fmt,
+          data:    data,
+          raw:     (fmt == 'bin' ? data.dup.force_encoding(Encoding::ASCII_8BIT) : data.to_s.dup.force_encoding(Encoding::ASCII_8BIT)),
         )
         dispatch_msg(msg)
       rescue JSON::ParserError

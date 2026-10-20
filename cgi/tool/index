@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+
+require_relative '../_base_'
+
+Q.get do |_,p|
+  p.body("okk")
+end
