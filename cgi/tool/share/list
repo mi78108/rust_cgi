@@ -6,9 +6,12 @@
 #   GET /tool/share/list                列全部分享（按上传时间倒序）
 #   GET /tool/share/list/<token>        单个分享详情（续传入口用）
 #
-# → 200 {ok:true, data:[{token, url, dl, name, size, type, max, left,
+# → 200 {ok:true, data:[{token, url, dl, name, size, type, max, left, pub, editable,
 #                       has_pw, exp_at, done, chunk, total_parts, got_parts, at}, ...]}
 # → 200 {ok:true, data:{...单个...}}      （带 /<token> 时）
+#
+# editable：带 ?c=<clientId> 且与该条 by 一致时为 true（= 这个分享归你管）。
+# 不带 c 时恒为 false —— 没给身份就不该让前端显示管理按钮。
 #
 # 删除（丢弃未完成的上传）在 tool/share/delete（DELETE /tool/share/delete/<token>）。
 #
@@ -48,7 +51,9 @@ def scan_parts(token)
 end
 
 # 构造一条分享记录（list 和单条查询共用）
-def build_item(mp, m)
+# editable：调用方带了 c 且跟 by 一致 → 这个分享归他管，前端可以显示
+#   「修改 / 取消分享」。判定放在服务端，前端就不用自己猜。
+def build_item(mp, m, cid = nil)
   token = File.basename(File.dirname(mp))
   done = m['done'].to_i
   {
@@ -60,10 +65,12 @@ def build_item(mp, m)
     type:    m['type'].to_s,
     max:     m['max'].to_i,
     left:    m['left'].to_i,
+    pub:     m.fetch('pub', 1).to_i,      # 1=公开 / 0=私密
     has_pw:  !m['pw'].to_s.empty?,
     exp_at:  m['exp_at'].to_i,
     at:      m['at'].to_i,
     done:    done,
+    editable: (!cid.to_s.empty? && m['by'].to_s == cid),
     chunk:   m['chunk'].to_i,
     total_parts: m['total_parts'].to_i,
     got_parts:  (done == 0 ? scan_parts(token) : [])
@@ -80,7 +87,8 @@ Q.get %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
   m = (JSON.parse(File.read(mp)) rescue nil)
   return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
 
-  json(rsp, 200, ok: true, data: build_item(mp, m))
+  cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+  json(rsp, 200, ok: true, data: build_item(mp, m, cid))
 end
 
 # ---------- GET / : 列表 ----------
@@ -106,7 +114,7 @@ Q.get '/' do |req, rsp|
     # 传了 c 就只返回该 client 的（清理照做，不受 c 影响）
     next if !cid.empty? && m['by'].to_s != cid
 
-    items << build_item(mp, m)
+    items << build_item(mp, m, cid)
   end
 
   items.sort_by! { |i| -i[:at] }

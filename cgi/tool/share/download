@@ -13,6 +13,15 @@
 #   分享链接常常直接贴给别人（IM / 邮件），带密码的 URL 本身即凭证，
 #   对方点开就能下。密码错时不消耗下载次数。
 #
+# 是否公开（pub 字段，meta 里持久化）：
+#   pub=1 公开（默认，旧数据无此字段时按公开处理）—— 下载逻辑跟以前一样，
+#         设了密码才校验，没密码就能下。
+#   pub=0 私密 —— 强制要求正确密码，缺/错一律 401。创建时就要求 pw 非空
+#         （create / upload 里 400 挡住），这里再兜一层底：万一历史数据里
+#         出现 pub=0 且 pw 空，也拒绝放行，保证「私密」名不副实时不会泄露。
+#   私密 = 「必须有密码」这一条硬约束，密码仍是唯一凭证来源；pub 只是把
+#   「这个分享对外公开」这个意图显式落库，并由下载端强制。
+#
 # 失效策略（次数耗尽 或 到期）—— 懒清理，不依赖定时器：
 #   第 1 次碰到失效 → 返回 410 Gone，meta.json 里打 dead 标记（文件仍在）
 #   第 2 次再碰到 → FileUtils.rm_rf 整个 token 目录（物理删除）
@@ -20,7 +29,7 @@
 #   真正清理发生在下一次访问，且不需要后台 cron。
 #
 # 存储布局（每个分享一个文件夹）:
-#   $SPIDER_DATA/<token>/meta.json   元信息 {name,type,size,max,left,pw,by,exp,exp_at,at,dead}
+#   $SPIDER_DATA/<token>/meta.json   元信息 {name,type,size,max,left,pub,pw,by,exp,exp_at,at,dead}
 #   $SPIDER_DATA/<token>/data        原始字节
 #   SPIDER_DATA 未设置时默认 /tmp/share（部署时用环境变量改，不用改代码）
 #   token = SecureRandom.hex(8) → 16 位 hex，短链好记又难猜
@@ -57,8 +66,13 @@ def json(rsp, code, payload)
   rsp.code(code).type_json.body(payload.to_json).finish
 end
 
+# Content-Disposition 里用的文件名：跟 create/upload 同一套规则（Unicode 安全），
+# 另外把 " 和 CR/LF 去掉 —— 这两个进了 header 会破坏响应头结构。
 def sanitize_name(str)
-  n = str.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip
+  n = str.to_s.gsub(/["\r\n]/, '')
+       .gsub(%r{[/\\]} , '_')
+       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')
+       .strip[0, 160]
   n.empty? ? 'file' : n
 end
 
@@ -110,6 +124,7 @@ Q.get %r{^/info/(?<token>[a-f0-9]{16})$} do |req, rsp|
     size:   m['size'],
     max:    m['max'],
     left:   m['left'],
+    pub:    m.fetch('pub', 1).to_i,      # 1=公开 / 0=私密
     has_pw: !m['pw'].to_s.empty?,
     exp_at: m['exp_at'].to_i,
     at:     m['at']
@@ -135,11 +150,16 @@ Q.get %r{^/f/(?<token>[a-f0-9]{16})$} do |req, rsp|
   end
 
   # 密码校验（密码错的不消耗下载次数）
+  # 私密分享（pub=0）强制要求正确密码：哪怕历史数据里 pw 意外为空，
+  # 也不能放行（否则「私密」形同虚设）。公开（pub=1）行为不变：设了密码才校验。
   want = m['pw'].to_s
-  unless want.empty?
+  if !want.empty? || m.fetch('pub', 1).to_i.zero?
     got = req.param('p').to_s
-    return json(rsp, 401, ok: false, error: '密码错误',
-                data: { name: m['name'], size: m['size'], has_pw: true }) if got != want
+    if want.empty? || got != want
+      return json(rsp, 401, ok: false, error: '密码错误',
+                  data: { name: m['name'], size: m['size'], has_pw: true,
+                          pub: m.fetch('pub', 1).to_i })
+    end
   end
 
   path = data_path(token)
@@ -153,8 +173,17 @@ Q.get %r{^/f/(?<token>[a-f0-9]{16})$} do |req, rsp|
 
   mime = m['type'].to_s
   mime = 'application/octet-stream' if mime.empty?
-  safe = sanitize_name(m['name']).gsub(/"/, '')
-  rsp.header_field('Content-Disposition', %(attachment; filename="#{safe}"))
+  safe = sanitize_name(m['name'])
+  # RFC 6266：filename 给 ASCII 兜底，filename* 给 UTF-8 真名。
+  # 直接把中文塞进 filename="..." 的话，浏览器多半拿到乱码或整串丢弃。
+  ascii = safe.gsub(/[^\x20-\x7e]/, '_').gsub('"', '')
+  # 顺序要紧：先把非 ASCII 字节转成 %XX，再单独处理 " % 空格这三个字符。
+  # 反过来做的话，刚生成的 % 会被第二次 gsub 再转义成 %25，就坏了。
+  utf8  = safe.b
+        .gsub(/["%\s]/) { |c| format('%%%02X', c.ord) }
+        .gsub(/[\x80-\xff]/n) { |b| format('%%%02X', b.ord) }
+  rsp.header_field('Content-Disposition',
+                   %(attachment; filename="#{ascii}"; filename*=UTF-8''#{utf8}))
   rsp.header_field('X-Share-Left', m['max'].to_i > 0 ? m['left'].to_s : 'inf')
   rsp.type(mime).body(path).finish
 end

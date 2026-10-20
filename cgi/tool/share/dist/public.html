@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>share · 公开分享</title>
+  <style>
+:root {
+  --bg: #0f0f12; --bg-2: #1a1a1f; --bg-3: #25252d;
+  --ink: #e8e8ea; --ink-2: #a0a0a8; --muted: #5a5a64;
+  --rule: #2a2a30; --lime: #c4f542; --lime-ink: #0f0f12;
+  --red: #ff5e5e; --green: #66d49e;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%;background:var(--bg);color:var(--ink);
+  font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;font-size:13px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:32px 16px 60px}
+
+header{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+header h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.04em}
+header h1::before{content:"//";color:var(--lime);margin-right:8px;font-weight:400}
+header .spacer{flex:1}
+
+.card{background:var(--bg-2);border:1px solid var(--rule);padding:22px;margin-bottom:16px}
+.card h2{margin:0 0 4px;font-size:14px;letter-spacing:.06em;color:var(--ink)}
+.card .sub{margin:0 0 18px;color:var(--muted);font-size:11px}
+
+.tag{display:inline-block;padding:1px 6px;font-size:10px;border:1px solid var(--lime);
+  color:var(--lime);vertical-align:middle;white-space:nowrap}
+.tag.red{border-color:var(--red);color:var(--red)}
+.tag.gray{border-color:var(--muted);color:var(--muted)}
+
+.item{display:flex;align-items:center;gap:12px;padding:10px 12px;
+  background:var(--bg-3);border:1px solid var(--rule);margin-bottom:8px}
+.item .fico{font-size:20px;flex:0 0 auto}
+.item .meta{flex:1;min-width:0}
+.item .fname{color:var(--ink);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .fmeta{color:var(--muted);font-size:10px;display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.item .acts{display:flex;gap:6px;flex:0 0 auto}
+.item button{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
+  padding:4px 9px;font:inherit;font-size:11px;cursor:pointer}
+.item button:hover{border-color:var(--lime);color:var(--lime)}
+.item a.act{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
+  padding:4px 9px;font:inherit;font-size:11px;text-decoration:none;display:inline-block}
+.item a.act:hover{border-color:var(--lime);color:var(--lime)}
+.item.open{flex-wrap:wrap}
+.item.open .acts{margin-left:auto}
+
+.err{color:var(--red);font-size:12px;margin-top:8px;min-height:16px}
+.empty-main{color:var(--muted);font-size:12px;margin:28px auto;text-align:center}
+.empty-main a{color:var(--lime);text-decoration:none}
+footer{color:var(--muted);font-size:11px;text-align:center;margin-top:32px}
+footer a{color:var(--lime);text-decoration:none}
+[hidden]{display:none !important}
+
+/* ── 预览 ── */
+.pv{margin:0 10px 8px;padding:10px;background:var(--bg);border:1px solid var(--rule)}
+.pv img{max-width:100%;max-height:420px;display:block;margin:0 auto;
+  background:#000;object-fit:contain}
+.pv audio,.pv video{width:100%;display:block}
+.pv video{max-height:420px;background:#000}
+.pv pre{margin:0;max-height:320px;overflow:auto;font-size:11px;line-height:1.55;
+  color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+.pv .pv-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+  color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.pv .pv-head .spacer{flex:1}
+.pv .pv-close{background:none;border:1px solid var(--rule);color:var(--muted);
+  font:inherit;font-size:10px;padding:2px 7px;cursor:pointer}
+.pv .pv-close:hover{border-color:var(--red);color:var(--red)}
+.pv .pv-err{color:var(--red);font-size:11px}
+@media(max-width:520px){.pv{margin:0 0 8px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>public</h1>
+    <div class="spacer"></div>
+    <a href="/tool/share" style="color:var(--muted);text-decoration:none;font-size:11px">upload</a>
+  </header>
+
+  <div class="card">
+    <h2>公开分享 <span class="sub" id="count" style="float:right"></span></h2>
+    <p class="sub">这里列出所有标记为「公开」且已上传完成的分享，点文件名可下载</p>
+    <div id="list"><div class="empty-main">加载中…</div></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <footer>公开分享才出现在这里 · 私密的不在此列</footer>
+  <div style="text-align:center;margin-top:8px">
+    <a href="/tool/share" style="color:var(--muted);text-decoration:none;font-size:11px">← 我要上传文件</a>
+  </div>
+</div>
+
+<script src="/tool/share/preview.js"></script>
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const API_LIST = '/tool/share/page/list';
+
+previewCfg({ box: '#list' });   // 本页列表容器
+
+function fmtSize(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+
+function ico(type, name) {
+  if (/^image\//.test(type)) return '🖼';
+  if (/^video\//.test(type)) return '🎬';
+  if (/^audio\//.test(type)) return '🎵';
+  if (/pdf/.test(type)) return '📕';
+  if (/zip|tar|gzip|rar|7z/.test(type)) return '🗜';
+  if (/word|document/.test(type)) return '📄';
+  if (/sheet|excel/.test(type)) return '📊';
+  return '📄';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function ago(ts) {
+  const s = Math.floor(Date.now() / 1000) - ts;
+  if (s < 60) return '刚刚';
+  if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+  if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+  return Math.floor(s / 86400) + ' 天前';
+}
+
+function fmtExp(expAt) {
+  const d = new Date(expAt * 1000);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function jfetch(url, opts) {
+  const res = await fetch(url, opts);
+  let j = null;
+  try { j = await res.json(); } catch (_) {}
+  return { status: res.status, json: j };
+}
+
+async function load() {
+  const box = $('list');
+  $('err').textContent = '';
+  try {
+    const { status, json } = await jfetch(API_LIST);
+    if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
+    const items = json.data || [];
+    $('count').textContent = items.length ? `${items.length} 项` : '';
+
+    if (!items.length) {
+      box.innerHTML = '<div class="empty-main">还没有公开的分享<br><br>' +
+        '<a href="/tool/share">去上传一个 →</a></div>';
+      return;
+    }
+
+    box.innerHTML = '';
+    for (const it of items) {
+      const quota = it.max > 0 ? `剩 ${it.left}/${it.max} 次` : '不限次数';
+      const bits = [`<span>${fmtSize(it.size)}</span>`, `<span>${quota}</span>`];
+      if (it.exp_at) bits.push(`<span>${escapeHtml(fmtExp(it.exp_at))}</span>`);
+      if (it.has_pw) bits.push('<span class="tag gray">密码</span>');
+      bits.push(`<span>${ago(it.at)}</span>`);
+
+      // 能预览的类型（文本/音频/视频）才给「预览」按钮
+      const kind = previewKind(it);
+      const pvBtn = kind
+        ? `<button data-act="pv" data-kind="${kind}">预览</button>` : '';
+
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML =
+        `<div class="fico">${ico(it.type, it.name)}</div>` +
+        `<div class="meta">` +
+          `<div class="fname">${escapeHtml(it.name)}</div>` +
+          `<div class="fmeta">${bits.join('')}</div>` +
+        `</div>` +
+        `<div class="acts">` +
+          pvBtn +
+          `<button data-act="dl" data-tok="${it.token}">下载</button>` +
+        `</div>`;
+      box.appendChild(el);
+
+      const pv = el.querySelector('button[data-act="pv"]');
+      if (pv) pv.addEventListener('click', () => togglePreview(it, el));
+    }
+
+    box.querySelectorAll('button[data-act="dl"]').forEach((b) => {
+      b.addEventListener('click', () => {
+        location.href = `/tool/share?t=${b.dataset.tok}`;
+      });
+    });
+  } catch (e) {
+    box.innerHTML = '';
+    $('err').textContent = '加载失败: ' + e.message;
+  }
+}
+
+load();
+</script>
+</body>
+</html>

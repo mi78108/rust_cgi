@@ -2,11 +2,14 @@
 # frozen_string_literal: true
 # tool/share/create — 分片上传第一步：建 token
 #
-#   POST /tool/share/create?c=<clientId>&name=&type=&size=<字节>&max=&exp=<h>&pw=&chunk=<字节>
+#   POST /tool/share/create?c=<clientId>&name=&type=&size=<字节>&max=&exp=<h>&pw=&chunk=<字节>&pub=<0|1>
 #
 #   chunk 单位是字节（前端把 KB 乘 1024 后传上来）。
 #   chunk=0 表示不分片 —— 服务端建一个空 data 文件并标记 done=1，
 #   等价于一次普通上传（前端仍走 multipart POST /upload，不该用到这里）。
+#
+#   pub=1 公开（默认，缺省即公开）；pub=0 私密 —— 私密强制要求密码，
+#   带 pub=0 且 pw 为空直接 400（见下面校验）。
 #
 #   → 200 {ok:true, data:{token, total_parts, chunk, got_parts:[]}}
 #
@@ -19,7 +22,7 @@
 #   3) POST /tool/share/finish?token=     → 合并 part/* → data，返回分享链接
 #
 # 存储布局（跟 /upload 一致，只是多一个 part/ 目录）:
-#   $SPIDER_DATA/<token>/meta.json   {done:0, chunk, total_parts, ...}
+#   $SPIDER_DATA/<token>/meta.json   {done:0, chunk, total_parts, pub, ...}
 #   $SPIDER_DATA/<token>/part/<n>     每个分片一个文件（幂等：重传直接覆盖）
 #   $SPIDER_DATA/<token>/data         finish 时按序合并而成
 
@@ -33,7 +36,16 @@ FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
 
 def dir_of(token)    = File.join(SHARE_ROOT, token)
 def meta_path(token) = File.join(dir_of(token), 'meta.json')
-def sanitize_name(s) = (s.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip.then { |n| n.empty? ? 'file' : n })
+# 文件名清洗：保留 Unicode 字母/数字（\p{L}\p{N}），只干掉路径分隔符和控制字符。
+#   原来用 [^\w.\- ]，但 Ruby 的 \w 只认 ASCII —— 中文会被整片替换成 _，
+#   「报告.txt」变成「__.txt」，等于文件名丢失。必须用 \p{L}\p{N} + /u。
+def sanitize_name(s)
+  n = s.to_s.gsub(%r{[/\\]} , '_')
+       .gsub(/[\x00-\x1f\x7f]/, '')
+       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')
+       .strip[0, 160]
+  n.empty? ? 'file' : n
+end
 
 def json(rsp, code, payload)
   rsp.code(code).type_json.body(payload.to_json).finish
@@ -54,6 +66,15 @@ Q.post '/' do |req, rsp|
   exp_h = 0 if exp_h.negative?
   exp_h = 87_600 if exp_h > 87_600
 
+  # 是否公开：pub=1 公开（默认），pub=0 私密。
+  # 私密 = 下载端强制要求正确密码（见 tool/share/download 的 GET /f）。
+  # 所以私密必须带密码，否则这个分享等于公开却标着「私密」，自相矛盾。
+  pub = req.param('pub', '1').to_s != '0' ? 1 : 0
+  pw  = req.param('pw').to_s[0, 64]
+  if pub.zero? && pw.empty?
+    return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）')
+  end
+
   token = SecureRandom.hex(8)
   FileUtils.mkdir_p(File.join(dir_of(token), 'part'))
 
@@ -64,7 +85,8 @@ Q.post '/' do |req, rsp|
     'size'   => size,
     'max'    => max,
     'left'   => max,
-    'pw'     => req.param('pw').to_s[0, 64],
+    'pub'    => pub,
+    'pw'     => pw,
     'by'     => req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40],
     'exp'    => exp_h,
     'exp_at' => (exp_h > 0 ? now + exp_h * 3600 : 0),

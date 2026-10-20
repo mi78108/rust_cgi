@@ -5,10 +5,11 @@
 #   POST /tool/share/upload            multipart 上传（不分片）
 #       query: max=<n>   下载次数上限（0 = 无限）
 #             pw=<pass>  分享密码（可空）
+#             pub=<0|1>  是否公开（1=公开默认 / 0=私密，私密必须有密码）
 #             exp=<h>    有效期小时数（0 = 永久）
 #             name=<..>  可选，覆盖原文件名
 #             c=<id>     上传者 clientId（前端 localStorage 生成，list 按它查）
-#       →  200 {ok:true, data:{token, url, name, size, type, max, has_pw, exp_at}}
+#       →  200 {ok:true, data:{token, url, name, size, type, max, pub, has_pw, exp_at}}
 #
 #   PUT  /tool/share/upload?token=<t>&n=<seq>    分片上传（裸 bytes body）
 #       Header: Content-Range: bytes <start>-<end>/<total>
@@ -47,7 +48,16 @@ SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPI
 FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
 
 def dir_of(token)   = File.join(SHARE_ROOT, token)
-def sanitize_name(s) = (s.to_s.gsub(/[^\w.\- ]/, '_')[0, 160].strip.then { |n| n.empty? ? 'file' : n })
+# 文件名清洗：保留 Unicode 字母/数字（\p{L}\p{N}），只干掉路径分隔符和控制字符。
+#   原来用 [^\w.\- ]，但 Ruby 的 \w 只认 ASCII —— 中文会被整片替换成 _，
+#   「报告.txt」变成「__.txt」，等于文件名丢失。必须用 \p{L}\p{N} + /u。
+def sanitize_name(s)
+  n = s.to_s.gsub(%r{[/\\]} , '_')          # 路径分隔符
+       .gsub(/[\x00-\x1f\x7f]/, '')         # 控制字符
+       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')    # 其余非 Unicode 字母数字 → _
+       .strip[0, 160]
+  n.empty? ? 'file' : n
+end
 
 def json(rsp, code, payload)
   rsp.code(code).type_json.body(payload.to_json).finish
@@ -77,6 +87,10 @@ Q.post '/' do |req, rsp|
   max = 0 if max.negative?
   max = 100_000 if max > 100_000          # 防手滑
   pw = req.param('pw').to_s[0, 64]
+  pub = req.param('pub', '1').to_s != '0' ? 1 : 0
+  if pub.zero? && pw.empty?
+    return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）')
+  end
   by = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]   # clientId
 
   # 有效期：小时数，0 = 永久。上限 10 年，防手滑。
@@ -105,6 +119,7 @@ Q.post '/' do |req, rsp|
     'size'   => content.bytesize,
     'max'    => max,
     'left'   => max,                       # 0 = 无限
+    'pub'    => pub,                       # 1=公开 / 0=私密（私密强制要密码）
     'pw'     => pw,
     'by'     => by,                         # 上传者 clientId（list 按它过滤）
     'exp'    => exp_h,                      # 有效期小时数（0 = 永久）
@@ -123,6 +138,7 @@ Q.post '/' do |req, rsp|
     size:   content.bytesize,
     type:   item.content_type,
     max:    max,
+    pub:    pub,
     has_pw: !pw.empty?,
     exp_at: (exp_h > 0 ? now + exp_h * 3600 : 0)
   })

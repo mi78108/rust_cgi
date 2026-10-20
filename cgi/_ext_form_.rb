@@ -25,14 +25,43 @@ class Q
       cd.each do |seg|
         k, v = seg.split('=', 2)
         next unless v
+        # RFC 5987 扩展参数：filename*=UTF-8''%E6%8A%A5%E5%91%8A.txt
+        # 浏览器上传非 ASCII 文件名时优先用这个，必须单独认。
+        if k.casecmp('filename*').zero?
+          filename = FormItem.decode_ext_param(v)
+          next
+        end
+        next unless k.casecmp('name').zero? || k.casecmp('filename').zero?
         v = v.gsub(/\A"|"\z/, '')
-        name = v if k == 'name'
-        filename = v if k == 'filename'
+        # 裸 filename 里也可能是 %XX 编码（部分客户端不加 filename*）
+        filename = FormItem.unescape_percent(v) if k.casecmp('filename').zero?
+        name = v if k.casecmp('name').zero?
       end
       @name = name
       @filename = filename
       @content_type = header['Content-Type'] || 'text/plain'
       @content = content
+    end
+
+    # 解 "UTF-8''%E6%8A%A5%E5%91%8A.txt" → "报告.txt"
+    # charset'lang'pct-encoded 三段，charset 可能是 UTF-8 或 utf-8
+    def self.decode_ext_param(v)
+      v = v.gsub(/\A"|"\z/, '')
+      parts = v.split("'", 3)
+      enc = parts[0].to_s
+      body = parts[2] || parts[-1].to_s
+      body = unescape_percent(body)
+      enc =~ /\Autf-8\z/i ? body.force_encoding('UTF-8') : body
+    rescue StandardError
+      v
+    end
+
+    # 只解 %XX，其余原样保留（避免把正常字符当转义）
+    def self.unescape_percent(s)
+      return s unless s.include?('%')
+      s.gsub(/%([0-9A-Fa-f]{2})/) { [$1].pack('H2') }.force_encoding('UTF-8')
+    rescue StandardError
+      s
     end
 
     def file?

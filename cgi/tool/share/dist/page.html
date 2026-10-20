@@ -81,6 +81,8 @@ button{font:inherit;cursor:pointer}
 .item button{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
   padding:4px 9px;font:inherit;font-size:11px;cursor:pointer}
 .item button:hover{border-color:var(--lime);color:var(--lime)}
+.item button.danger{border-color:rgba(255,94,94,.4);color:var(--red)}
+.item button.danger:hover{background:var(--red);color:#0f0f12;border-color:var(--red)}
 .item.expired{opacity:.5}
 .item a.act{background:var(--bg-2);color:var(--ink-2);border:1px solid var(--rule);
   padding:4px 9px;font:inherit;font-size:11px;text-decoration:none;display:inline-block}
@@ -143,6 +145,35 @@ footer a{color:var(--lime);text-decoration:none}
 footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px solid var(--rule)}
 .empty-main{color:var(--muted);font-size:12px;margin:28px auto;text-align:center}
 [hidden]{display:none !important}
+
+/* ── 弹窗 ── */
+.dlg{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-start;
+  justify-content:center;overflow-y:auto;padding:24px 16px;
+  background:rgba(8,8,10,.78);backdrop-filter:blur(2px)}
+.dlg-bd{width:100%;max-width:560px;margin:auto}
+.dlg-bd .card{margin:0;box-shadow:0 18px 48px rgba(0,0,0,.55)}
+.dlg-bd .kv .k{flex:0 0 84px}
+.nowrap{white-space:nowrap}
+.btn.ghost.on{border-color:var(--red);color:var(--red);background:rgba(255,94,94,.08)}
+
+/* ── 预览（逻辑在 /tool/share/preview.js，与 public.html 共用） ── */
+.pv{margin:0 10px 8px;padding:10px;background:var(--bg);border:1px solid var(--rule)}
+.pv img{max-width:100%;max-height:420px;display:block;margin:0 auto;
+  background:#000;object-fit:contain}
+.pv audio,.pv video{width:100%;display:block}
+.pv video{max-height:420px;background:#000}
+.pv pre{margin:0;max-height:320px;overflow:auto;font-size:11px;line-height:1.55;
+  color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+.pv .pv-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+  color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.pv .pv-head .spacer{flex:1}
+.pv .pv-close{background:none;border:1px solid var(--rule);color:var(--muted);
+  font:inherit;font-size:10px;padding:2px 7px;cursor:pointer}
+.pv .pv-close:hover{border-color:var(--red);color:var(--red)}
+.pv .pv-err{color:var(--red);font-size:11px}
+.item.open{flex-wrap:wrap}
+.item.open .acts{margin-left:auto}
+@media(max-width:520px){.dlg{padding:12px 8px}.dlg-bd{max-width:none}.pv{margin:0 0 8px}}
 </style>
 </head>
 <body>
@@ -151,6 +182,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
   <header>
     <h1>share</h1>
     <div class="spacer"></div>
+    <a href="/tool/share/page" style="color:var(--muted);text-decoration:none;font-size:11px">public</a>
     <a href="/tool/share" style="color:var(--muted);text-decoration:none;font-size:11px">home</a>
   </header>
 
@@ -170,7 +202,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
       <div id="opts" hidden>
         <div class="field">
           <label>上传方式</label>
-          <div class="seg">
+          <div class="seg" id="way-seg">
             <button class="on" data-way="post">http</button>
             <button data-way="ws">websocket</button>
           </div>
@@ -221,6 +253,15 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
           <label for="pw">分享密码（可空）</label>
           <input type="text" id="pw" placeholder="留空 = 免密" autocomplete="off" spellcheck="false">
         </div>
+
+        <div class="field">
+          <label>是否公开</label>
+          <div class="seg" id="pub-seg">
+            <button class="on" data-pub="1">公开</button>
+            <button data-pub="0">私密（需密码）</button>
+          </div>
+          <div class="hint-line" id="pub-hint"></div>
+        </div>
       </div>
 
       <button class="btn" id="btn-upload" disabled>上传并生成分享链接</button>
@@ -245,27 +286,75 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
     </div>
   </section>
 
-  <!-- ══════════ 成功 ══════════ -->
-  <section id="v-done" hidden>
-    <div class="card">
-      <h2>分享链接已生成</h2>
-      <p class="sub">把这个链接发给对方</p>
-      <div class="share-url" id="done-url"></div>
-      <div class="linkrow">
-        <input type="text" id="done-copy" readonly>
-        <button class="btn ghost" id="btn-copy">复制</button>
-      </div>
-      <div class="kv"><span class="k">文件名</span><span class="v" id="done-name"></span></div>
-      <div class="kv"><span class="k">大小</span><span class="v" id="done-size"></span></div>
-      <div class="kv"><span class="k">次数上限</span><span class="v" id="done-max"></span></div>
-      <div class="kv"><span class="k">有效期</span><span class="v" id="done-exp"></span></div>
-      <div class="kv"><span class="k">密码</span><span class="v" id="done-pw"></span></div>
-      <div class="note" id="done-note"></div>
-      <div style="margin-top:18px">
-        <button class="btn ghost" id="btn-again">← 再传一个</button>
+  <!-- ══════════ 修改分享配置 ══════════ -->
+  <div id="v-edit" class="dlg" hidden>
+    <div class="dlg-bd" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+      <div class="card">
+        <h2 id="edit-title">修改分享配置</h2>
+        <p class="sub" id="edit-sub"></p>
+
+        <div class="grid2">
+          <div class="field">
+            <label for="ed-max">下载次数上限</label>
+            <input type="number" id="ed-max" min="0" max="100000" step="1">
+          </div>
+          <div class="field">
+            <label for="ed-exp">有效期（小时，0 = 永久）</label>
+            <input type="number" id="ed-exp" min="0" max="87600" step="1">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="ed-pw">分享密码（留空 = 不改）</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="ed-pw" autocomplete="off" spellcheck="false" placeholder="留空 = 不修改">
+            <button class="btn ghost nowrap" id="ed-pw-clear" type="button">清除密码</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>是否公开</label>
+          <div class="seg" id="ed-pub-seg">
+            <button class="on" data-pub="1">公开</button>
+            <button data-pub="0">私密（需密码）</button>
+          </div>
+          <div class="hint-line" id="ed-pub-hint"></div>
+        </div>
+
+        <div class="note" id="ed-note"></div>
+        <div style="margin-top:18px;display:flex;gap:8px">
+          <button class="btn ghost" id="ed-save">保存</button>
+          <button class="btn ghost" id="ed-cancel">取消</button>
+        </div>
       </div>
     </div>
-  </section>
+  </div>
+
+<!-- ══════════ 成功（弹窗，不切视图） ══════════ -->
+  <div id="v-done" class="dlg" hidden>
+    <div class="dlg-bd" role="dialog" aria-modal="true" aria-labelledby="done-title">
+      <div class="card">
+        <h2 id="done-title">分享链接已生成</h2>
+        <p class="sub">把这个链接发给对方</p>
+        <div class="share-url" id="done-url"></div>
+        <div class="linkrow">
+          <input type="text" id="done-copy" readonly>
+          <button class="btn ghost" id="btn-copy">复制</button>
+        </div>
+        <div class="kv"><span class="k">文件名</span><span class="v" id="done-name"></span></div>
+        <div class="kv"><span class="k">大小</span><span class="v" id="done-size"></span></div>
+        <div class="kv"><span class="k">次数上限</span><span class="v" id="done-max"></span></div>
+        <div class="kv"><span class="k">有效期</span><span class="v" id="done-exp"></span></div>
+        <div class="kv"><span class="k">是否公开</span><span class="v" id="done-pub"></span></div>
+        <div class="kv"><span class="k">密码</span><span class="v" id="done-pw"></span></div>
+        <div class="note" id="done-note"></div>
+        <div style="margin-top:18px">
+          <button class="btn ghost" id="btn-again">← 再传一个</button>
+          <button class="btn ghost" id="btn-close">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ══════════ 下载 (?t=<token>) ══════════ -->
   <section id="v-dl" hidden>
@@ -300,14 +389,18 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
   <footer>数据存 <code>$SPIDER_DATA</code>（默认 <code>/tmp/share</code>）</footer>
 </div>
 
+<script src="/tool/share/preview.js"></script>
 <script>
 'use strict';
+
+previewCfg({ box: '#my-list' });   // 本页列表容器
 
 const API = {
   CREATE: '/tool/share/create',
   UPLOAD: '/tool/share/upload',
   FINISH: '/tool/share/finish',
   LIST:   '/tool/share/list',
+  EDIT:   '/tool/share/edit',
   DELETE: '/tool/share/delete',
   INFO:   '/tool/share/download',
 };
@@ -389,11 +482,126 @@ function myId() {
 let TOKEN = new URLSearchParams(location.search).get('t');
 let RESUME = new URLSearchParams(location.search).get('resume');
 
+// 'done' 不是视图切换了 —— 成功弹窗浮在上层，上传页保持原样。
+// 注意：切走时走 closeDone()，否则 body 的滚动锁会漏掉。
 function show(v) {
   $('v-upload').hidden = (v !== 'upload');
-  $('v-done').hidden   = (v !== 'done');
   $('v-dl').hidden     = (v !== 'dl');
+  if (v !== 'done') closeDone();
 }
+
+// 打开/关闭成功弹窗。打开时锁掉背景滚动 —— 否则页面能在遮罩后面滑，
+// 遮罩（position:fixed，只覆盖一屏）跟内容就对不上了。
+function openDone() {
+  $('v-done').hidden = false;
+  document.body.style.overflow = 'hidden';
+  $('btn-copy').focus();
+}
+function closeDone() {
+  $('v-done').hidden = true;
+  document.body.style.overflow = '';
+}
+
+// 点遮罩空白处关闭（点在卡片里不关）
+$('v-done').addEventListener('click', (e) => {
+  if (e.target === $('v-done')) closeDone();
+});
+$('btn-close').addEventListener('click', closeDone);
+// Esc 关闭
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('v-edit').hidden) { closeEdit(); return; }
+  if (!$('v-done').hidden) closeDone();
+});
+
+/* ---------- 修改分享配置 ---------- */
+
+let editTarget = null;
+let editPub = 1;
+let editClearPw = false;   // 点了「清除密码」才为 true
+
+function openEdit(it) {
+  editTarget = it;
+  editPub = it.pub === 0 ? 0 : 1;
+  editClearPw = false;
+  $('edit-sub').textContent = `${it.name} · ${fmtSize(it.size)}`;
+  $('ed-max').value = it.max || 0;
+  // exp_at 是绝对时间戳，界面要的是「还剩几小时」；已过期就显示 0
+  $('ed-exp').value = it.exp_at ? Math.max(0, Math.round((it.exp_at - Date.now() / 1000) / 3600)) : 0;
+  $('ed-pw').value = '';
+  $('ed-pw').placeholder = it.has_pw ? '已设密码，留空不改' : '未设密码';
+  $('ed-pw-clear').hidden = !it.has_pw;
+  $('ed-note').textContent = it.has_pw
+    ? '密码不回显。留空 = 不修改；点右侧「清除密码」可改成免密。' : '';
+  $('ed-pub-seg').querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('on', (b.dataset.pub === '0' ? 0 : 1) === editPub));
+  updateEditPubHint();
+  $('v-edit').hidden = false;
+  document.body.style.overflow = 'hidden';
+  $('ed-max').focus();
+}
+
+$('ed-pw-clear').addEventListener('click', () => {
+  editClearPw = !editClearPw;
+  $('ed-pw-clear').classList.toggle('on', editClearPw);
+  $('ed-pw').disabled = editClearPw;
+  $('ed-pw').value = '';
+  $('ed-note').innerHTML = editClearPw
+    ? '<b style="color:var(--red)">将清除密码</b> — 保存后这个分享变成免密。'
+    : (editTarget && editTarget.has_pw ? '密码不回显。留空 = 不修改；点右侧「清除密码」可改成免密。' : '');
+});
+
+function closeEdit() {
+  $('v-edit').hidden = true;
+  editTarget = null;
+  if ($('v-done').hidden) document.body.style.overflow = '';
+}
+
+function updateEditPubHint() {
+  $('ed-pub-hint').innerHTML = editPub
+    ? '公开 = 拿到链接即可下载。'
+    : '私密 = <b>必须输入正确密码</b>才能下载，密码不能为空。';
+}
+
+$('ed-pub-seg').querySelectorAll('button').forEach((b) => {
+  b.addEventListener('click', () => {
+    editPub = b.dataset.pub === '0' ? 0 : 1;
+    $('ed-pub-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    updateEditPubHint();
+  });
+});
+
+$('ed-cancel').addEventListener('click', closeEdit);
+$('v-edit').addEventListener('click', (e) => { if (e.target === $('v-edit')) closeEdit(); });
+
+$('ed-save').addEventListener('click', async () => {
+  if (!editTarget) return;
+  const q = new URLSearchParams();
+  q.set('token', editTarget.token);
+  q.set('c', myId());
+  q.set('max', $('ed-max').value || '0');
+  q.set('exp', $('ed-exp').value || '0');
+  q.set('pub', String(editPub));
+  // 密码三态：填了 → 传新值；点清除 → 传空串（后端据此清空并自动降级公开）；
+  // 什么都不动 → 根本不传该参数（后端保持原样）。
+  if (editClearPw) q.set('pw', '');
+  else if ($('ed-pw').value) q.set('pw', $('ed-pw').value);
+
+  const btn = $('ed-save');
+  btn.disabled = true;
+  btn.textContent = '保存中…';
+  try {
+    const { status, json } = await jfetch(`${API.EDIT}?${q}`, { method: 'POST' });
+    if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
+    closeEdit();
+    loadList();
+  } catch (e) {
+    $('ed-note').innerHTML = `<span style="color:var(--red)">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+});
 
 /* ---------- chunk 计划 + 状态矩阵 ---------- */
 
@@ -495,13 +703,37 @@ $('file').addEventListener('change', (e) => setFile(e.target.files[0]));
 );
 $('drop').addEventListener('drop', (e) => setFile(e.dataTransfer.files[0]));
 
-document.querySelectorAll('.seg button').forEach((b) => {
+// 只作用于「上传方式」这一组 seg（#way-seg），不要抓到 #pub-seg 的按钮
+$('way-seg').querySelectorAll('button').forEach((b) => {
   b.addEventListener('click', () => {
     way = b.dataset.way;
-    document.querySelectorAll('.seg button').forEach((x) => x.classList.toggle('on', x === b));
+    $('way-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     $('up-err').textContent = (way === 'ws') ? '⚠ websocket 上传后端还没上线，当前会自动走 http' : '';
   });
 });
+
+/* ---------- 是否公开 ---------- */
+
+// 当前是否公开（1=公开 / 0=私密）。默认公开。
+let pub = 1;
+
+function updatePubHint() {
+  const hint = $('pub-hint');
+  if (pub) {
+    hint.innerHTML = '公开 = 拿到链接即可下载（设了密码仍需密码）。';
+  } else {
+    hint.innerHTML = '私密 = <b>必须输入正确密码</b>才能下载，密码不能为空。';
+  }
+}
+
+$('pub-seg').querySelectorAll('button').forEach((b) => {
+  b.addEventListener('click', () => {
+    pub = b.dataset.pub === '0' ? 0 : 1;
+    $('pub-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    updatePubHint();
+  });
+});
+updatePubHint();
 
 $('chunk').addEventListener('input', debounce(updateChunkHint, 250));
 $('chunk').addEventListener('keydown', (e) => { if (e.key === 'Enter') updateChunkHint(); });
@@ -660,6 +892,14 @@ async function uploadChunked(q, skipParts) {
 
 $('btn-upload').addEventListener('click', async () => {
   if (!picked) return;
+  // 私密必须有密码（后端也会 400 挡一道，这里先给出即时提示并聚焦密码框）
+  // 放在状态改动之前，省得再把按钮文字/进度条回滚
+  if (!pub && !$('pw').value) {
+    $('up-err').textContent = '私密分享必须设置密码';
+    $('pw').focus();
+    return;
+  }
+
   const btn = $('btn-upload');
   btn.disabled = true;
   btn.textContent = '上传中…';
@@ -670,6 +910,7 @@ $('btn-upload').addEventListener('click', async () => {
     const q = new URLSearchParams();
     q.set('max', $('max').value || '0');
     q.set('exp', $('exp').value || '0');
+    q.set('pub', String(pub));
     q.set('c', myId());
     if ($('pw').value) q.set('pw', $('pw').value);
 
@@ -699,11 +940,14 @@ $('btn-upload').addEventListener('click', async () => {
     $('done-size').textContent = fmtSize(d.size);
     $('done-max').textContent = d.max > 0 ? d.max + ' 次' : '不限';
     $('done-exp').textContent = fmtExp(d.exp_at);
+    $('done-pub').textContent = (d.pub === 0 || pub === 0) ? '私密（需密码）' : '公开';
     $('done-pw').textContent = d.has_pw ? $('pw').value : '无（免密）';
     $('done-note').innerHTML =
       (d.max > 0 ? '每成功下载一次扣 1 次，用完后链接失效。' : '不限次数。') +
-      (d.exp_at ? ' 到期后链接自动失效。' : '') + ' 密码错不扣次数。';
-    show('done');
+      (d.exp_at ? ' 到期后链接自动失效。' : '') +
+      ((d.pub === 0 || pub === 0) ? ' 这是<b>私密</b>分享，对方必须输入正确密码才能下载。' : '') +
+      ' 密码错不扣次数。';
+    openDone();
     loadList();
   } catch (e) {
     $('up-err').textContent = '上传失败: ' + e.message;
@@ -729,6 +973,7 @@ $('btn-copy').addEventListener('click', async () => {
 });
 
 $('btn-again').addEventListener('click', () => {
+  closeDone();
   picked = null;
   $('file').value = '';
   $('drop-name').textContent = '点击选择文件，或拖到这里';
@@ -736,7 +981,6 @@ $('btn-again').addEventListener('click', () => {
   $('btn-upload').textContent = '上传并生成分享链接';
   $('up-err').textContent = '';
   $('prog').hidden = true;
-  show('upload');
 });
 
 /* ---------- 我的分享 ---------- */
@@ -770,8 +1014,16 @@ async function loadList() {
         acts = `<button data-act="resume" data-tok="${it.token}">续传</button>` +
                `<button data-act="del" data-tok="${it.token}">丢弃</button>`;
       } else {
+        // editable 由服务端判定（list?c= 带上了 clientId 且与 by 一致）
+        // 能预览的类型（公开的图片/文本/音频/视频）才给「预览」按钮
+        const kind = previewKind(it);
         acts = `<button data-act="copy" data-url="${it.url}">复制链接</button>` +
-               `<a class="act" href="${location.origin}/tool/share/download/info/${it.token}">打开</a>`;
+               (kind ? `<button data-act="pv" data-tok="${it.token}">预览</button>` : '') +
+               `<a class="act" href="${location.origin}/tool/share/download/info/${it.token}">打开</a>` +
+               (it.editable
+                 ? `<button data-act="edit" data-tok="${it.token}">修改</button>` +
+                   `<button class="danger" data-act="cancel" data-tok="${it.token}">取消分享</button>`
+                 : '');
       }
 
       el.innerHTML =
@@ -783,6 +1035,7 @@ async function loadList() {
             `<span>${quota}</span>` +
             (it.exp_at ? `<span>${escapeHtml(fmtExp(it.exp_at))}</span>` : '') +
             (it.has_pw ? `<span class="tag gray">密码</span>` : '') +
+            (it.pub === 0 ? `<span class="tag">私密</span>` : '') +
             (it.expired ? `<span class="tag red">已耗尽</span>` : '') +
             `<span>${ago(it.at)}</span>` +
           `</div>` + bar +
@@ -805,6 +1058,27 @@ async function loadList() {
             if (!j || !j.ok) throw new Error((j && j.error) || 'delete failed');
             loadList();
           } catch (e) { alert('丢弃失败: ' + e.message); }
+          return;
+        }
+        if (act === 'cancel') {
+          if (!confirm('取消分享？文件会被永久删除，链接立即失效，无法恢复。')) return;
+          try {
+            // 带 clientId —— 服务端据此判定这是上传者本人的分享
+            const { json: j } = await jfetch(
+              `${API.DELETE}/${b.dataset.tok}?c=${encodeURIComponent(myId())}`, { method: 'DELETE' });
+            if (!j || !j.ok) throw new Error((j && j.error) || 'cancel failed');
+            loadList();
+          } catch (e) { alert('取消分享失败: ' + e.message); }
+          return;
+        }
+        if (act === 'edit') {
+          const it = items.find((x) => x.token === b.dataset.tok);
+          if (it) openEdit(it);
+          return;
+        }
+        if (act === 'pv') {
+          const it = items.find((x) => x.token === b.dataset.tok);
+          if (it) togglePreview(it, b.closest('.item'));
           return;
         }
         const url = location.origin + b.dataset.url;
@@ -837,9 +1111,12 @@ async function initDownload(t) {
     $('dl-size').textContent = fmtSize(d.size);
     $('dl-ico').textContent = ico(d.type, d.name);
 
-    if (d.has_pw) { $('dl-pwbox').hidden = false; $('dl-pw').focus(); }
+    // 私密（pub=0）必须有密码 —— 后端强制，这里把密码框亮出来
+    const isPrivate = d.pub === 0;
+    if (d.has_pw || isPrivate) { $('dl-pwbox').hidden = false; $('dl-pw').focus(); }
 
     const bits = [];
+    if (isPrivate) bits.push('私密 · 需密码');
     if (d.max > 0) bits.push(`剩 ${d.left}/${d.max} 次`);
     if (d.exp_at) {
       const h = (d.exp_at - Date.now() / 1000) / 3600;
@@ -854,6 +1131,7 @@ async function initDownload(t) {
         (d.exp_at && (d.exp_at - Date.now()/1000) <= 86400) ? ' red' : '');
     }
     $('dl-note').innerHTML =
+      (isPrivate ? '这是一个<b>私密</b>分享，需要正确密码才能下载。' : '') +
       (d.max > 0 ? `剩余 <b>${d.left}</b> / ${d.max} 次下载机会。` : '不限下载次数。') +
       (d.exp_at ? `<br>${escapeHtml(fmtExp(d.exp_at))}。` : '');
   } catch (e) {
