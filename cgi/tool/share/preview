@@ -89,14 +89,14 @@ Q.get %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   return Share.missing(rsp) if s.nil?
 
   # ★ 只放行公开分享 —— 预览端点不校验密码，私密分享一律不给
-  return json(rsp, 403, '私密分享不支持预览') unless s.public?
+  return s.fail(rsp, 403, '私密分享不支持预览') unless s.public?
 
   # 预览不做懒清理（:none）—— 它是只读的，每次都打标记/删文件太积极。
   # 失效了就报 410，清理交给下载端和 list 去做。
   unless s.alive?
-    return json(rsp, 410, s.dead_message)
+    return s.fail(rsp, 410, s.dead_message)
   end
-  return json(rsp, 404, 'file gone') unless s.data_exists?
+  return s.fail(rsp, 404, 'file gone') unless s.data_exists?
 
   size = File.size(s.data_path)
   rng = parse_range(req.header('range', ''), size)
