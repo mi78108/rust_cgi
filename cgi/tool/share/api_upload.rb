@@ -304,4 +304,102 @@ module ShareUpload
 
     json(rsp, 200, ok: true, data: s.to_finish_info(merged))
   end
+
+  # ---------- GET /<token>/chunk : 内联预览（inline，不扣次数） ----------
+  #
+  # 跟 GET /<token>（下载本体）的区别：
+  #   disposition  inline（浏览器直接渲染）vs attachment（强制存盘）
+  #   下载次数    不扣vs 扣 1
+  #   Range       支持 206（浏览器能拖进度条边下边播）vs 忽略
+  #   密码        不校验。私密分享一律 403 ——
+  #                这个端点没有 ?p= 参数，链接泄露就等于内容泄露，
+  #                密码形同虚设。私密内容只能走 /<token> 输密码下载。
+  #
+  # 懒清理不做（:none）—— 它是只读的，不该有副作用；
+  # 清理交给下载端和 list。
+  def chunk(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+    return s.fail(rsp, 403, '私密分享不支持预览') unless s.public?
+
+    unless s.alive?
+      return s.fail(rsp, 410, s.dead_message)
+    end
+    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+
+    size = File.size(s.data_path)
+    rng = parse_range(req.header('range', ''), size)
+
+    s.preview_headers(rsp)
+
+    unless rng
+      rsp.type(s.mime_inline).body(s.data_path).finish
+    else
+      first, last = rng
+      rsp.code(206)
+         .header_field('Content-Range', "bytes #{first}-#{last}/#{size}")
+         .type(s.mime_inline)
+         .body(Q::RangeBody.new(s.data_path, first, last - first + 1))
+         .finish
+    end
+  end
+
+  # ---------- Range ----------
+  #
+  # 解析 Range 请求头 → [first, last]（闭区间，字节偏移），不支持就返回 nil
+  #   Range: bytes=0-            → 0 .. size-1
+  #   Range: bytes=100-199      → 100 .. 199
+  #   Range: bytes=-500         → 最后 500 字节（后缀式）
+  #   Range: bytes=500-         → 500 .. size-1
+  #   多个 range（bytes=0-1,5-6）不支持 → nil（按整块发）
+  def parse_range(hdr, size)
+    return nil if hdr.to_s.strip.empty?
+    m = hdr.strip.match(%r{\Abytes\s*=\s*(\d*)\s*-\s*(\d*)\z}i)
+    return nil unless m
+    first, last = m[1], m[2]
+
+    # 后缀式：bytes=-N → 取末尾 N 字节
+    if first.empty?
+      return nil if last.empty?
+      n = last.to_i
+      return nil if n <= 0
+      n = size if n > size
+      return [size - n, size - 1]
+    end
+
+    f = first.to_i
+    return nil if f >= size          # 越界 → 当作不支持，让上层发整块
+    l = last.empty? ? size - 1 : last.to_i
+    l = size - 1 if l >= size        # 开放结尾：夹到文件末尾
+    return nil if l < f
+    [f, l]
+  end
+end
+
+# 文件的 [offset, offset+len) 片段。
+# 为什么不用 Q::Body::StreamBody：它 #size 恒为 nil，Rsp#finish 会直接
+# Content-Length: 0 把响应发完，压根不会调 each_chunk（body 不输出）。
+# 206 必须带真实的 Content-Length，所以要一个 size 已知的 body。
+# each_chunk 按 BUFFER_SIZE 读 → 大视频也是边读边发，不整个读进内存。
+class Q
+  class RangeBody < Q::Body::Base
+    def initialize(path, offset, len)
+      @path = path
+      @offset = offset
+      @len = len
+    end
+
+    def size = @len
+
+    def each_chunk(chunk_size = Q::BUFFER_SIZE)
+      File.open(@path, 'rb') do |f|
+        f.seek(@offset)
+        left = @len
+        while left > 0 && (buf = f.read([chunk_size, left].min))
+          yield buf
+          left -= buf.bytesize
+        end
+      end
+    end
+  end
 end

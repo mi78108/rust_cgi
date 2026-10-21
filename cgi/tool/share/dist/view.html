@@ -279,7 +279,7 @@ function previewKind(d) {
   return null;
 }
 
-const pvUrl = () => `/tool/share/preview/${TOKEN}`;
+const pvUrl = () => `${API_SHARE}/${TOKEN}/chunk`;
 
 function fail(msg) {
   $('err').textContent = msg;

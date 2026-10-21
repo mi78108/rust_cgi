@@ -391,7 +391,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
  * 内嵌预览只在本页用（「我的分享」列表）——公开分享改跳独立预览页，
  * 所以这份副本无需跟别的页面同步。
  *
- * 预览走 /tool/share/preview/<token> 而不是 /download/f：
+ * 预览走 /tool/share/<token>/chunk 而不是 /tool/share/<token>：
  *   前者 inline 渲染且不扣下载次数，服务端只放行 pub=1；
  *   后者 attachment + 验密码 + 每次扣次数。
  */
@@ -423,7 +423,7 @@ function previewKind(it) {
   return null;
 }
 
-function pvUrl(it) { return `/tool/share/preview/${it.token}`; }
+function pvUrl(it) { return `${API.ROOT}/${it.token}/chunk`; }
 
 function errNode(msg) {
   const d = document.createElement('div');

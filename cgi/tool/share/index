@@ -153,10 +153,11 @@ Q.delete %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   ShareUpload.destroy(req, rsp, req.named(:token))
 end
 
-# GET /view —— 独立预览页（?t=<token>）
-# 不支持的类型（exe/apk/zip…）会在页面上提示改用下载。
-Q.get %r{^/view/?$} do |_req, rsp|
-  share_view_page(rsp)
+
+# GET /<token>/chunk —— 内联预览（inline，不扣下载次数）
+# 与 GET /<token>（attachment，扣次数）的区别见 ShareUpload.chunk 的注释。
+Q.get %r{^/(?<token>[a-f0-9]{16})/chunk/?$} do |req, rsp|
+  ShareUpload.chunk(req, rsp, req.named(:token))
 end
 
 # GET /<token>/page —— 下载详情页（文件名 + 输密码 + 点下载）
