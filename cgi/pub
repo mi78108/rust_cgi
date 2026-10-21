@@ -17,6 +17,7 @@ MIME = {
   '.gif'  => 'image/gif',
   '.webp' => 'image/webp',
   '.ico'  => 'image/x-icon',
+  '.ttf'  => 'font/ttf',
   '.woff' => 'font/woff',
   '.woff2'=> 'font/woff2',
   '.txt'  => 'text/plain; charset=utf-8',
@@ -45,11 +46,11 @@ end
 Q.get %r{^/(?<file>(?!.*\.\.)[A-Za-z0-9._/-]{1,128})$} do |req, rsp|
   path = req.named(:file)
   if path.include?('..')
-    return reject(rsp, "invalid path: #{rel}")
+    return reject(rsp, "invalid path: #{path}")
   end
   full = File.join(PUB_ROOT, path)
   unless File.file?(full)
-    return reject(rsp, "#{rel} not a file")
+    return reject(rsp, "#{full} not a file")
   end
   ext = File.extname(full).downcase
   mime = MIME[ext] or return reject(rsp, "unsupported extension: #{ext}")

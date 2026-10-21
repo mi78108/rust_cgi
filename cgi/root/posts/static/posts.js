@@ -307,7 +307,7 @@
         monacoEl.hidden = false;
         bodyEl.hidden = true;
         if (!monacoEditor && window.require){
-          window.require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }});
+          window.require.config({ paths: { vs: '/root/assets/vs' }});
           window.require(['vs/editor/editor.main'], () => {
             monacoEditor = window.monaco.editor.create(monacoEl, {
               value: cur,
