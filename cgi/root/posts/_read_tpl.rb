@@ -121,7 +121,7 @@ def render_read_page_html(kind:, slug:, title:, excerpt:)
         <div class="state">loading…</div>
       </main>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+    <script src="/root/posts/assets/markdown-it-14.1.0.min.js"></script>
     <script src="#{asset_js}"></script>
     </body>
     </html>

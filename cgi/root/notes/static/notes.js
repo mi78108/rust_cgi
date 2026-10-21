@@ -38,14 +38,21 @@
     }catch(e){ return iso; }
   };
 
-  /* ---- markdown (复用 posts 的 markdown-it 实例) ---- */
+  /* ---- markdown (本地 markdown-it 实例, 跟 posts.js 同配置) ---- */
+  const md = window.markdownit
+    ? window.markdownit({
+        html: false, linkify: true, breaks: false, typographer: true,
+        highlight: (str, lang) =>
+          `<pre class="hljs"><code class="language-${escHtml(lang || 'text')}">${md.utils.escapeHtml(str)}</code></pre>`,
+      })
+    : null;
   function renderMd(src){
+    // 主页 drawer 里 posts.js 可能已加载, 优先复用它的实例
     if (window.PostsApp && typeof window.PostsApp.renderMd === 'function'){
-      // 委托给 posts 的 markdown-it 实例 (避免重复加载 CDN)
       return window.PostsApp.renderMd(src);
     }
-    // 兜底: posts 还没加载, escapeHtml 简化版
-    return escHtml(String(src||'')).replace(/\n/g, '<br>');
+    if (!md) return escHtml(String(src||'')).replace(/\n/g, '<br>');
+    return md.render(String(src||''));
   }
   /* ---- fetch ---- */
   let _listCache = null;
