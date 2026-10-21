@@ -69,26 +69,25 @@ end
 #  会匹配任何 16 位 hex 的单段路径，所以更具体的路由必须排在它前面。
 # ══════════════════════════════════════════════════════════════
 
-# ── 上传系列 ──────────────────────────────────────────────────
-#   POST /shares                     一次性上传（multipart）
-#   POST /uploads                    建分片会话
-#   PUT  /uploads/<token>            传一片
-#   POST /uploads/<token>/complete   合并收尾
-
-Q.post '/shares' do |req, rsp|
-  ShareUpload.create_share(req, rsp)
-end
-
-Q.post '/uploads' do |req, rsp|
-  ShareUpload.create_session(req, rsp)
+# POST / —— 建分片会话 还是 一次性上传
+#   无 query → 建分片会话（size/chunk 等参数之后放在后续请求里）
+#   有 query → 一次性上传（配置参数 c/max/exp/pub/pw 在 query，文件在 multipart body）
+#
+# nil 也判一下：Q::REQ_PARAMS 默认是空字符串，但显式传 nil 时同样表示「无」。
+Q.post '/' do |req, rsp|
+  if req.query.nil? || req.query.empty?
+    ShareUpload.create_session(req, rsp)
+  else
+    ShareUpload.create_share(req, rsp)
+  end
 end
 
 # complete 排在 <token> 前面 —— 否则 PUT 不受影响，但 POST 会先命中短路径
-Q.post %r{^/uploads/(?<token>[a-f0-9]{16})/complete$} do |req, rsp|
+Q.post %r{^/(?<token>[a-f0-9]{16})/complete$} do |req, rsp|
   ShareUpload.complete(req, rsp, req.named(:token))
 end
 
-Q.put %r{^/uploads/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
+Q.put %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   ShareUpload.put_part(req, rsp, req.named(:token))
 end
 
