@@ -159,6 +159,64 @@ module ShareUpload
     s.ok(rsp, s.to_info)
   end
 
+  # ---------- DELETE /<token> : 删除分享 ----------
+  #
+  # 两种授权任一即可：归属（cid）或正确密码。
+  # 未完成的分享（done=0）无凭证也允许丢 —— 它还没对外发过链接。
+  #
+  # 密码参数名是 pw 不是 p —— 跟 download 的 ?p= 故意不一样：
+  #   download 的 ?p= 会出现在分享链接里（对方点开就要输密码），要短；
+  #   这里是内部管理接口，前端只传 ?c= 或 ?pw=，用全称更清楚。
+  # 两边各自保持原样，别「顺手统一」。
+  def destroy(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+
+    cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+    pw  = req.param('pw').to_s
+
+    unless s.authorized?(cid: cid, pw: pw, require_cred: true) || s.discardable?
+      # 区分「凭证错了」和「压根没给凭证」，提示才准确
+      given = !cid.empty? || !pw.empty?
+      return s.fail(rsp, 403,
+                    given ? '没有权限删除这个分享' : '需要密码或上传者身份才能删除')
+    end
+
+    s.destroy!
+    s.ok(rsp, { token: token, deleted: true })
+  end
+
+  # ---------- PATCH /<token> : 改配置 ----------
+  #
+  # 归属校验只认 clientId，不接受密码兜底 ——
+  # 「修改配置」比「删除」更需要限定所有者：删除只是回到没人能访问的状态，
+  # 修改却可能把一个私密分享改成公开。
+  def update(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+
+    cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+    return s.fail(rsp, 403, '没有权限修改这个分享') if cid.empty?
+    return s.fail(rsp, 403, '只有上传者可以修改这个分享') unless s.owned_by?(cid)
+
+    s.apply_max!(req.param('max').to_i) if req.param('max')
+    s.apply_exp!(req.param('exp').to_i) if req.param('exp')
+    s.apply_pw!(req.param('pw'))         if req.param('pw')
+
+    # 改成私密必须有密码，否则这个分享等于公开却标着「私密」，
+    # 而且下载端会一直 401 谁都下不了 —— 直接拒绝这个组合。
+    if req.param('pub')
+      pub = req.param('pub').to_i
+      if !pub.negative? && pub.zero? && !s.can_be_private?
+        return s.fail(rsp, 400, '私密分享必须设置密码')
+      end
+      s.apply_pub!(pub)
+    end
+
+    s.save!
+    s.ok(rsp, s.to_config)
+  end
+
   # ---------- PUT /<token> : 传一片 ----------
   def put_part(req, rsp, token)
     return json(rsp, 400, ok: false, error: 'missing token') unless Share::TOKEN_RE.match?(token)

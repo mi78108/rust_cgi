@@ -52,6 +52,14 @@ PAGE        = 'dist/page.html'
 VIEW_PAGE = 'dist/view.html'
 DL         = '/tool/share/download'
 
+# 预览页 HTML（dist/view.html）。GET /<token>/view 和 GET /view?t= 共用。
+def share_view_page(rsp)
+  unless File.file?(VIEW_PAGE)
+    return rsp.fail_404.type_text.body("#{VIEW_PAGE} not found").finish
+  end
+  rsp.type_html.body(VIEW_PAGE).finish
+end
+
 # 302 到实际下载端点，保留 ?p=（分享密码）?d=（强制下载）等 query
 def to_download(rsp, token, extra = {})
   q = extra.transform_keys(&:to_s).reject { |_k, v| v.nil? || v.to_s.empty? }
@@ -123,19 +131,36 @@ Q.get '/' do |req, rsp|
   rsp.type_html.body(PAGE).finish
 end
 
-# GET /<token>/info —— 分享元信息（替代旧的 /tool/share/download/info/<token>）
+# GET /<token>/info —— 分享元信息
 # 下载页和预览页加载时用。放在短链兜底之前 —— 短链会匹配任意 16 位 hex 单段。
 Q.get %r{^/(?<token>[a-f0-9]{16})/info/?$} do |req, rsp|
   ShareUpload.show_info(req, rsp, req.named(:token))
 end
 
+# GET /<token>/view —— 这个分享的预览页
+# 服务端先校验 token 存在，跟 /info 行为一致 —— 不存在的分享直接 404，
+# 别让用户先看到一个空页面再由 JS 报「加载失败」。
+Q.get %r{^/(?<token>[a-f0-9]{16})/view/?$} do |req, rsp|
+  return Share.missing(rsp) if Share.find(req.named(:token)).nil?
+  share_view_page(rsp)
+end
+
+# PATCH /<token> —— 改配置（下载次数 / 有效期 / 密码 / 是否公开）
+# 原先是 POST /tool/share/edit/<token>，edit 脚本已删除。
+Q.patch %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
+  ShareUpload.update(req, rsp, req.named(:token))
+end
+
+# DELETE /<token> —— 取消分享 / 丢弃未完成
+# 原先是 DELETE /tool/share/delete/<token>，delete 脚本已删除。
+Q.delete %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
+  ShareUpload.destroy(req, rsp, req.named(:token))
+end
+
 # GET /view —— 独立预览页（?t=<token>）
 # 不支持的类型（exe/apk/zip…）会在页面上提示改用下载。
 Q.get %r{^/view/?$} do |_req, rsp|
-  unless File.file?(VIEW_PAGE)
-    return rsp.fail_404.type_text.body("#{VIEW_PAGE} not found").finish
-  end
-  rsp.type_html.body(VIEW_PAGE).finish
+  share_view_page(rsp)
 end
 
 # ── /tool/share/<token> → 下载端点 ──────────────────────────

@@ -216,7 +216,12 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
 'use strict';
 const API_CONTENT = '/tool/share/download';   // 预览取文件本体
 const API_SHARE = '/tool/share';            // 元信息
-const TOKEN = new URLSearchParams(location.search).get('t');
+// 两种入口都要支持：
+//   /tool/share/<token>/view   路径式（新）
+//   /tool/share/view?t=<token> query 式（旧，保留兼容）
+const TOKEN = new URLSearchParams(location.search).get('t')
+           || (location.pathname.match(/\/([a-f0-9]{16})\/view\/?$/) || [])[1]
+           || '';
 
 const $ = (id) => document.getElementById(id);
 
@@ -283,7 +288,7 @@ function fail(msg) {
 }
 
 async function init(t) {
-  if (!t) return fail('缺少分享 token —— 访问 /tool/share/view?t=<token>');
+  if (!t) return fail('缺少分享 token —— 访问 /tool/share/<token>/view');
 
   let status, json;
   try {
