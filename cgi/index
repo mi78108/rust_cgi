@@ -3,5 +3,5 @@
 require_relative '_base_'
 
 Q.get do |_,p|
-  p.body("okk").finish
+  p.redirect_to 'root'
 end
