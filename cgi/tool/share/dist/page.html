@@ -507,10 +507,14 @@ function togglePreview(it, el) {
 'use strict';
 
 
+// 所有 API 集中在 index 一处注册，这里跟着走。
+//   POST /shares                     一次性上传
+//   POST /uploads                    建分片会话
+//   PUT  /uploads/<token>            传一片
+//   POST /uploads/<token>/complete   合并收尾
 const API = {
-  CREATE: '/tool/share/create',
-  UPLOAD: '/tool/share/upload',
-  FINISH: '/tool/share/finish',
+  SHARES: '/tool/share/shares',
+  UPLOADS: '/tool/share/uploads',
   LIST:   '/tool/share/list',
   EDIT:   '/tool/share/edit',
   DELETE: '/tool/share/delete',
@@ -874,7 +878,7 @@ function xhrPost(url, body) {
 function xhrPutChunk(token, n, blob, start, end, total) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', `${API.UPLOAD}?token=${token}&n=${n}`);
+    xhr.open('PUT', `${API.UPLOADS}/${token}?n=${n}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.setRequestHeader('Content-Range', `bytes ${start}-${end}/${total}`);
     xhr.upload.onprogress = (e) => {
@@ -942,7 +946,7 @@ async function uploadChunked(q, skipParts) {
     if (picked.type) iq.set('type', picked.type);
     if (!resumeTarget) iq.set('name', picked.name);
 
-    const { status: rs, json: ij } = await jfetch(`${API.CREATE}?${iq}`, { method: 'POST' });
+    const { status: rs, json: ij } = await jfetch(`${API.UPLOADS}?${iq}`, { method: 'POST' });
     if (!ij || !ij.ok) throw new Error('create failed: ' + ((ij && ij.error) || ('HTTP ' + rs)));
     token = ij.data.token;
     if (ij.data.total_parts !== parts) {
@@ -992,7 +996,7 @@ async function uploadChunked(q, skipParts) {
   logChunk('info', `全部 PUT 完成 — ok ${ok} / fail ${fail} · ${ms}ms`);
 
   const t2 = performance.now();
-  const { status: fs, json: dj } = await jfetch(`${API.FINISH}?token=${token}`, { method: 'POST' });
+  const { status: fs, json: dj } = await jfetch(`${API.UPLOADS}/${token}/complete`, { method: 'POST' });
   const fok = dj && dj.ok;
   logChunk(fok ? 'ok' : 'fail',
     `finish ${fok ? 'ok' : 'fail'} ${Math.round(performance.now()-t2)}ms — ` +
@@ -1033,7 +1037,7 @@ $('btn-upload').addEventListener('click', async () => {
       logChunk('info', `不分片 — multipart POST ${fmtSize(picked.size)}`);
       const fd = new FormData();
       fd.append('file', picked, picked.name);
-      const { status, json } = await xhrPost(`${API.UPLOAD}?${q}`, fd);
+      const { status, json } = await xhrPost(`${API.SHARES}?${q}`, fd);
       if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
       logChunk('ok', `上传完成 — ${fmtSize(picked.size)}`);
       d = json.data;
