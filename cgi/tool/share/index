@@ -136,7 +136,7 @@ end
 # 服务端先校验 token 存在，跟 /info 行为一致 —— 不存在的分享直接 404，
 # 别让用户先看到一个空页面再由 JS 报「加载失败」。
 Q.get %r{^/(?<token>[a-f0-9]{16})/view/?$} do |req, rsp|
-  return Share.missing(rsp) if Share.find(req.named(:token)).nil?
+  return fail(rsp, 404) if Share.find(req.named(:token)).nil?
   share_view_page(rsp)
 end
 
@@ -177,7 +177,7 @@ end
 # GET /<token>/page —— 下载详情页（文件名 + 输密码 + 点下载）
 # 想直接拿文件走 GET /<token>，两者语义不同：页面给人看，文件给程序取。
 Q.get %r{^/(?<token>[a-f0-9]{16})/page/?$} do |req, rsp|
-  return Share.missing(rsp) if Share.find(req.named(:token)).nil?
+  return fail(rsp, 404) if Share.find(req.named(:token)).nil?
   share_download_page(rsp)
 end
 

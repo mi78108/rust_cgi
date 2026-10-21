@@ -12,9 +12,9 @@
 #
 #   Q.get %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
 #     s = Share.find(req.named(:token))
-#     return s.fail(rsp, 404, 'not found') if s.nil?
-#     return s.fail(rsp, 410, s.expired_message) unless s.alive?
-#     return s.fail(rsp, 401, '密码错误', has_pw: true) unless s.authorized?(pw: req.param('p'))
+#     return fail(rsp, 404, 'not found') if s.nil?
+#     return fail(rsp, 410, s.expired_message) unless s.alive?
+#     return fail(rsp, 401, '密码错误', has_pw: true) unless s.authorized?(pw: req.param('p'))
 #     s.serve_attachment(rsp)
 #   end
 #
@@ -69,8 +69,24 @@ def scan_got_parts(token)
   Dir.children(pdir).select { |f| f =~ /\A\d+\z/ }.map(&:to_i).sort
 end
 
+# ---------- 响应 ----------
+#
+# 三个函数覆盖了全部 JSON 响应，别再直接调 json(rsp, code, hash) 手拼
+# ok/error 字段 —— 漏了 ok 前端就当成功处理（ShareUpload 里踩过）。
+#   ok       成功，带 data
+#   fail     失败，带 error（extra 透传，404 时常要附 name/size）
+#   missing  Share.find 返回 nil 时的固定回应
+
 def json(rsp, code, payload)
   rsp.code(code).type_json.body(payload.to_json).finish
+end
+
+def ok(rsp, data = nil)
+  json(rsp, 200, { ok: true, data: data })
+end
+
+def fail(rsp, code, error = 'not found', **extra)
+  json(rsp, code, { ok: false, error: error }.merge(extra))
 end
 
 # ══════════════════════════════════════════════════════════════
@@ -87,9 +103,8 @@ class Share
     # 返回 nil 时 rsp 已经写好了，调用方直接 return。
     def load(req, rsp, token, purge: nil)
       s = Share.find(token)
-      return nil if s.nil?
-      if purge && s.reap!(purge: purge)
-        Share.missing(rsp)
+      if s.nil? || (purge && s.reap!(purge: purge))
+        fail(rsp, 404)      # 找不到 / 已被懒清理删除
         return nil
       end
       s
@@ -224,14 +239,14 @@ class Share
     return if s.nil?
     # 用 :mark —— 第一次发现失效只打标记（本次还能报「次数已用完」而不是
     # 404），下次访问才物理删。误判一次不会立刻丢数据。
-    return Share.missing(rsp) if s.reap!(purge: :mark)
+    return fail(rsp, 404) if s.reap!(purge: :mark)
 
     unless s.alive?
-      return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
+      return fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
     end
-    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+    return fail(rsp, 404, 'file gone') unless s.data_exists?
 
-    s.ok(rsp, s.to_info)
+    ok(rsp, s.to_info)
   end
 
   #
@@ -243,19 +258,19 @@ class Share
   def content(req, rsp, token)
     s = load(req, rsp, token)
     return if s.nil?
-    return Share.missing(rsp) if s.reap!(purge: :mark)
+    return fail(rsp, 404) if s.reap!(purge: :mark)
 
     unless s.alive?
-      return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
+      return fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
     end
 
     unless s.authorized?(pw: req.param('p'))
-      return s.fail(rsp, 401, '密码错误',
+      return fail(rsp, 401, '密码错误',
                     data: { name: s.name, size: s.size, has_pw: true,
                             pub: s.public? ? 1 : 0 })
     end
 
-    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+    return fail(rsp, 404, 'file gone') unless s.data_exists?
     s.serve_attachment(rsp)
   end
 
@@ -277,12 +292,12 @@ class Share
     unless s.authorized?(cid: cid, pw: pw, require_cred: true) || s.discardable?
       # 区分「凭证错了」和「压根没给凭证」，提示才准确
       given = !cid.empty? || !pw.empty?
-      return s.fail(rsp, 403,
+      return fail(rsp, 403,
                     given ? '没有权限删除这个分享' : '需要密码或上传者身份才能删除')
     end
 
     s.destroy!
-    s.ok(rsp, { token: token, deleted: true })
+    ok(rsp, { token: token, deleted: true })
   end
 
   #
@@ -294,8 +309,8 @@ class Share
     return if s.nil?
 
     cid = cid_of(req)
-    return s.fail(rsp, 403, '没有权限修改这个分享') if cid.empty?
-    return s.fail(rsp, 403, '只有上传者可以修改这个分享') unless s.owned_by?(cid)
+    return fail(rsp, 403, '没有权限修改这个分享') if cid.empty?
+    return fail(rsp, 403, '只有上传者可以修改这个分享') unless s.owned_by?(cid)
 
     s.apply_max!(req.param('max').to_i) if req.param('max')
     s.apply_exp!(req.param('exp').to_i) if req.param('exp')
@@ -306,13 +321,13 @@ class Share
     if req.param('pub')
       pub = req.param('pub').to_i
       if !pub.negative? && pub.zero? && !s.can_be_private?
-        return s.fail(rsp, 400, '私密分享必须设置密码')
+        return fail(rsp, 400, '私密分享必须设置密码')
       end
       s.apply_pub!(pub)
     end
 
     s.save!
-    s.ok(rsp, s.to_config)
+    ok(rsp, s.to_config)
   end
 
   def put_part(req, rsp, token)
@@ -395,7 +410,7 @@ class Share
     return if s.nil?
 
     cid = cid_of(req)
-    s.ok(rsp, s.to_item(cid))
+    ok(rsp, s.to_item(cid))
   end
 
   #
@@ -412,12 +427,12 @@ class Share
   def chunk(req, rsp, token)
     s = load(req, rsp, token)
     return if s.nil?
-    return s.fail(rsp, 403, '私密分享不支持预览') unless s.public?
+    return fail(rsp, 403, '私密分享不支持预览') unless s.public?
 
     unless s.alive?
-      return s.fail(rsp, 410, s.dead_message)
+      return fail(rsp, 410, s.dead_message)
     end
-    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+    return fail(rsp, 404, 'file gone') unless s.data_exists?
 
     size = File.size(s.data_path)
     rng = parse_range(req.header('range', ''), size)
@@ -1033,22 +1048,6 @@ end
     rsp.type(mime).body(data_path).finish
   end
 
-  # ---------- 响应快捷方式 ----------
-  #
-  # find 返回 nil 时不能调实例方法，所以 404 也提供一个类方法，
-  # 让路由能一行写完：return Share.missing(rsp) if s.nil?
-
-  def self.missing(rsp)
-    json(rsp, 404, ok: false, error: 'not found')
-  end
-
-  def fail(rsp, code, error, **extra)
-    json(rsp, code, { ok: false, error: error }.merge(extra))
-  end
-
-  def ok(rsp, data)
-    json(rsp, 200, { ok: true, data: data })
-  end
 end
 
 # 文件的 [offset, offset+len) 片段。
