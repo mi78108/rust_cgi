@@ -50,7 +50,6 @@ require 'fileutils'
 
 PAGE        = 'dist/page.html'
 VIEW_PAGE = 'dist/view.html'
-TOKEN       = /\A[a-f0-9]{16}\z/
 DL         = '/tool/share/download'
 
 # 302 到实际下载端点，保留 ?p=（分享密码）?d=（强制下载）等 query
@@ -63,7 +62,7 @@ end
 # ── /tool/share?t=<token> → 下载端点 ────────────────────────
 Q.get '/' do |req, rsp|
   t = req.param('t').to_s
-  if t =~ TOKEN
+  if Share::TOKEN_RE.match?(t)
     # 密码通过 ?p= 传（页面表单提交时带的），其余 query 也带上
     extra = {}
     %w[p d].each { |k| extra[k] = req.param(k) unless req.param(k).nil? }

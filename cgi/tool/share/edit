@@ -26,82 +26,35 @@ require_relative '../../_base_'
 require_relative '_lib_'
 
 ensure_share_root!
-require 'fileutils'
-
-
 
 Q.post %r{^/?(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   token = req.named(:token)
-  mp = meta_path(token)
-  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(mp)
+  s = Share.find(token)
+  return Share.missing(rsp) if s.nil?
 
-  m = (JSON.parse(File.read(mp)) rescue nil)
-  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
-
-  # ── 归属校验 ──
+  # ── 归属校验：只认 clientId，不接受密码兜底 ──
+  # 「修改配置」比「删除」更需要限定所有者：删除只是回到没人能访问的状态，
+  # 修改却可能把一个私密分享改成公开。
   cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
-  return json(rsp, 403, ok: false, error: '没有权限修改这个分享') if cid.empty?
-  return json(rsp, 403, ok: false, error: '只有上传者可以修改这个分享') unless m['by'].to_s == cid
+  return s.fail(rsp, 403, '没有权限修改这个分享') if cid.empty?
+  return s.fail(rsp, 403, '只有上传者可以修改这个分享') unless s.owned_by?(cid)
 
-  # ── 下载次数上限 ──
-  if req.param('max')
-    max = req.param('max').to_i
-    max = 0 if max.negative?
-    max = 100_000 if max > 100_000
-    old_max = m['max'].to_i
-    m['max'] = max
-    # left 按「还剩多少」重算：new_left = 新上限 - (已用掉的次数)
-    used = old_max > 0 ? (old_max - m['left'].to_i) : 0
-    used = 0 if used.negative?
-    m['left'] = max > 0 ? [max - used, 0].max : max
-  end
+  s.apply_max!(req.param('max').to_i) if req.param('max')
+  s.apply_exp!(req.param('exp').to_i) if req.param('exp')
+  s.apply_pw!(req.param('pw'))         if req.param('pw')
 
-  # ── 有效期（-1 = 不改）──
-  if req.param('exp')
-    exp_h = req.param('exp').to_i
-    unless exp_h.negative?
-      exp_h = 87_600 if exp_h > 87_600
-      m['exp'] = exp_h
-      m['exp_at'] = exp_h > 0 ? Time.now.to_i + exp_h * 3600 : 0
-    end
-  end
-
-  # ── 密码（不传 = 不改；传空串 = 改成免密）──
-  if req.param('pw')
-    pw = req.param('pw').to_s[0, 64]
-    # 取消密码后如果它本来是「私密」，那这个分享就没有任何保护了 ——
-    # 自动降级成公开，否则下载端会因为「私密却没密码」而永久拒绝（死锁）。
-    if pw.empty? && m.fetch('pub', 1).to_i.zero?
-      m['pub'] = 1
-    end
-    m['pw'] = pw
-  end
-
-  # ── 是否公开（-1 = 不改）──
+  # 改成私密必须有密码，否则这个分享等于公开却标着「私密」，
+  # 而且下载端会一直 401 谁都下不了 —— 直接拒绝这个组合。
   if req.param('pub')
     pub = req.param('pub').to_i
-    unless pub.negative?
-      pub = 1 if pub > 1
-      # 改成私密必须有密码，否则这个分享等于公开却标着「私密」，
-      # 而且下载端会一直 401 谁都下不了 —— 直接拒绝这个组合。
-      if pub.zero? && m['pw'].to_s.empty?
-        return json(rsp, 400, ok: false, error: '私密分享必须设置密码')
-      end
-      m['pub'] = pub
+    if !pub.negative? && pub.zero? && !s.can_be_private?
+      return s.fail(rsp, 400, '私密分享必须设置密码')
     end
+    s.apply_pub!(pub)
   end
 
-  File.write(mp, m.to_json)
-
-  json(rsp, 200, ok: true, data: {
-    token:  token,
-    max:    m['max'].to_i,
-    left:   m['left'].to_i,
-    exp:    m['exp'].to_i,
-    exp_at: m['exp_at'].to_i,
-    pub:    m.fetch('pub', 1).to_i,
-    has_pw: !m['pw'].to_s.empty?
-  })
+  s.save!
+  s.ok(rsp, s.to_config)
 end
 
 Q.get %r{^/?$} do |_req, rsp|

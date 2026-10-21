@@ -27,14 +27,6 @@
 require_relative '../../_base_'
 require_relative '_lib_'
 
-# 分享是否已失效（次数耗尽 或 已到期），跟 download 的判定保持一致
-def dead?(m)
-  return true if m['max'].to_i > 0 && m['left'].to_i <= 0
-  exp_at = m['exp_at'].to_i
-  return true if exp_at > 0 && Time.now.to_i >= exp_at
-  false
-end
-
 # 解析 Range 请求头 → [first, last]（闭区间，字节偏移），不支持就返回 nil
 #   Range: bytes=0-            → 0 .. size-1
 #   Range: bytes=100-199      → 100 .. 199
@@ -93,49 +85,32 @@ class Q
 end
 
 Q.get %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  token = req.named(:token)
-  mp = meta_path(token)
-  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(mp)
+  s = Share.find(req.named(:token))
+  return Share.missing(rsp) if s.nil?
 
-  m = (JSON.parse(File.read(mp)) rescue nil)
-  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
+  # ★ 只放行公开分享 —— 预览端点不校验密码，私密分享一律不给
+  return s.fail(rsp, 403, '私密分享不支持预览') unless s.public?
 
-  # ★ 只放行公开分享
-  return json(rsp, 403, ok: false, error: '私密分享不支持预览') unless m.fetch('pub', 1).to_i != 0
-
-  if m['dead'] || dead?(m)
-    quota = m['max'].to_i > 0 && m['left'].to_i <= 0
-    return json(rsp, 410, ok: false, error: (quota ? '次数已用完' : '链接已过期'))
+  # 预览不做懒清理（:none）—— 它是只读的，每次都打标记/删文件太积极。
+  # 失效了就报 410，清理交给下载端和 list 去做。
+  unless s.alive?
+    return s.fail(rsp, 410, s.dead_message)
   end
+  return s.fail(rsp, 404, 'file gone') unless s.data_exists?
 
-  path = File.join(dir_of(token), 'data')
-  return json(rsp, 404, ok: false, error: 'file gone') unless File.file?(path)
-
-  mime = m['type'].to_s
-  mime = 'application/octet-stream' if mime.empty?
-  mime = "#{mime}; charset=utf-8" if mime.start_with?('text/') && !mime.include?('charset')
-
-  size = File.size(path)
+  size = File.size(s.data_path)
   rng = parse_range(req.header('range', ''), size)
 
-  # Content-Disposition 用 inline，让浏览器把它当页面内容渲染而不是下载
-  rsp.header_field('Content-Disposition', 'inline')
-  # 预览是只读展示：禁缓存，免得改完配置还看到旧内容
-  rsp.header_field('Cache-Control', 'no-store')
-  # 明确告诉中间层/浏览器：这是别人上传的内容，别嗅探类型
-  rsp.header_field('X-Content-Type-Options', 'nosniff')
-  # 声明支持 Range，浏览器才会用 206 去拖动/续传音视频
-  rsp.header_field('Accept-Ranges', 'bytes')
+  s.preview_headers(rsp)
 
   unless rng
-    rsp.type(mime).body(path).finish
+    rsp.type(s.mime_inline).body(s.data_path).finish
   else
     first, last = rng
-    len = last - first + 1
     rsp.code(206)
        .header_field('Content-Range', "bytes #{first}-#{last}/#{size}")
-       .type(mime)
-       .body(Q::RangeBody.new(path, first, len))
+       .type(s.mime_inline)
+       .body(Q::RangeBody.new(s.data_path, first, last - first + 1))
        .finish
   end
 end

@@ -14,9 +14,8 @@
 #   2. 密码校验 pw=<密码>：分享者自己设的密码，老行为保留
 #      （给「知道密码但换设备」的场景留个后路）。
 #
-# 没法授权的两种情况（都 403）：
-#   - 完成了、没设密码、又没有匹配的 c  → 没有凭证能证明是所有者
-#   - 未完成的（done=0）没设密码且 c 不匹配 → 同理
+#   3. 未完成的（done=0）允许无凭证直接丢 —— 它还没对外发过链接，
+#      留着只是等续传。
 #
 # 为什么不能「裸 token 就删」：
 #   token 只有 16 位 hex，分享出去的链接别人捡到就能删掉别人的分享。
@@ -27,36 +26,28 @@ require_relative '../../_base_'
 require_relative '_lib_'
 
 ensure_share_root!
-require 'fileutils'
-
 
 Q.delete %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
   token = req.named(:token)
-  dir = File.join(SHARE_ROOT, token)
-  mp = File.join(dir, 'meta.json')
-  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(mp)
-
-  m = (JSON.parse(File.read(mp)) rescue nil)
-  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
+  s = Share.find(token)
+  return Share.missing(rsp) if s.nil?
 
   cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+  # 这里是 pw 不是 p —— 跟 download 的 ?p= 故意不一样：
+  #   download 的 ?p= 会出现在分享链接里（对方点开就要输密码），要短；
+  #   delete 是内部管理接口，前端只传 ?c= 或 ?pw=，用全称更清楚。
+  # 两边各自保持原样，别「顺手统一」。
   pw  = req.param('pw').to_s
 
-  owner  = !cid.empty? && m['by'].to_s == cid   # 归属：同一个浏览器传的 clientId
-  passwd = !pw.empty?  && m['pw'].to_s == pw    # 密码（老路径保留）
-
-  unless owner || passwd
-    # 注意：Ruby 里 "" 是 truthy，只有 nil/false 才假。所以判断「调用方
-    # 有没有给凭证」必须写成 !x.empty?，不能写 || pw —— 后者永远为真，
-    # 会把「什么都没给」的请求也判成有凭证而误报 403。
-    given_cred = !cid.empty? || !pw.empty?
-    return json(rsp, 403, ok: false, error: '没有权限删除这个分享') if given_cred
-    # 什么凭证都没给：只有未完成的分享允许直接丢（还没对外发过链接）
-    return json(rsp, 403, ok: false, error: '需要密码或上传者身份才能删除') unless m['done'].to_i.zero?
+  unless s.authorized?(cid: cid, pw: pw, require_cred: true) || s.discardable?
+    # 区分「凭证错了」和「压根没给凭证」，提示才准确
+    given = !cid.empty? || !pw.empty?
+    return s.fail(rsp, 403,
+                  given ? '没有权限删除这个分享' : '需要密码或上传者身份才能删除')
   end
 
-  FileUtils.rm_rf(dir)
-  json(rsp, 200, ok: true, data: { token: token, deleted: true })
+  s.destroy!
+  s.ok(rsp, { token: token, deleted: true })
 end
 
 # 用错方法时给提示

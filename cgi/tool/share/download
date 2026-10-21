@@ -43,78 +43,24 @@ require_relative '../../_base_'
 require_relative '_lib_'
 
 ensure_share_root!
-require 'fileutils'
 
-# 全局数据目录，可用 SPIDER_DATA 环境变量覆盖
-# ---------- helpers ----------
-
-
-
-
-
-# Content-Disposition 里用的文件名：跟 create/upload 同一套规则（Unicode 安全），
-# 另外把 " 和 CR/LF 去掉 —— 这两个进了 header 会破坏响应头结构。
-def sanitize_name(str)
-  n = str.to_s.gsub(/["\r\n]/, '')
-       .gsub(%r{[/\\]} , '_')
-       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')
-       .strip[0, 160]
-  n.empty? ? 'file' : n
-end
-
-# 分享是否已失效（次数耗尽 或 已到期）。返回 :none / :quota / :expired
-def dead_reason(m)
-  return :quota if m['max'].to_i > 0 && m['left'].to_i <= 0
-  exp_at = m['exp_at'].to_i
-  return :expired if exp_at > 0 && Time.now.to_i >= exp_at
-  :none
-end
-
-# 懒清理：第一次碰到失效打 dead 标记，第二次直接物理删除。
-# 返回 true 表示"已物理删除，调用方应该回 404"。
-def reap_if_dead(token, m)
-  if m['dead']
-    FileUtils.rm_rf(dir_of(token))
-    return true
-  end
-  return false unless dead_reason(m) != :none
-  m['dead'] = true
-  m['dead_at'] = Time.now.to_i
-  save_meta(token, m)
-  false
-end
+DOWNLOAD_PAGE = 'dist/download.html'
 
 # ---------- GET: 元信息（下载页用） ----------
 
 Q.get %r{^/info/(?<token>[a-f0-9]{16})$} do |req, rsp|
-  token = req.named(:token)
-  m = load_meta(token)
-  return json(rsp, 404, ok: false, error: 'not found') if m.nil?
+  s = Share.find(req.named(:token))
+  return Share.missing(rsp) if s.nil?
+  # 下载端用 :mark —— 第一次发现失效只打标记（本次还能报「次数已用完」而不是
+  # 404），下次访问才物理删。误判一次不会立刻丢数据。
+  return Share.missing(rsp) if s.reap!(purge: :mark)
 
-  if reap_if_dead(token, m)
-    return json(rsp, 404, ok: false, error: 'not found')
+  unless s.alive?
+    return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
   end
+  return s.fail(rsp, 404, 'file gone') unless s.data_exists?
 
-  reason = dead_reason(m)
-  if reason != :none
-    return json(rsp, 410, ok: false,
-                error: (reason == :quota ? '次数已用完' : '链接已过期'),
-                data: { name: m['name'], size: m['size'] })
-  end
-
-  return json(rsp, 404, ok: false, error: 'file gone') unless File.file?(data_path(token))
-
-  json(rsp, 200, ok: true, data: {
-    name:   m['name'],
-    type:   m['type'],
-    size:   m['size'],
-    max:    m['max'],
-    left:   m['left'],
-    pub:    m.fetch('pub', 1).to_i,      # 1=公开 / 0=私密
-    has_pw: !m['pw'].to_s.empty?,
-    exp_at: m['exp_at'].to_i,
-    at:     m['at']
-  })
+  s.ok(rsp, s.to_info)
 end
 
 # ---------- GET: 下载 ----------
@@ -123,62 +69,27 @@ end
 #
 # 原来这层是 /f/<token>，中间的 f 是为了跟 /info/<token> 区分。现在
 # 「info」是字母、「<token>」是 16 位 hex，两者正则上不可能撞，直接省掉这层。
-# 同理 /info/<token> 也可以砍，但 info 这个词有语义（"这是元信息不是文件"），
-# 留着当自解释的路径。
 
 Q.get %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
-  token = req.named(:token)
-  m = load_meta(token)
-  return json(rsp, 404, ok: false, error: 'not found') if m.nil?
+  s = Share.find(req.named(:token))
+  return Share.missing(rsp) if s.nil?
+  return Share.missing(rsp) if s.reap!(purge: :mark)
 
-  if reap_if_dead(token, m)
-    return json(rsp, 404, ok: false, error: 'not found')
-  end
-
-  reason = dead_reason(m)
-  if reason != :none
-    return json(rsp, 410, ok: false,
-                error: (reason == :quota ? '次数已用完' : '链接已过期'),
-                data: { name: m['name'], size: m['size'] })
+  unless s.alive?
+    return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
   end
 
   # 密码校验（密码错的不消耗下载次数）
   # 私密分享（pub=0）强制要求正确密码：哪怕历史数据里 pw 意外为空，
   # 也不能放行（否则「私密」形同虚设）。公开（pub=1）行为不变：设了密码才校验。
-  want = m['pw'].to_s
-  if !want.empty? || m.fetch('pub', 1).to_i.zero?
-    got = req.param('p').to_s
-    if want.empty? || got != want
-      return json(rsp, 401, ok: false, error: '密码错误',
-                  data: { name: m['name'], size: m['size'], has_pw: true,
-                          pub: m.fetch('pub', 1).to_i })
-    end
+  unless s.authorized?(pw: req.param('p'))
+    return s.fail(rsp, 401, '密码错误',
+                  data: { name: s.name, size: s.size, has_pw: true,
+                          pub: s.public? ? 1 : 0 })
   end
 
-  path = data_path(token)
-  return json(rsp, 404, ok: false, error: 'file gone') unless File.file?(path)
-
-  # 扣次数（发出响应前落盘）
-  if m['max'].to_i > 0
-    m['left'] = m['left'].to_i - 1
-    save_meta(token, m)
-  end
-
-  mime = m['type'].to_s
-  mime = 'application/octet-stream' if mime.empty?
-  safe = sanitize_name(m['name'])
-  # RFC 6266：filename 给 ASCII 兜底，filename* 给 UTF-8 真名。
-  # 直接把中文塞进 filename="..." 的话，浏览器多半拿到乱码或整串丢弃。
-  ascii = safe.gsub(/[^\x20-\x7e]/, '_').gsub('"', '')
-  # 顺序要紧：先把非 ASCII 字节转成 %XX，再单独处理 " % 空格这三个字符。
-  # 反过来做的话，刚生成的 % 会被第二次 gsub 再转义成 %25，就坏了。
-  utf8  = safe.b
-        .gsub(/["%\s]/) { |c| format('%%%02X', c.ord) }
-        .gsub(/[\x80-\xff]/n) { |b| format('%%%02X', b.ord) }
-  rsp.header_field('Content-Disposition',
-                   %(attachment; filename="#{ascii}"; filename*=UTF-8''#{utf8}))
-  rsp.header_field('X-Share-Left', m['max'].to_i > 0 ? m['left'].to_s : 'inf')
-  rsp.type(mime).body(path).finish
+  return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+  s.serve_attachment(rsp)
 end
 
 # ---------- GET / : 详情页（?t=<token>）或状态 ----------
@@ -186,15 +97,10 @@ end
 # 这个目录名 tool/share/download 跟 URL 前缀同名，spider 的路径解析会把
 # /tool/share/download/* 全派发到这里（index 拦不到）。所以详情页的 HTML
 # 渲染逻辑放在本脚本，不在 index。
-#
-#   GET /tool/share/download?t=<token>   → dist/download.html（下载详情页）
-#   GET /tool/share/download             → 状态 JSON（调试用）
-
-DOWNLOAD_PAGE = 'dist/download.html'
 
 Q.get '/' do |req, rsp|
   t = req.param('t').to_s
-  if !t.empty?
+  unless t.empty?
     unless File.file?(DOWNLOAD_PAGE)
       return rsp.fail_404.type_text.body("#{DOWNLOAD_PAGE} not found").finish
     end

@@ -20,80 +20,31 @@ require_relative '../../_base_'
 require_relative '_lib_'
 
 ensure_share_root!
-require 'fileutils'
-
-
-
 
 Q.post '/' do |req, rsp|
   token = req.param('token').to_s
-  return json(rsp, 400, ok: false, error: 'missing token') unless token =~ /\A[a-f0-9]{16}\z/
+  return json(rsp, 400, ok: false, error: 'missing token') unless Share::TOKEN_RE.match?(token)
 
-  mp = meta_path(token)
-  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(mp)
-
-  m = (JSON.parse(File.read(mp)) rescue nil)
-  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
+  s = Share.find(token)
+  return Share.missing(rsp) if s.nil?
 
   # 幂等：已完成就直接返回成功（客户端重试 finish 不会报错）
-  if m['done'].to_i != 0
-    return json(rsp, 200, ok: true, data: {
-      # url 是文件本体（直接下），不是给人分享的链接。分享链接用
-      # /tool/share/download?t=<token>（详情页，能输密码）—— 见 list 的 url 字段。
-      token: token, url: "/tool/share/download/#{token}",
-      name: m['name'], size: m['size'], type: m['type'],
-      max: m['max'], has_pw: !m['pw'].to_s.empty?, exp_at: m['exp_at'].to_i,
-      merged: 0, already: true
-    })
-  end
+  return json(rsp, 200, ok: true, data: s.to_finish_info(0, already: true)) if s.done?
 
-  total = m['total_parts'].to_i
-  got = got_parts(token)
-
-  # 缺片 → 409，告诉前端缺哪些
-  missing = (0...total).to_a - got
+  missing = s.missing_parts
   unless missing.empty?
     return json(rsp, 409, ok: false,
                 error: "missing #{missing.length} part(s): #{missing.first(20).join(',')}",
-                data: { got: got, total_parts: total, missing: missing })
+                data: { got: s.got_parts, total_parts: s.total_parts, missing: missing })
   end
 
-  # 按序合并 → 临时文件 → rename（原子）
-  tmp = File.join(dir_of(token), 'data.tmp')
-  merged = 0
-  File.open(tmp, 'wb') do |out|
-    (0...total).each do |i|
-      pf = File.join(dir_of(token), 'part', i.to_s)
-      data = File.binread(pf)
-      out.write(data)
-      merged += data.bytesize
-    end
+  begin
+    merged = s.merge_parts!
+  rescue RangeError => e
+    return json(rsp, 500, ok: false, error: e.message)
   end
 
-  # 大小校验：合并结果必须等于声明的 size
-  if merged != m['size'].to_i
-    File.delete(tmp)
-    return json(rsp, 500, ok: false,
-                error: "size mismatch: merged #{merged} != declared #{m['size']}")
-  end
-
-  File.rename(tmp, File.join(dir_of(token), 'data'))
-  FileUtils.rm_rf(File.join(dir_of(token), 'part'))
-
-  m['done'] = 1
-  File.write(mp, m.to_json)
-
-  json(rsp, 200, ok: true, data: {
-    token: token,
-    url:   "/tool/share/download/#{token}",
-    name:  m['name'],
-    size:  m['size'],
-    type:  m['type'],
-    max:   m['max'],
-    has_pw: !m['pw'].to_s.empty?,
-    exp_at: m['exp_at'].to_i,
-    merged: merged
-  })
+  json(rsp, 200, ok: true, data: s.to_finish_info(merged))
 end
 
 Q.get '/' do |_req, rsp|

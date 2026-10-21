@@ -30,20 +30,6 @@ require_relative '../../_base_'
 require_relative '_lib_'
 
 ensure_share_root!
-require 'securerandom'
-require 'fileutils'
-
-# 文件名清洗：保留 Unicode 字母/数字（\p{L}\p{N}），只干掉路径分隔符和控制字符。
-#   原来用 [^\w.\- ]，但 Ruby 的 \w 只认 ASCII —— 中文会被整片替换成 _，
-#   「报告.txt」变成「__.txt」，等于文件名丢失。必须用 \p{L}\p{N} + /u。
-def sanitize_name(s)
-  n = s.to_s.gsub(%r{[/\\]} , '_')
-       .gsub(/[\x00-\x1f\x7f]/, '')
-       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')
-       .strip[0, 160]
-  n.empty? ? 'file' : n
-end
-
 
 Q.post '/' do |req, rsp|
   size = req.param('size').to_i
@@ -51,48 +37,31 @@ Q.post '/' do |req, rsp|
 
   chunk = req.param('chunk').to_i
   return json(rsp, 400, ok: false, error: "bad chunk: #{req.param('chunk')}") if chunk.negative?
-  total = chunk > 0 ? (size + chunk - 1) / chunk : 1
 
   max = req.param('max').to_i
   max = 0 if max.negative?
   max = 100_000 if max > 100_000
+
   exp_h = req.param('exp').to_i
   exp_h = 0 if exp_h.negative?
   exp_h = 87_600 if exp_h > 87_600
 
-  # 是否公开：pub=1 公开（默认），pub=0 私密。
-  # 私密 = 下载端强制要求正确密码（见 tool/share/download 的 GET /f）。
-  # 所以私密必须带密码，否则这个分享等于公开却标着「私密」，自相矛盾。
   pub = req.param('pub', '1').to_s != '0' ? 1 : 0
-  pw  = req.param('pw').to_s[0, 64]
-  if pub.zero? && pw.empty?
-    return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）')
-  end
+  pw  = req.param('pw').to_s
+  # 私密必须带密码，否则这个分享等于公开却标着「私密」，自相矛盾
+  return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）') if pub.zero? && pw.empty?
 
-  token = SecureRandom.hex(8)
-  FileUtils.mkdir_p(File.join(dir_of(token), 'part'))
+  s = Share.create(name:  req.param('name'),
+                   type:  req.param('type'),
+                   size:  size,
+                   chunk: chunk,
+                   max:   max,
+                   exp_h: exp_h,
+                   pub:   pub,
+                   pw:    pw,
+                   owner: req.param('c'))
 
-  now = Time.now.to_i
-  File.write(meta_path(token), {
-    'name'   => sanitize_name(req.param('name')),
-    'type'   => req.param('type').to_s[0, 100],
-    'size'   => size,
-    'max'    => max,
-    'left'   => max,
-    'pub'    => pub,
-    'pw'     => pw,
-    'by'     => req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40],
-    'exp'    => exp_h,
-    'exp_at' => (exp_h > 0 ? now + exp_h * 3600 : 0),
-    'at'     => now,
-    'done'   => 0,
-    'chunk'  => chunk,
-    'total_parts' => total
-  }.to_json)
-
-  json(rsp, 200, ok: true, data: {
-    token: token, total_parts: total, chunk: chunk, got_parts: []
-  })
+  json(rsp, 200, ok: true, data: s.to_create_info)
 end
 
 Q.get '/' do |_req, rsp|

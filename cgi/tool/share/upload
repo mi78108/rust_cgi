@@ -40,39 +40,19 @@
 
 require_relative '../../_base_'
 require_relative '_lib_'
+require_relative '../../_ext_form_'
 
 ensure_share_root!
-require_relative '../../_ext_form_'
-require 'securerandom'
-require 'fileutils'
 
-# 文件名清洗：保留 Unicode 字母/数字（\p{L}\p{N}），只干掉路径分隔符和控制字符。
-#   原来用 [^\w.\- ]，但 Ruby 的 \w 只认 ASCII —— 中文会被整片替换成 _，
-#   「报告.txt」变成「__.txt」，等于文件名丢失。必须用 \p{L}\p{N} + /u。
-def sanitize_name(s)
-  n = s.to_s.gsub(%r{[/\\]} , '_')          # 路径分隔符
-       .gsub(/[\x00-\x1f\x7f]/, '')         # 控制字符
-       .gsub(/[^\p{L}\p{N}._\- ]/u, '_')    # 其余非 Unicode 字母数字 → _
-       .strip[0, 160]
-  n.empty? ? 'file' : n
-end
-
-
-
-
-
-# 扫已收到的分片 part/<n> → [0, 2, 5]（升序）
+# ── POST: 一次性上传（multipart） ────────────────────────────────
 
 Q.post '/' do |req, rsp|
   max = req.param('max').to_i
   max = 0 if max.negative?
   max = 100_000 if max > 100_000          # 防手滑
-  pw = req.param('pw').to_s[0, 64]
+  pw = req.param('pw').to_s
   pub = req.param('pub', '1').to_s != '0' ? 1 : 0
-  if pub.zero? && pw.empty?
-    return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）')
-  end
-  by = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]   # clientId
+  return json(rsp, 400, ok: false, error: '私密分享必须设置密码（pub=0 需要 pw）') if pub.zero? && pw.empty?
 
   # 有效期：小时数，0 = 永久。上限 10 年，防手滑。
   exp_h = req.param('exp').to_i
@@ -88,41 +68,19 @@ Q.post '/' do |req, rsp|
   content = item.content
   return json(rsp, 400, ok: false, error: 'empty file') if content.empty?
 
-  token = SecureRandom.hex(8)
-  FileUtils.mkdir_p(dir_of(token))
-  File.binwrite(File.join(dir_of(token), 'data'), content)
+  # 显式 name 优先，没给就用 multipart 里的文件名
+  name = req.param('name').to_s.empty? ? item.filename : req.param('name')
 
-  now = Time.now.to_i
-  name = sanitize_name(req.param('name').to_s.empty? ? item.filename : req.param('name'))
-  File.write(File.join(dir_of(token), 'meta.json'), {
-    'name'   => name,
-    'type'   => item.content_type.to_s[0, 100],
-    'size'   => content.bytesize,
-    'max'    => max,
-    'left'   => max,                       # 0 = 无限
-    'pub'    => pub,                       # 1=公开 / 0=私密（私密强制要密码）
-    'pw'     => pw,
-    'by'     => by,                         # 上传者 clientId（list 按它过滤）
-    'exp'    => exp_h,                      # 有效期小时数（0 = 永久）
-    'exp_at' => (exp_h > 0 ? now + exp_h * 3600 : 0),  # 到期时间戳，0 = 不过期
-    'at'     => now,
-    'done'   => 1,                          # 1=已完成（旧接口一次性上传）
-    'chunk'  => 0,                          # 0=不分片
-    'total_parts' => 1,
-    'got_parts'  => []
-  }.to_json)
+  s = Share.upload_direct!(name:   name,
+                           type:   item.content_type,
+                           content: content,
+                           max:    max,
+                           exp_h:  exp_h,
+                           pub:    pub,
+                           pw:     pw,
+                           owner:  req.param('c'))
 
-  json(rsp, 200, ok: true, data: {
-    token:  token,
-    url:    "/tool/share/download/#{token}",
-    name:   name,
-    size:   content.bytesize,
-    type:   item.content_type,
-    max:    max,
-    pub:    pub,
-    has_pw: !pw.empty?,
-    exp_at: (exp_h > 0 ? now + exp_h * 3600 : 0)
-  })
+  json(rsp, 200, ok: true, data: s.to_upload_info)
 end
 
 # 误用 GET 时给个提示
@@ -130,37 +88,30 @@ Q.get '/' do |_req, rsp|
   json(rsp, 405, ok: false, error: 'POST multipart/form-data here (see tool/share/download)')
 end
 
-# ── PUT: 分片上传 ───────────────────────────────────────────
+# ── PUT: 分片上传 ────────────────────────────────────────────────
+#   PUT /tool/share/upload?token=<t>&n=<片号>
+#   Content-Range: bytes <start>-<end>/<total>   必填
 Q.put '/' do |req, rsp|
   token = req.param('token').to_s
-  return json(rsp, 400, ok: false, error: 'missing token') unless token =~ /\A[a-f0-9]{16}\z/
-  return json(rsp, 404, ok: false, error: 'not found') unless File.file?(meta_path(token))
+  return json(rsp, 400, ok: false, error: 'missing token') unless Share::TOKEN_RE.match?(token)
 
-  m = load_meta(token)
-  return json(rsp, 404, ok: false, error: 'not found') unless m.is_a?(Hash)
-  return json(rsp, 409, ok: false, error: 'already done') if m['done'].to_i != 0
+  s = Share.find(token)
+  return Share.missing(rsp) if s.nil?
+  return json(rsp, 409, ok: false, error: 'already done') if s.done?
 
   n = req.param('n').to_i
-  total = m['total_parts'].to_i
-  return json(rsp, 400, ok: false, error: "bad n: #{req.param('n')}") if n.negative? || n >= total
+  return json(rsp, 400, ok: false, error: "bad n: #{req.param('n')}") if n.negative? || n >= s.total_parts
 
-  # Content-Range: bytes <start>-<end>/<total>  —— 必填
   cr = req.header('content-range', '')
   md = cr.to_s.match(%r{\Abytes\s+(\d+)-(\d+)/(\d+)\z})
   unless md
     return json(rsp, 400, ok: false,
-                error: "bad or missing Content-Range: #{cr.inspect} (want 'bytes 0-1023/#{m['size']}')")
+                error: "bad or missing Content-Range: #{cr.inspect} (want 'bytes 0-1023/#{s.size}')")
   end
   start, finish, cr_total = md[1].to_i, md[2].to_i, md[3].to_i
 
-  return json(rsp, 400, ok: false, error: "range end < start") if finish < start
-  return json(rsp, 400, ok: false, error: "total mismatch: #{cr_total} != #{m['size']}") if cr_total != m['size'].to_i
-
-  # n 与字节位置必须自洽（chunk 大小 × n == start，最后一片允许短）
-  chunk = m['chunk'].to_i
-  if chunk > 0 && start != n * chunk
-    return json(rsp, 400, ok: false, error: "start #{start} != n*chunk #{n * chunk}")
-  end
+  err = s.check_part_range(n, start, finish, cr_total)
+  return json(rsp, 400, ok: false, error: err) if err
 
   content = req.body.to_s
   want = finish - start + 1
@@ -169,15 +120,5 @@ Q.put '/' do |req, rsp|
                 error: "body size #{content.bytesize} != range length #{want}")
   end
 
-  pdir = File.join(dir_of(token), 'part')
-  FileUtils.mkdir_p(pdir)
-  File.binwrite(File.join(pdir, n.to_s), content)
-
-  got = got_parts(token)
-  json(rsp, 200, ok: true, data: {
-    token: token, n: n,
-    got: got.length, total_parts: total,
-    all_parts: got,
-    complete: got.length >= total
-  })
+  json(rsp, 200, ok: true, data: s.write_part!(n, content))
 end
