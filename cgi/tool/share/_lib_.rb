@@ -76,6 +76,7 @@ end
 #   ok(rsp, data)           成功，带 data
 #   err(rsp, code, error)   失败，带 error（extra 透传，404 时常要附 name/size）
 #   err(rsp, 404)           error 走默认值 'not found'
+#   serve_html(rsp, path)   吐静态页面（dist/*.html）
 
 def json(rsp, code, payload)
   rsp.code(code).type_json.body(payload.to_json).finish
@@ -87,6 +88,13 @@ end
 
 def err(rsp, code, error = 'not found', **extra)
   json(rsp, code, { ok: false, error: error }.merge(extra))
+end
+
+# 吐 dist 下的静态页面。文件不在就 404 文本 —— 部署漏了文件时能看出来，
+# 而不是返回一段空白页让人以为是页面 bug。
+def serve_html(rsp, path)
+  return rsp.fail_404.type_text.body("#{path} not found").finish unless File.file?(path)
+  rsp.type_html.body(path).finish
 end
 
 # ══════════════════════════════════════════════════════════════

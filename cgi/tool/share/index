@@ -1,47 +1,38 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# tool/share/index — 文件分享页面 + 分享链接重定向
+# tool/share/index — 分享服务的全部 HTTP 端点
 #
-#   GET /tool/share                        → dist/page.html（提取 / 上传 / 我的分享 / 公开分享）
-#   GET /tool/share/view?t=<tok>           → 预览页（dist/view.html）
-#   GET /tool/share/download?t=<tok>       → 下载详情页（路由在 download 脚本里）
-#   GET /tool/share?t=<token>              → 302 /tool/share/download?t=<token>
-#   GET /tool/share/<token>                → 302 /tool/share/download/info/<token>
+# 所有路由集中在这里，处理逻辑在 _lib_.rb：
+#   Share       领域模型，一个分享是什么、能做什么
+#   Share::Api  把 HTTP 请求翻译成对 Share 的调用
+# index 自己只做路由分发，不写业务逻辑。
 #
-# 详情页 / 预览页不带 .html 后缀 —— spider 的 URL→脚本解析是从路径尾部
-# 往前剥文件名，而 cgi/tool/share/download 这个目录名会让 /tool/share/download
-# 直接派发给 download 脚本（index 拦不到）。所以详情页的「渲染 HTML」那段
-# 逻辑写在 download 脚本的 Q.get '/' 里，带 ?t= 时出页面，不带时出状态 JSON。
+# 路由一览（顺序即匹配优先级，从上到下）：
 #
-# 公开分享不再有独立广场页 —— 直接内嵌在 page.html 下方，
-# 数据源跟「我的分享」同一个脚本：GET /tool/share/list?pub=1
-# （服务端按 pub=1 且 done=1 过滤，私密元信息不会漏出去）。
+#   POST   /                    建分片会话（无 query）/ 一次性上传（有 query）
+#   POST   /<token>             一次性上传到指定 token
+#   POST   /<token>/complete    分片合并收尾
+#   PUT    /<token>             传一片
+#   GET    /                    ?t=<token> → 下载详情页 / 无 → 上传页
+#   GET    /list                 分享列表（?c= 我的 · ?pub=1 公开）
+#   GET    /<token>/list         单条详情（续传入口）
+#   GET    /<token>/info         元信息
+#   GET    /<token>/view         预览页 HTML
+#   GET    /<token>/chunk        内联预览（inline，不扣次数）
+#   GET    /<token>/page         下载详情页 HTML
+#   GET    /<token>              下载文件本体（attachment，扣次数）
+#   PATCH  /<token>              改配置
+#   DELETE /<token>              取消分享 / 丢弃未完成
+#   GET    /view                 预览页（旧 query 式入口，保留兼容）
 #
-# 预览在独立脚本 tool/share/preview（GET /tool/share/preview/<token>）。
+# 两条要注意的：
+#   1. GET /<token> 在最后 —— 它匹配任何 16 位 hex 的单段路径，
+#      所有更具体的路由都必须排在它前面。
+#   2. /download 之类带目录名的前缀不行 —— spider 的路径解析会先派发到
+#      那个目录下的 CGI 脚本，index 拦不到。所以路径一律用 /<token>/xxx。
 #
-# 页面本身是纯 HTML/CSS/JS（无框架，单文件内联），存在 dist/page.html 里，
-# 本脚本只负责端出来。
-#
-# 为什么 ?t=<token> 要重定向而不是直接渲染页面：
-#   分享链接是「给人点的」（对方要看文件名、输密码、点下载），
-#   而 /tool/share/download?t= 是给程序用的（直接吐文件 / 返回 401/410 JSON）。
-#   两者语义不同：页面走 query，接口走 download 脚本。
-#   早期版本让 page.html 自己判断 ?t= 切下载视图，现在统一交给 download，
-#   页面专心做上传。
-#
-# 为什么 /tool/share/<token> 也重定向到 info：
-#   短链形式更好记（/s/a1b2c3d4），info 返回元信息 JSON 让调用方自己决定怎么展示。
-#   值必须是 32 位 hex（跟 share 的 token 格式一致），避免误吞其他路径段。
-#
-# API 端点（每个独立脚本）：
-#   POST   /tool/share/create   分片第一步：建 token
-#   POST   /tool/share/upload   不分片 multipart 上传
-#   PUT    /tool/share/upload   分片上传（?token=&n=，Content-Range）
-#   POST   /tool/share/finish   分片合并收尾
-#   GET    /tool/share/list     列表 / 单条详情（续传入口）
-#   DELETE /tool/share/delete   丢弃未完成 / 删除
-#   GET    /tool/share/download 元信息 / 下载
-#   GET    /tool/share/preview  公开分享的内联预览（不扣次数，私密不给）
+# 存储：$SPIDER_DATA/<token>/{meta.json, data, part/<n>}
+#      SPIDER_DATA 未设置时默认 /tmp/share。
 
 require_relative '../../_base_'
 require_relative '_lib_'
@@ -49,22 +40,6 @@ require_relative '_lib_'
 PAGE        = 'dist/page.html'
 VIEW_PAGE = 'dist/view.html'
 DOWNLOAD_PAGE = 'dist/download.html'
-
-# 预览页 HTML（dist/view.html）。GET /<token>/view 和 GET /view?t= 共用。
-def share_view_page(rsp)
-  unless File.file?(VIEW_PAGE)
-    return rsp.fail_404.type_text.body("#{VIEW_PAGE} not found").finish
-  end
-  rsp.type_html.body(VIEW_PAGE).finish
-end
-
-# 下载详情页 HTML（dist/download.html）。GET /<token>/page 用。
-def share_download_page(rsp)
-  unless File.file?(DOWNLOAD_PAGE)
-    return rsp.fail_404.type_text.body("#{DOWNLOAD_PAGE} not found").finish
-  end
-  rsp.type_html.body(DOWNLOAD_PAGE).finish
-end
 
 # ══════════════════════════════════════════════════════════════
 #  API 路由表
@@ -118,12 +93,9 @@ end
 Q.get '/' do |req, rsp|
   t = req.param('t').to_s
   # ?t=<token> → 详情页（保留旧链接可用，新链接是 /<token>/page）
-  return share_download_page(rsp) if Share::TOKEN_RE.match?(t)
+  return serve_html(rsp, DOWNLOAD_PAGE) if Share::TOKEN_RE.match?(t)
 
-  unless File.file?(PAGE)
-    return rsp.fail_404.type_text.body("#{PAGE} not found").finish
-  end
-  rsp.type_html.body(PAGE).finish
+  serve_html(rsp, PAGE)
 end
 
 # GET /<token>/info —— 分享元信息
@@ -137,7 +109,13 @@ end
 # 别让用户先看到一个空页面再由 JS 报「加载失败」。
 Q.get %r{^/(?<token>[a-f0-9]{16})/view/?$} do |req, rsp|
   return err(rsp, 404) if Share.find(req.named(:token)).nil?
-  share_view_page(rsp)
+  serve_html(rsp, VIEW_PAGE)
+end
+
+# GET /view?t=<token> —— 预览页旧入口（query 式）。
+# view.html 两种 URL 都认，但这个入口本身可以撤了，留着方便旧链接。
+Q.get %r{^/view/?$} do |_req, rsp|
+  serve_html(rsp, VIEW_PAGE)
 end
 
 # PATCH /<token> —— 改配置（下载次数 / 有效期 / 密码 / 是否公开）
@@ -178,7 +156,7 @@ end
 # 想直接拿文件走 GET /<token>，两者语义不同：页面给人看，文件给程序取。
 Q.get %r{^/(?<token>[a-f0-9]{16})/page/?$} do |req, rsp|
   return err(rsp, 404) if Share.find(req.named(:token)).nil?
-  share_download_page(rsp)
+  serve_html(rsp, DOWNLOAD_PAGE)
 end
 
 # ── GET /<token> → 下载文件本体 ──────────────────────────
