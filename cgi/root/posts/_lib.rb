@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 # posts/_lib.rb — 长文章数据模块 (跟 notes/_lib.rb 同构)
 #
-# 数据源: ./root/data/posts/<slug>.md
+# 数据源: ./root/data/posts/<yyyy>/<mm>/<slug>.md  (按 frontmatter date 的年月分目录,
+# 目录建后不再变动; slug 定位靠递归 glob)
 # frontmatter 跟 notes 一致: title / date / updated / tags
 #
 # API (跟 notes 同构, 前端可直接复用 drawer):
@@ -14,6 +15,7 @@
 
 require 'date'
 require 'time'
+require 'fileutils'
 
 # TODO(新 _base_ 不兼容): parse_body (L188-203) 用了老 Rsp API:
 #   resp.code = 400
@@ -63,6 +65,23 @@ def slug_from_post_path(path)
   File.basename(path, '.md')
 end
 
+# 递归列出全部 .md (data/posts/&lt;yyyy&gt;/&lt;mm&gt;/ 下, 任意深度)
+def post_paths
+  return [] unless Dir.exist?(POSTS_DIR)
+  Dir.glob(File.join(POSTS_DIR, '**', '*.md')).sort
+end
+
+# 按 slug 定位文件 (递归搜索; 重名取第一个)
+def post_path_for(slug)
+  post_paths.find { |p| slug_from_post_path(p) == slug }
+end
+
+# 按 date 推出 &lt;yyyy&gt;/&lt;mm&gt; 相对子目录, 供写入时 mkdir
+def post_rel_dir(date)
+  t = date.is_a?(Time) ? date : (parse_iso_post(date.to_s) || Time.now.utc)
+  format('%04d/%02d', t.year, t.month)
+end
+
 def reading_minutes_post(text)
   cjk = text.scan(/\p{Han}/).size
   ascii_words = text.scan(/[A-Za-z]+/).size
@@ -77,8 +96,7 @@ def excerpt_for_post(body, max = 200)
 end
 
 def all_posts
-  return [] unless Dir.exist?(POSTS_DIR)
-  Dir.glob(File.join(POSTS_DIR, '*.md')).map do |path|
+  post_paths.map do |path|
     parsed = parse_post_file(path)
     slug = slug_from_post_path(path)
     meta = parsed[:meta]
@@ -100,8 +118,8 @@ def all_posts
 end
 
 def find_post(slug)
-  path = File.join(POSTS_DIR, "#{slug}.md")
-  return nil unless File.file?(path)
+  path = post_path_for(slug)
+  return nil unless path
   parsed = parse_post_file(path)
   meta = parsed[:meta]
   created_at = parse_iso_post(meta[:date]) || File.mtime(path)
@@ -135,8 +153,10 @@ def write_post(data)
   meta = { title: title, author: author, date: now, updated: now, tags: tags }
   yaml_meta = meta.map { |k, v| "#{k}: #{v.is_a?(Array) ? "[#{v.join(', ')}]" : v}" }.join("\n")
   content = "---\n#{yaml_meta}\n---\n\n#{body}\n"
-  Dir.mkdir(POSTS_DIR) unless Dir.exist?(POSTS_DIR)
-  path = File.join(POSTS_DIR, "#{slug}.md")
+  rel = post_rel_dir(meta[:date])
+  dir = File.join(POSTS_DIR, rel)
+  FileUtils.mkdir_p(dir)
+  path = File.join(dir, "#{slug}.md")
   File.write(path, content)
   { ok: true, slug: slug, path: path }
 rescue => e
@@ -145,13 +165,13 @@ end
 
 def create_post(data)
   slug = data[:slug].to_s.empty? ? slugify(data[:title].to_s) : data[:slug].to_s
-  return { ok: false, error: 'slug conflict' } if File.file?(File.join(POSTS_DIR, "#{slug}.md"))
+  return { ok: false, error: 'slug conflict' } if post_path_for(slug)
   write_post(data.merge(slug: slug))
 end
 
 def update_post(slug, data)
-  path = File.join(POSTS_DIR, "#{slug}.md")
-  return { ok: false, error: 'not found' } unless File.file?(path)
+  path = post_path_for(slug)
+  return { ok: false, error: 'not found' } unless path
   write_post(data.merge(slug: slug))
 end
 

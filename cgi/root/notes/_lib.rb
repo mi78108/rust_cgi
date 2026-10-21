@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 # notes/_lib.rb — 共享 frontmatter 解析 + 列表/单篇查询
 #
-# 数据源: ./root/data/notes/<slug>.md
+# 数据源: ./root/data/notes/<yyyy>/<mm>/<slug>.md  (按 frontmatter date 的年月分目录,
+# 目录建后不再变动; slug 定位靠递归 glob)
 # 文件格式:
 #   ---
 #   title: My note title
@@ -25,6 +26,7 @@
 
 require 'date'
 require 'time'
+require 'fileutils'
 
 NOTES_DIR = File.expand_path('../data/notes', __dir__)
 
@@ -66,6 +68,23 @@ def slug_from_filename(path)
   File.basename(path, '.md')
 end
 
+# 递归列出全部 .md (data/notes/&lt;yyyy&gt;/&lt;mm&gt;/ 下, 任意深度)
+def note_paths
+  return [] unless Dir.exist?(NOTES_DIR)
+  Dir.glob(File.join(NOTES_DIR, '**', '*.md')).sort
+end
+
+# 按 slug 定位文件 (递归搜索; 重名取第一个)
+def note_path_for(slug)
+  note_paths.find { |p| slug_from_filename(p) == slug }
+end
+
+# 按 date 推出 &lt;yyyy&gt;/&lt;mm&gt; 相对子目录, 供写入时 mkdir
+def note_rel_dir(date)
+  t = date.is_a?(Time) ? date : (parse_iso(date.to_s) || Time.now.utc)
+  format('%04d/%02d', t.year, t.month)
+end
+
 # 计算 reading time (粗略: 中文按字, 英文按词, 平均 ~300 字/分钟)
 def reading_minutes(text)
   cjk = text.scan(/\p{Han}/).size
@@ -82,8 +101,7 @@ end
 
 # 列出全部笔记 (返回 hash 数组), 按 updated_at desc 排序
 def all_notes
-  return [] unless Dir.exist?(NOTES_DIR)
-  Dir.glob(File.join(NOTES_DIR, '*.md')).map do |path|
+  note_paths.map do |path|
     parsed = parse_note_file(path)
     slug = slug_from_filename(path)
     meta = parsed[:meta]
@@ -104,8 +122,8 @@ def all_notes
 end
 
 def find_note(slug)
-  path = File.join(NOTES_DIR, "#{slug}.md")
-  return nil unless File.file?(path)
+  path = note_path_for(slug)
+  return nil unless path
   parsed = parse_note_file(path)
   meta = parsed[:meta]
   created_at = parse_iso(meta[:date]) || File.mtime(path)
@@ -161,8 +179,10 @@ def write_note(data)
   meta = { title: title, author: author, date: now, updated: now, tags: tags }
   yaml_meta = meta.map { |k, v| "#{k}: #{v.is_a?(Array) ? "[#{v.join(', ')}]" : v}" }.join("\n")
   content = "---\n#{yaml_meta}\n---\n\n#{body}\n"
-  Dir.mkdir(NOTES_DIR) unless Dir.exist?(NOTES_DIR)
-  path = File.join(NOTES_DIR, "#{slug}.md")
+  rel = note_rel_dir(meta[:date])
+  dir = File.join(NOTES_DIR, rel)
+  FileUtils.mkdir_p(dir)
+  path = File.join(dir, "#{slug}.md")
   File.write(path, content)
   { ok: true, slug: slug, path: path }
 rescue => e
@@ -171,13 +191,13 @@ end
 
 def create_note(data)
   slug = data[:slug].to_s.empty? ? slugify(data[:title].to_s) : data[:slug].to_s
-  return { ok: false, error: 'slug conflict' } if File.file?(File.join(NOTES_DIR, "#{slug}.md"))
+  return { ok: false, error: 'slug conflict' } if note_path_for(slug)
   write_note(data.merge(slug: slug))
 end
 
 def update_note(slug, data)
-  path = File.join(NOTES_DIR, "#{slug}.md")
-  return { ok: false, error: 'not found' } unless File.file?(path)
+  path = note_path_for(slug)
+  return { ok: false, error: 'not found' } unless path
   write_note(data.merge(slug: slug))
 end
 
