@@ -45,7 +45,6 @@
 
 require_relative '../../_base_'
 require_relative '_lib_'
-require_relative 'api_upload'
 
 PAGE        = 'dist/page.html'
 VIEW_PAGE = 'dist/view.html'
@@ -84,9 +83,9 @@ end
 # nil 也判一下：Q::REQ_PARAMS 默认是空字符串，但显式传 nil 时同样表示「无」。
 Q.post '/' do |req, rsp|
   if req.query.nil? || req.query.empty?
-    ShareUpload.create_session(req, rsp)
+    Share::Api.create_session(req, rsp)
   else
-    ShareUpload.create_share(req, rsp)
+    Share::Api.create_share(req, rsp)
   end
 end
 
@@ -96,16 +95,16 @@ end
 #   token 未完成（done=0）→ 允许覆盖（半成品重传）
 #   token 不存在         → 直接创建
 Q.post %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  ShareUpload.create_share(req, rsp, req.named(:token))
+  Share::Api.create_share(req, rsp, req.named(:token))
 end
 
 # complete 排在 <token> 前面 —— 否则 PUT 不受影响，但 POST 会先命中短路径
 Q.post %r{^/(?<token>[a-f0-9]{16})/complete$} do |req, rsp|
-  ShareUpload.complete(req, rsp, req.named(:token))
+  Share::Api.complete(req, rsp, req.named(:token))
 end
 
 Q.put %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  ShareUpload.put_part(req, rsp, req.named(:token))
+  Share::Api.put_part(req, rsp, req.named(:token))
 end
 
 # ── 页面 ──────────────────────────────────────────────────────
@@ -130,7 +129,7 @@ end
 # GET /<token>/info —— 分享元信息
 # 下载页和预览页加载时用。放在短链兜底之前 —— 短链会匹配任意 16 位 hex 单段。
 Q.get %r{^/(?<token>[a-f0-9]{16})/info/?$} do |req, rsp|
-  ShareUpload.show_info(req, rsp, req.named(:token))
+  Share::Api.show_info(req, rsp, req.named(:token))
 end
 
 # GET /<token>/view —— 这个分享的预览页
@@ -144,13 +143,13 @@ end
 # PATCH /<token> —— 改配置（下载次数 / 有效期 / 密码 / 是否公开）
 # 原先是 POST /tool/share/edit/<token>，edit 脚本已删除。
 Q.patch %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  ShareUpload.update(req, rsp, req.named(:token))
+  Share::Api.update(req, rsp, req.named(:token))
 end
 
 # DELETE /<token> —— 取消分享 / 丢弃未完成
 # 原先是 DELETE /tool/share/delete/<token>，delete 脚本已删除。
 Q.delete %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  ShareUpload.destroy(req, rsp, req.named(:token))
+  Share::Api.destroy(req, rsp, req.named(:token))
 end
 
 
@@ -160,19 +159,19 @@ end
 #
 # /list 是字母，单段路径不会被短链的 16 位 hex 正则匹配到，排哪都行。
 Q.get %r{^/list$} do |req, rsp|
-  ShareUpload.list(req, rsp)
+  Share::Api.list(req, rsp)
 end
 
 # GET /<token>/list —— 单条详情（续传入口）
 # 挂在资源下面，跟 /<token>/info、/<token>/view 一致。
 Q.get %r{^/(?<token>[a-f0-9]{16})/list/?$} do |req, rsp|
-  ShareUpload.show(req, rsp, req.named(:token))
+  Share::Api.show(req, rsp, req.named(:token))
 end
 
 # GET /<token>/chunk —— 内联预览（inline，不扣下载次数）
-# 与 GET /<token>（attachment，扣次数）的区别见 ShareUpload.chunk 的注释。
+# 与 GET /<token>（attachment，扣次数）的区别见 Share::Api.chunk 的注释。
 Q.get %r{^/(?<token>[a-f0-9]{16})/chunk/?$} do |req, rsp|
-  ShareUpload.chunk(req, rsp, req.named(:token))
+  Share::Api.chunk(req, rsp, req.named(:token))
 end
 
 # GET /<token>/page —— 下载详情页（文件名 + 输密码 + 点下载）
@@ -185,5 +184,5 @@ end
 # ── GET /<token> → 下载文件本体 ──────────────────────────
 # 放最后：它匹配任何 16 位 hex 单段路径，必须给所有具体路由让路
 Q.get %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
-  ShareUpload.content(req, rsp, req.named(:token))
+  Share::Api.content(req, rsp, req.named(:token))
 end
