@@ -305,6 +305,31 @@ module ShareUpload
     json(rsp, 200, ok: true, data: s.to_finish_info(merged))
   end
 
+  # ---------- GET /list : 列表 ----------
+  #
+  #   ?c=<clientId>  只列这个浏览器上传过的
+  #   ?pub=1只列「已完成 + 公开」的（公开广场用）
+  #
+  # 过滤必须放服务端：列表要给任何人看，如果不按 pub 过滤，
+  # 私密分享的文件名/大小/类型就会随 JSON 发给每一个访问者
+  # （哪怕前端不显示），等于泄露私密元信息。
+  def list(req, rsp)
+    cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+    pub_only = req.param('pub').to_s == '1'
+    json(rsp, 200, ok: true, data: Share.list(cid: cid, pub_only: pub_only))
+  end
+
+  # ---------- GET /<token>/list : 单条详情（续传入口） ----------
+  #
+  # 未完成的分享也要能查 —— 续传时要靠它知道已收了哪几片。
+  def show(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+
+    cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+    s.ok(rsp, s.to_item(cid))
+  end
+
   # ---------- GET /<token>/chunk : 内联预览（inline，不扣次数） ----------
   #
   # 跟 GET /<token>（下载本体）的区别：

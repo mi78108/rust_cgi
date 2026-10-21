@@ -154,6 +154,21 @@ Q.delete %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
 end
 
 
+# GET /list —— 分享列表
+#   ?c=<clientId>  我的分享
+#   ?pub=1         公开广场
+#
+# /list 是字母，单段路径不会被短链的 16 位 hex 正则匹配到，排哪都行。
+Q.get %r{^/list$} do |req, rsp|
+  ShareUpload.list(req, rsp)
+end
+
+# GET /<token>/list —— 单条详情（续传入口）
+# 挂在资源下面，跟 /<token>/info、/<token>/view 一致。
+Q.get %r{^/(?<token>[a-f0-9]{16})/list/?$} do |req, rsp|
+  ShareUpload.show(req, rsp, req.named(:token))
+end
+
 # GET /<token>/chunk —— 内联预览（inline，不扣下载次数）
 # 与 GET /<token>（attachment，扣次数）的区别见 ShareUpload.chunk 的注释。
 Q.get %r{^/(?<token>[a-f0-9]{16})/chunk/?$} do |req, rsp|

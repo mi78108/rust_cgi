@@ -419,7 +419,7 @@ class Share
   def to_upload_info
     {
       token:  @token,
-      url:    "/tool/share/download/#{@token}",   # 文件本体，不是分享链接
+      url:    "/tool/share/#{@token}",         # 文件本体，不是分享链接（分享链接用 /page）
       name:   name,
       size:   size,
       type:   type,
@@ -507,7 +507,7 @@ class Share
   def to_finish_info(merged, already: false)
     {
       token:   @token,
-      url:     "/tool/share/download/#{@token}",   # 文件本体，不是分享链接
+      url:     "/tool/share/#{@token}",         # 文件本体，不是分享链接（分享链接用 /page）
       name:    name,
       size:    size,
       type:    type,
@@ -526,8 +526,10 @@ class Share
   def to_item(cid = nil)
     {
       token:   @token,
-      url:     "/tool/share/download?t=#{@token}",
-      dl:      "/tool/share/download/#{@token}",
+      # url  分享链接给人看（详情页，能输密码）
+      # dl   文件本体，给程序取（curl / wget）
+      url:     "/tool/share/#{@token}/page",
+      dl:      "/tool/share/#{@token}",
       name:    name,
       size:    size,
       type:    type,

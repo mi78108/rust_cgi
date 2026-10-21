@@ -1298,7 +1298,7 @@ $('get-tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') goGet()
 
 async function initResume(tok) {
   try {
-    const { json } = await jfetch(`${API.LIST}/${tok}`);
+    const { json } = await jfetch(`${API.ROOT}/${tok}/list`);
     if (!json || !json.ok || !json.data) throw new Error('未找到这个上传');
     resumeTarget = json.data;
     const got = (resumeTarget.got_parts || []).length;
