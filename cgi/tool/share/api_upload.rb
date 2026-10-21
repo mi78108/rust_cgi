@@ -140,6 +140,25 @@ module ShareUpload
     URI.decode_www_form(req.body.to_s).to_h
   end
 
+  # ---------- GET /<token>/info : 元信息 ----------
+  #
+  # 下载页 / 预览页加载时要先知道文件名、大小、还有没有次数。
+  # 不校验密码 —— 只回 has_pw 布尔值，不回明文，也不回 by 之类内部字段。
+  def show_info(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+    # 用 :mark —— 第一次发现失效只打标记（本次还能报「次数已用完」而不是
+    # 404），下次访问才物理删。误判一次不会立刻丢数据。
+    return Share.missing(rsp) if s.reap!(purge: :mark)
+
+    unless s.alive?
+      return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
+    end
+    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+
+    s.ok(rsp, s.to_info)
+  end
+
   # ---------- PUT /<token> : 传一片 ----------
   def put_part(req, rsp, token)
     return json(rsp, 400, ok: false, error: 'missing token') unless Share::TOKEN_RE.match?(token)

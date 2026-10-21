@@ -1,14 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# tool/share/download — 文件分享：元信息 + 下载
+# tool/share/download — 文件本体输出 + 下载详情页
 #
 #   GET  /tool/share/download?t=<token>       下载详情页（dist/download.html）
-#   GET  /tool/share/download/info/<token>   元信息（下载页用）
-#   GET  /tool/share/download/<token>?p=<password>  下载（计一次次数）
+#   GET  /tool/share/download/<token>?p=<pw>  下载文件本体（计一次次数）
 #   GET  /tool/share/download                 状态 JSON
 #
-# 上传在 tool/share/upload（POST multipart），不在这里。
-# 所有下载相关的接口都在本文件：info（元信息）+ f（实际下载）。
+# 元信息（info）已经迁到 index 的 GET /<token>/info —— 那是资源自身的
+# 属性，不该挂在「下载」这个路径下。上传端点也在 index，这里只剩输出文件。
 #
 # 为什么密码走 URL query 而不是 cookie/session：
 #   分享链接常常直接贴给别人（IM / 邮件），带密码的 URL 本身即凭证，
@@ -46,26 +45,12 @@ ensure_share_root!
 
 DOWNLOAD_PAGE = 'dist/download.html'
 
-# ---------- GET: 元信息（下载页用） ----------
-
-Q.get %r{^/info/(?<token>[a-f0-9]{16})$} do |req, rsp|
-  s = Share.find(req.named(:token))
-  return Share.missing(rsp) if s.nil?
-  # 下载端用 :mark —— 第一次发现失效只打标记（本次还能报「次数已用完」而不是
-  # 404），下次访问才物理删。误判一次不会立刻丢数据。
-  return Share.missing(rsp) if s.reap!(purge: :mark)
-
-  unless s.alive?
-    return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
-  end
-  return s.fail(rsp, 404, 'file gone') unless s.data_exists?
-
-  s.ok(rsp, s.to_info)
-end
-
 # ---------- GET: 下载 ----------
 #
 #   GET /tool/share/download/<token>?p=<password>
+#
+# 元信息端点已迁到 index 的 GET /<token>/info（ShareUpload.show_info），
+# 这里只剩「吐文件本体」这一件事。
 #
 # 原来这层是 /f/<token>，中间的 f 是为了跟 /info/<token> 区分。现在
 # 「info」是字母、「<token>」是 16 位 hex，两者正则上不可能撞，直接省掉这层。

@@ -123,6 +123,12 @@ Q.get '/' do |req, rsp|
   rsp.type_html.body(PAGE).finish
 end
 
+# GET /<token>/info —— 分享元信息（替代旧的 /tool/share/download/info/<token>）
+# 下载页和预览页加载时用。放在短链兜底之前 —— 短链会匹配任意 16 位 hex 单段。
+Q.get %r{^/(?<token>[a-f0-9]{16})/info/?$} do |req, rsp|
+  ShareUpload.show_info(req, rsp, req.named(:token))
+end
+
 # GET /view —— 独立预览页（?t=<token>）
 # 不支持的类型（exe/apk/zip…）会在页面上提示改用下载。
 Q.get %r{^/view/?$} do |_req, rsp|

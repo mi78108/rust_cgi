@@ -214,7 +214,9 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
 
 <script>
 'use strict';
-const API_INFO = '/tool/share/download';
+// 文件本体走 /download（元信息已迁到 /<token>/info）
+const API_CONTENT = '/tool/share/download';
+const API_SHARE = '/tool/share';
 const TOKEN = new URLSearchParams(location.search).get('t');
 
 const $ = (id) => document.getElementById(id);
@@ -270,7 +272,7 @@ async function jfetch(url, opts) {
 // 注意用 documentElement.textContent 而不是 body.textContent：
 // JSON 响应在 Chrome 里不生成 <body>，body 是 null。
 function startDownload(tok, pw) {
-  const url = `${API_INFO}/${tok}` + (pw ? `?p=${encodeURIComponent(pw)}` : '');
+  const url = `${API_CONTENT}/${tok}` + (pw ? `?p=${encodeURIComponent(pw)}` : '');
   const errBox = $('err');
   errBox.textContent = '';
 
@@ -314,7 +316,7 @@ async function init(t) {
 
   let status, json;
   try {
-    ({ status, json } = await jfetch(`${API_INFO}/info/${t}`));
+    ({ status, json } = await jfetch(`${API_SHARE}/${t}/info`));
   } catch (e) {
     return fail('加载失败: ' + e.message);
   }
