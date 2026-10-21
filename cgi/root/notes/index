@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# root/notes/spa — SPA 入口 (GET /)
+# root/notes/index — SPA 入口 (GET /)
 
 require_relative File.expand_path('../../_base_', __dir__)
 
