@@ -826,9 +826,9 @@
     notes: { list: '/root/notes/list/all', mountId: 'notes-mount', limit: 6, asset: '/root/notes/assets/notes.js' },
     posts: { list: '/root/posts/list',      mountId: 'posts-mount', limit: 6, asset: '/root/posts/assets/posts.js' },
   };
-  // markdown-it 本地 vendor (走 posts/assets 静态路由) — jsdelivr CDN 在部分网络环境不可达,
+  // markdown-it 本地 vendor (走 /root/assets 共享静态路由) — jsdelivr CDN 在部分网络环境不可达,
   // 加载失败会让 notes.js / posts.js 的 renderMd() 静默降级成纯文本。
-  const MARKDOWN_IT_SRC = '/root/posts/assets/markdown-it-14.1.0.min.js';
+  const MARKDOWN_IT_SRC = '/root/assets/markdown-it-14.1.0.min.js';
   const fmtDateW = iso => {
     try{
       const d = new Date(iso);

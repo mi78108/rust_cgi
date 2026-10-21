@@ -1,0 +1,28 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/assets — /root 下各子模块共享的静态资源 (markdown-it 等 vendor 库)
+#
+# posts/notes 各自的 assets 路由只服务自己的 static/;
+# 跨模块共用的 vendor 库放这里, 避免 notes 去引 /root/posts/assets/。
+
+require_relative File.expand_path('../_base_', __dir__)
+
+STATIC_DIR = File.expand_path('static', __dir__)
+
+Q.get(%r{^/(?<asset>.+)$}) do |req, rsp|
+  file = "#{STATIC_DIR}/#{req.named(:asset)}"
+  if File.file?(file)
+    mime = {
+      '.js'   => 'text/javascript',
+      '.css'  => 'text/css',
+      '.html' => 'text/html',
+      '.svg'  => 'image/svg+xml',
+      '.png'  => 'image/png',
+      '.ico'  => 'image/x-icon',
+      '.json' => 'application/json',
+    }[File.extname(file)] || 'text/plain'
+    rsp.type(mime).body(File.read(file)).finish
+  else
+    rsp.fail_404.type_html.body("Not found: #{file}").finish
+  end
+end
