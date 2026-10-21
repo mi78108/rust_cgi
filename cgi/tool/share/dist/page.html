@@ -127,7 +127,11 @@ button{font:inherit;cursor:pointer}
   border:1px solid var(--rule);padding:6px 8px;font-size:10px;line-height:1.55;
   display:flex;flex-direction:column-reverse;gap:1px}
 .pchunk:empty{display:none}
-.pchunk div{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* flex item 默认 flex-shrink:1 —— 日志条数超过 max-height:150px 时，
+   浏览器会把每条压扁去塞进 150px 而不是产生滚动条，压到 0 高就
+   「框还在但一片空白，新日志也不显示」。flex-shrink:0 让条目保持
+   自然高度，溢出的交给 overflow-y:auto 滚动。 */
+.pchunk div{flex:0 0 auto;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pchunk .l-ok{color:var(--green)}
 .pchunk .l-fail{color:var(--red)}
 .pchunk .l-active{color:var(--lime)}
@@ -156,7 +160,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
 .nowrap{white-space:nowrap}
 .btn.ghost.on{border-color:var(--red);color:var(--red);background:rgba(255,94,94,.08)}
 
-/* ── 预览（逻辑在 /tool/share/preview.js，与 public.html 共用） ── */
+/* ── 预览 ── */
 .pv{margin:0 10px 8px;padding:10px;background:var(--bg);border:1px solid var(--rule)}
 .pv img{max-width:100%;max-height:420px;display:block;margin:0 auto;
   background:#000;object-fit:contain}
@@ -182,9 +186,23 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
   <header>
     <h1>share</h1>
     <div class="spacer"></div>
-    <a href="/tool/share/page" style="color:var(--muted);text-decoration:none;font-size:11px">public</a>
     <a href="/tool/share" style="color:var(--muted);text-decoration:none;font-size:11px">home</a>
   </header>
+
+  <!-- ══════════ 提取分享文件 ══════════ -->
+  <section id="v-get">
+    <div class="card">
+      <h2>提取分享文件</h2>
+      <p class="sub">输入分享 token 或完整分享链接，公开文件直接下载，私密文件会要求密码</p>
+      <div class="field">
+        <label for="get-tok">token / 链接</label>
+        <input type="text" id="get-tok" placeholder="a1b2c3d4e5f60718 或 https://.../tool/share/a1b2c3d4e5f60718" autocomplete="off">
+      </div>
+      <button class="btn" id="btn-get">提取</button>
+      <div class="err" id="get-err"></div>
+      <div class="note">也可以直接访问 <code>/tool/share/download?t=&lt;token&gt;</code></div>
+    </div>
+  </section>
 
   <!-- ══════════ 上传 ══════════ -->
   <section id="v-upload">
@@ -277,15 +295,19 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
         <div class="pchunk" id="pchunk"></div>
       </div>
     </div>
-
     <!-- 我的分享（含未完成的续传） -->
     <div class="card">
       <h2>我的分享 <span class="sub" id="list-count" style="float:right"></span></h2>
       <p class="sub">本浏览器上传过的（未完成的可以续传）</p>
       <div id="my-list"><div class="empty-main">加载中…</div></div>
     </div>
+    <!-- 公开分享（所有人的公开内容，数据源 list?pub=1） -->
+    <div class="card">
+      <h2>公开分享 <span class="sub" id="pub-count" style="float:right"></span></h2>
+      <p class="sub">所有公开的分享都可以直接下载</p>
+      <div id="pub-list"><div class="empty-main">加载中…</div></div>
+    </div>
   </section>
-
   <!-- ══════════ 修改分享配置 ══════════ -->
   <div id="v-edit" class="dlg" hidden>
     <div class="dlg-bd" role="dialog" aria-modal="true" aria-labelledby="edit-title">
@@ -329,7 +351,6 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
       </div>
     </div>
   </div>
-
 <!-- ══════════ 成功（弹窗，不切视图） ══════════ -->
   <div id="v-done" class="dlg" hidden>
     <div class="dlg-bd" role="dialog" aria-modal="true" aria-labelledby="done-title">
@@ -356,44 +377,135 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
     </div>
   </div>
 
-  <!-- ══════════ 下载 (?t=<token>) ══════════ -->
-  <section id="v-dl" hidden>
-    <div class="card">
-      <div class="filerow">
-        <div class="fico" id="dl-ico">📄</div>
-        <div class="meta">
-          <div class="fname" id="dl-name">…</div>
-          <div class="fsize" id="dl-size"></div>
-        </div>
-        <span class="tag" id="dl-tag" hidden></span>
-      </div>
-
-      <div id="dl-pwbox" hidden>
-        <div class="field">
-          <label for="dl-pw">访问密码</label>
-          <input type="password" id="dl-pw" placeholder="请输入分享密码" autocomplete="off">
-        </div>
-      </div>
-
-      <button class="btn" id="btn-dl">下载文件</button>
-      <div class="err" id="dl-err"></div>
-      <div class="note" id="dl-note"></div>
-    </div>
-    <div style="text-align:center">
-      <a href="/tool/share" style="color:var(--lime);text-decoration:none;font-size:11px">
-        ← 我要上传文件
-      </a>
-    </div>
-  </section>
-
   <footer>数据存 <code>$SPIDER_DATA</code>（默认 <code>/tmp/share</code>）</footer>
 </div>
 
-<script src="/tool/share/preview.js"></script>
+<script>
+/* 分享预览 —— 逻辑已内联在本页。
+ *
+ * 用法：
+ *   previewKind(item)                 // 'image' | 'audio' | 'video' | 'text' | null
+ *   togglePreview(item, el)           // 展开/收起
+ *   closeAllPreviews()
+ *
+ * 内嵌预览只在本页用（「我的分享」列表）——公开分享改跳独立预览页，
+ * 所以这份副本无需跟别的页面同步。
+ *
+ * 预览走 /tool/share/preview/<token> 而不是 /download/f：
+ *   前者 inline 渲染且不扣下载次数，服务端只放行 pub=1；
+ *   后者 attachment + 验密码 + 每次扣次数。
+ */
+
+const TEXT_EXT = /\.(txt|log|md|markdown|json|jsonl|xml|ya?ml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|c|h|cpp|hpp|java|kt|kts|swift|scala|sh|bash|zsh|fish|sql|ini|cfg|conf|toml|env|gitignore|dockerfile|makefile|csv|tsv|properties|gradle|tf|tfvars|vue|svelte|less|scss|sass|patch|diff|log\.\d+|txt\.log)$/i;
+const IMG_EXT  = /\.(png|jpe?g|gif|webp|bmp|avif|svg|ico)$/i;
+
+const PREVIEW_MAX = 512 * 1024;      // 文本预览上限 512KB —— 文本要整个读进内存再贴到 <pre>，太大没意义
+const IMAGE_MAX   = 16 * 1024 * 1024; // 图片内嵌 <img>，别太大
+
+// 注：原来这里有个 PREVIEW_BOX 选择器 + previewCfg({box})，供多页面共用
+// 内嵌预览。公开分享改跳独立预览页后只剩本页用，而 closeAllPreviews()
+// 走的是全局 document.querySelectorAll，根本不读这个变量 —— 已删除。
+
+// 能不能预览？能的话是哪种。
+// 私密（pub=0）不给：preview 端点只服务 pub=1，而且私密要先过密码才有意义。
+function previewKind(it) {
+  if (it.pub === 0) return null;
+  const t = (it.type || '').toLowerCase();
+  const n = it.name || '';
+  if (/^image\//.test(t) || IMG_EXT.test(n)) return it.size <= IMAGE_MAX ? 'image' : null;
+  // 音视频不设上限：preview 端点支持 Range（206），浏览器只会拉它需要的片段，
+  // 几百 MB 的视频照样能预览/拖动 —— 早期那版 64MB 上限纯属多余，
+  // 反而把最大的视频挡在门外（752MB 的 mp4 就没有预览按钮）。
+  if (/^audio\//.test(t)) return 'audio';
+  if (/^video\//.test(t)) return 'video';
+  const texty = /^text\//.test(t) || /json|xml|javascript|yaml|x-sh/.test(t) || TEXT_EXT.test(n);
+  if (texty) return it.size <= PREVIEW_MAX ? 'text' : null;
+  return null;
+}
+
+function pvUrl(it) { return `/tool/share/preview/${it.token}`; }
+
+function errNode(msg) {
+  const d = document.createElement('div');
+  d.className = 'pv-err';
+  d.textContent = msg;
+  return d;
+}
+
+// 收起所有预览（停止播放、释放资源），同一时刻只展开一个
+function closeAllPreviews() {
+  document.querySelectorAll('.pv').forEach((pv) => {
+    const v = pv.querySelector('video, audio');
+    if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {} }
+    if (pv.dataset.objurl) URL.revokeObjectURL(pv.dataset.objurl);
+    pv.remove();
+  });
+  document.querySelectorAll('.item.open').forEach((it) => it.classList.remove('open'));
+}
+
+// 展开/收起某个分享的预览。el 是它所在的 .item 容器。
+function togglePreview(it, el) {
+  if (el.querySelector('.pv')) { closeAllPreviews(); return; }
+  closeAllPreviews();
+  el.classList.add('open');
+
+  const kind = previewKind(it);
+  const pv = document.createElement('div');
+  pv.className = 'pv';
+  pv.innerHTML =
+    `<div class="pv-head"><span>preview</span><span class="spacer"></span>` +
+    `<button class="pv-close" type="button">close</button></div>`;
+  pv.querySelector('.pv-close').addEventListener('click', closeAllPreviews);
+  el.querySelector('.meta').insertAdjacentElement('afterend', pv);
+
+  const url = pvUrl(it);
+
+  if (kind === 'image') {
+    const img = document.createElement('img');
+    img.src = url; img.alt = it.name || 'preview'; img.loading = 'lazy';
+    img.onerror = () => { img.replaceWith(errNode('图片加载失败')); };
+    pv.appendChild(img);
+    return;
+  }
+  if (kind === 'audio') {
+    const a = document.createElement('audio');
+    a.controls = true; a.preload = 'metadata'; a.src = url;
+    a.addEventListener('error', () => pv.appendChild(errNode('音频加载失败')));
+    pv.appendChild(a);
+    return;
+  }
+  if (kind === 'video') {
+    const v = document.createElement('video');
+    v.controls = true; v.preload = 'metadata'; v.playsInline = true; v.src = url;
+    v.addEventListener('error', () => pv.appendChild(errNode('视频加载失败（可能编码不支持）')));
+    pv.appendChild(v);
+    return;
+  }
+
+  // 纯文本：取回来贴到 <pre>
+  const note = errNode('加载中…');
+  pv.appendChild(note);
+  fetch(url)
+    .then(async (res) => {
+      if (!res.ok) {
+        let msg = 'HTTP ' + res.status;
+        try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        throw new Error(msg);
+      }
+      return res.text();
+    })
+    .then((txt) => {
+      pv.removeChild(note);
+      const pre = document.createElement('pre');
+      pre.textContent = txt;   // textContent，不是 innerHTML —— 防止文件内容当 HTML 执行
+      pv.appendChild(pre);
+    })
+    .catch((e) => { note.textContent = '预览失败: ' + e.message; });
+}
+</script>
 <script>
 'use strict';
 
-previewCfg({ box: '#my-list' });   // 本页列表容器
 
 const API = {
   CREATE: '/tool/share/create',
@@ -479,14 +591,13 @@ function myId() {
 
 /* ---------- 视图切换 ---------- */
 
-let TOKEN = new URLSearchParams(location.search).get('t');
+let TOKEN  = new URLSearchParams(location.search).get('t');
 let RESUME = new URLSearchParams(location.search).get('resume');
 
 // 'done' 不是视图切换了 —— 成功弹窗浮在上层，上传页保持原样。
 // 注意：切走时走 closeDone()，否则 body 的滚动锁会漏掉。
 function show(v) {
   $('v-upload').hidden = (v !== 'upload');
-  $('v-dl').hidden     = (v !== 'dl');
   if (v !== 'done') closeDone();
 }
 
@@ -595,6 +706,7 @@ $('ed-save').addEventListener('click', async () => {
     if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
     closeEdit();
     loadList();
+    loadPublic();
   } catch (e) {
     $('ed-note').innerHTML = `<span style="color:var(--red)">${escapeHtml(e.message)}</span>`;
   } finally {
@@ -933,7 +1045,8 @@ $('btn-upload').addEventListener('click', async () => {
     for (let i = 0; i < chunkState.length; i++) setChunkState(i, 'ok');
     resumeTarget = null;
 
-    const full = `${location.origin}/tool/share/download/info/${d.token}`;
+    // 分享链接给详情页而不是文件本体 —— 私密分享要能在那儿输密码
+    const full = `${location.origin}/tool/share/download?t=${d.token}`;
     $('done-url').textContent = full;
     $('done-copy').value = full;
     $('done-name').textContent = d.name;
@@ -949,6 +1062,7 @@ $('btn-upload').addEventListener('click', async () => {
       ' 密码错不扣次数。';
     openDone();
     loadList();
+    loadPublic();
   } catch (e) {
     $('up-err').textContent = '上传失败: ' + e.message;
     $('btn-upload').textContent = '上传并生成分享链接';
@@ -1019,7 +1133,7 @@ async function loadList() {
         const kind = previewKind(it);
         acts = `<button data-act="copy" data-url="${it.url}">复制链接</button>` +
                (kind ? `<button data-act="pv" data-tok="${it.token}">预览</button>` : '') +
-               `<a class="act" href="${location.origin}/tool/share/download/info/${it.token}">打开</a>` +
+               `<a class="act" href="${location.origin}/tool/share/download?t=${it.token}">打开</a>` +
                (it.editable
                  ? `<button data-act="edit" data-tok="${it.token}">修改</button>` +
                    `<button class="danger" data-act="cancel" data-tok="${it.token}">取消分享</button>`
@@ -1057,6 +1171,7 @@ async function loadList() {
             const { json: j } = await jfetch(`${API.DELETE}/${b.dataset.tok}`, { method: 'DELETE' });
             if (!j || !j.ok) throw new Error((j && j.error) || 'delete failed');
             loadList();
+            loadPublic();
           } catch (e) { alert('丢弃失败: ' + e.message); }
           return;
         }
@@ -1068,6 +1183,7 @@ async function loadList() {
               `${API.DELETE}/${b.dataset.tok}?c=${encodeURIComponent(myId())}`, { method: 'DELETE' });
             if (!j || !j.ok) throw new Error((j && j.error) || 'cancel failed');
             loadList();
+            loadPublic();
           } catch (e) { alert('取消分享失败: ' + e.message); }
           return;
         }
@@ -1095,60 +1211,84 @@ async function loadList() {
   }
 }
 
-/* ---------- 下载视图 ---------- */
+/* ---------- 公开分享 ----------
+ * 所有人的公开分享（服务端 ?pub=1 只返回 done=1 且 pub=1 的）。
+ * 「预览」跳独立预览页 /tool/share/view，「详情」跳 /tool/share/download —— 都不内嵌展开。
+ */
 
-async function initDownload(t) {
-  show('dl');
+async function loadPublic() {
+  const box = $('pub-list');
   try {
-    const { status: ds, json } = await jfetch(`${API.INFO}/info/${t}`);
-    if (!json || !json.ok) {
-      $('dl-err').textContent = (json && json.error) || ('HTTP ' + ds);
-      $('btn-dl').disabled = true;
+    const { status, json } = await jfetch(`${API.LIST}?pub=1`);
+    if (!json || !json.ok) throw new Error((json && json.error) || ('HTTP ' + status));
+    const items = json.data || [];
+    $('pub-count').textContent = items.length ? `${items.length} 项` : '';
+
+    if (!items.length) {
+      box.innerHTML = '<div class="empty-main">还没有公开的分享</div>';
       return;
     }
-    const d = json.data;
-    $('dl-name').textContent = d.name;
-    $('dl-size').textContent = fmtSize(d.size);
-    $('dl-ico').textContent = ico(d.type, d.name);
 
-    // 私密（pub=0）必须有密码 —— 后端强制，这里把密码框亮出来
-    const isPrivate = d.pub === 0;
-    if (d.has_pw || isPrivate) { $('dl-pwbox').hidden = false; $('dl-pw').focus(); }
+    box.innerHTML = '';
+    for (const it of items) {
+      const quota = it.max > 0 ? `剩 ${it.left}/${it.max} 次` : '不限次数';
+      const bits = [`<span>${fmtSize(it.size)}</span>`, `<span>${quota}</span>`];
+      if (it.exp_at) bits.push(`<span>${escapeHtml(fmtExp(it.exp_at))}</span>`);
+      if (it.has_pw) bits.push('<span class="tag gray">密码</span>');
+      bits.push(`<span>${ago(it.at)}</span>`);
 
-    const bits = [];
-    if (isPrivate) bits.push('私密 · 需密码');
-    if (d.max > 0) bits.push(`剩 ${d.left}/${d.max} 次`);
-    if (d.exp_at) {
-      const h = (d.exp_at - Date.now() / 1000) / 3600;
-      if (h <= 0) bits.push('已过期');
-      else if (h <= 24) bits.push(fmtExp(d.exp_at));
+      // 所有项都给「详情」；能内联预览的类型额外给「预览」。
+      // 两个按钮都跳独立页 —— 预览 /tool/share/view，详情 /tool/share/download。
+      const kind = previewKind(it);
+      const pvBtn = kind ? `<button data-act="pv" data-tok="${it.token}">预览</button>` : '';
+
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML =
+        `<div class="fico">${ico(it.type, it.name)}</div>` +
+        `<div class="meta">` +
+          `<div class="fname">${escapeHtml(it.name)}</div>` +
+          `<div class="fmeta">${bits.join('')}</div>` +
+        `</div>` +
+        `<div class="acts">` + pvBtn +
+          `<button data-act="dl" data-tok="${it.token}">详情</button>` +
+        `</div>`;
+      box.appendChild(el);
+
+      el.querySelector('[data-act="dl"]').addEventListener('click', () => {
+        location.href = `/tool/share/download?t=${it.token}`;
+      });
+      const pv = el.querySelector('[data-act="pv"]');
+      if (pv) pv.addEventListener('click', () => {
+        location.href = `/tool/share/view?t=${it.token}`;
+      });
     }
-    if (bits.length) {
-      const tag = $('dl-tag');
-      tag.hidden = false;
-      tag.textContent = bits.join(' · ');
-      tag.className = 'tag' + ((d.max > 0 && d.left <= 2) ||
-        (d.exp_at && (d.exp_at - Date.now()/1000) <= 86400) ? ' red' : '');
-    }
-    $('dl-note').innerHTML =
-      (isPrivate ? '这是一个<b>私密</b>分享，需要正确密码才能下载。' : '') +
-      (d.max > 0 ? `剩余 <b>${d.left}</b> / ${d.max} 次下载机会。` : '不限下载次数。') +
-      (d.exp_at ? `<br>${escapeHtml(fmtExp(d.exp_at))}。` : '');
   } catch (e) {
-    $('dl-err').textContent = '加载失败: ' + e.message;
-    $('btn-dl').disabled = true;
+    box.innerHTML = `<div class="err" style="margin:12px 0">加载失败: ${escapeHtml(e.message)}</div>`;
   }
 }
 
-$('btn-dl').addEventListener('click', () => {
-  const q = new URLSearchParams();
-  if ($('dl-pw').value) q.set('p', $('dl-pw').value);
-  const url = `${API.INFO}/f/${TOKEN}` + (q.toString() ? '?' + q : '');
-  const a = document.createElement('a');
-  a.href = url; a.rel = 'noopener';
-  document.body.appendChild(a); a.click(); a.remove();
-});
-$('dl-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-dl').click(); });
+/* ---------- 提取分享文件 ---------- */
+
+// 从用户输入里抠出 16 位 hex token。
+// 容忍三种形态：纯 token、完整分享链接、/tool/share/download?t=xxx 链接。
+function parseToken(s) {
+  const m = String(s || '').match(/[a-f0-9]{16}/i);
+  return m ? m[0].toLowerCase() : null;
+}
+
+function goGet() {
+  const t = parseToken($('get-tok').value);
+  if (!t) {
+    $('get-err').textContent = '没找到有效的分享 token（应为 16 位十六进制字符）';
+    $('get-tok').focus();
+    return;
+  }
+  location.href = `/tool/share/download?t=${t}`;
+}
+
+$('btn-get').addEventListener('click', goGet);
+$('get-tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') goGet(); });
 
 /* ---------- boot ---------- */
 
@@ -1170,11 +1310,14 @@ async function initResume(tok) {
   }
 }
 
+// 详情页已独立成 /tool/share/download —— ?t=<token> 直接重定向过去，
+// 本页只负责上传 + 列表 + 提取框。
 if (TOKEN) {
-  initDownload(TOKEN);
+  location.replace(`/tool/share/download?t=${TOKEN}`);
 } else {
   show('upload');
   loadList();
+  loadPublic();
   if (RESUME) initResume(RESUME);
 }
 </script>

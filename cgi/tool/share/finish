@@ -12,29 +12,18 @@
 #   4. 删掉 part/ 目录（省空间）
 #
 # 为什么先写临时文件再 rename：
-#   下载端GET /f/<token> 直接读 data 文件。如果边合并边被下载，
+#   下载端 GET /tool/share/download/<token> 直接读 data 文件。如果边合并边被下载，
 #   对方拿到的是残缺内容。rename 在同一文件系统内是原子的，
 #   下载端要么看到旧状态（没有 data），要么看到完整的。
 
 require_relative '../../_base_'
+require_relative '_lib_'
+
+ensure_share_root!
 require 'fileutils'
 
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
 
-FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
 
-def dir_of(token)   = File.join(SHARE_ROOT, token)
-def meta_path(token) = File.join(dir_of(token), 'meta.json')
-
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
-
-def got_parts(token)
-  pdir = File.join(dir_of(token), 'part')
-  return [] unless File.directory?(pdir)
-  Dir.children(pdir).select { |f| f =~ /\A\d+\z/ }.map(&:to_i).sort
-end
 
 Q.post '/' do |req, rsp|
   token = req.param('token').to_s
@@ -49,7 +38,9 @@ Q.post '/' do |req, rsp|
   # 幂等：已完成就直接返回成功（客户端重试 finish 不会报错）
   if m['done'].to_i != 0
     return json(rsp, 200, ok: true, data: {
-      token: token, url: "/tool/share/download/f/#{token}",
+      # url 是文件本体（直接下），不是给人分享的链接。分享链接用
+      # /tool/share/download?t=<token>（详情页，能输密码）—— 见 list 的 url 字段。
+      token: token, url: "/tool/share/download/#{token}",
       name: m['name'], size: m['size'], type: m['type'],
       max: m['max'], has_pw: !m['pw'].to_s.empty?, exp_at: m['exp_at'].to_i,
       merged: 0, already: true
@@ -94,7 +85,7 @@ Q.post '/' do |req, rsp|
 
   json(rsp, 200, ok: true, data: {
     token: token,
-    url:   "/tool/share/download/f/#{token}",
+    url:   "/tool/share/download/#{token}",
     name:  m['name'],
     size:  m['size'],
     type:  m['type'],

@@ -4,6 +4,7 @@
 #
 #   GET /tool/share/list?c=<clientId>   只列这个 clientId 上传的（'by' 字段匹配）
 #   GET /tool/share/list                列全部分享（按上传时间倒序）
+#   GET /tool/share/list?pub=1          只列「公开且已完成」的（公开广场用）
 #   GET /tool/share/list/<token>        单个分享详情（续传入口用）
 #
 # → 200 {ok:true, data:[{token, url, dl, name, size, type, max, left, pub, editable,
@@ -23,15 +24,11 @@
 # 目录物理删掉（比在 s 的下载路径上等下一次访问更早）。
 
 require_relative '../../_base_'
+require_relative '_lib_'
+
+ensure_share_root!
 require 'fileutils'
 
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
-
-FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
-
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
 
 def dead_reason(m)
   return 'quota' if m['max'].to_i > 0 && m['left'].to_i <= 0
@@ -41,14 +38,6 @@ def dead_reason(m)
 end
 
 # 扫已收到的分片文件 part/<n> → [0, 2, 5, ...]（升序）
-def scan_parts(token)
-  pdir = File.join(SHARE_ROOT, token, 'part')
-  return [] unless File.directory?(pdir)
-  Dir.children(pdir)
-     .select { |f| f =~ /\A\d+\z/ }
-     .map(&:to_i)
-     .sort
-end
 
 # 构造一条分享记录（list 和单条查询共用）
 # editable：调用方带了 c 且跟 by 一致 → 这个分享归他管，前端可以显示
@@ -58,8 +47,10 @@ def build_item(mp, m, cid = nil)
   done = m['done'].to_i
   {
     token:   token,
-    url:     "/tool/share?t=#{token}",
-    dl:      "/tool/share/download/f/#{token}",
+    # 分享链接指向下载详情页，不是文件本体 —— 私密分享（pub=0 或设了密码）
+    # 落到详情页才能输密码；直接给 download/<token> 会让对方拿到文件却没机会输。
+    url:     "/tool/share/download?t=#{token}",
+    dl:      "/tool/share/download/#{token}",
     name:    m['name'],
     size:    m['size'].to_i,
     type:    m['type'].to_s,
@@ -73,7 +64,7 @@ def build_item(mp, m, cid = nil)
     editable: (!cid.to_s.empty? && m['by'].to_s == cid),
     chunk:   m['chunk'].to_i,
     total_parts: m['total_parts'].to_i,
-    got_parts:  (done == 0 ? scan_parts(token) : [])
+    got_parts:  (done == 0 ? got_parts(token) : [])
   }
 end
 
@@ -95,6 +86,9 @@ end
 
 Q.get '/' do |req, rsp|
   cid = req.param('c').to_s.gsub(/[^A-Za-z0-9_-]/, '')[0, 40]
+  # pub=1：公开广场。只列「已完成 + 公开」的 —— 未完成的还没内容，
+  # 私密的不该出现在公开列表里。
+  pub_only = req.param('pub').to_s == '1'
 
   items = []
   Dir.glob(File.join(SHARE_ROOT, '*', 'meta.json')).each do |mp|
@@ -111,8 +105,13 @@ Q.get '/' do |req, rsp|
       next
     end
 
-    # 传了 c 就只返回该 client 的（清理照做，不受 c 影响）
-    next if !cid.empty? && m['by'].to_s != cid
+    if pub_only
+      next unless m['done'].to_i != 0
+      next unless m.fetch('pub', 1).to_i != 0
+    else
+      # 传了 c 就只返回该 client 的（清理照做，不受 c 影响）
+      next if !cid.empty? && m['by'].to_s != cid
+    end
 
     items << build_item(mp, m, cid)
   end

@@ -11,5 +11,10 @@
     </content>
     <orderEntry type="jdk" jdkName="ruby-3.4.10-p104" jdkType="RUBY_SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" scope="PROVIDED" name="ffi (v1.17.4, ruby-3.4.10-p104) [gem]" level="application" />
+    <orderEntry type="library" scope="PROVIDED" name="listen (v3.10.1, ruby-3.4.10-p104) [gem]" level="application" />
+    <orderEntry type="library" scope="PROVIDED" name="logger (v1.6.4, ruby-3.4.10-p104) [gem]" level="application" />
+    <orderEntry type="library" scope="PROVIDED" name="rb-fsevent (v0.11.2, ruby-3.4.10-p104) [gem]" level="application" />
+    <orderEntry type="library" scope="PROVIDED" name="rb-inotify (v0.11.1, ruby-3.4.10-p104) [gem]" level="application" />
   </component>
 </module>

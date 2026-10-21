@@ -2,9 +2,10 @@
 # frozen_string_literal: true
 # tool/share/download — 文件分享：元信息 + 下载
 #
-#   GET  /tool/share/download/info/<token>            元信息（下载页用）
-#   GET  /tool/share/download/f/<token>?p=<password>  下载（计一次次数）
-#   GET  /tool/share/download                         状态
+#   GET  /tool/share/download?t=<token>       下载详情页（dist/download.html）
+#   GET  /tool/share/download/info/<token>   元信息（下载页用）
+#   GET  /tool/share/download/<token>?p=<password>  下载（计一次次数）
+#   GET  /tool/share/download                 状态 JSON
 #
 # 上传在 tool/share/upload（POST multipart），不在这里。
 # 所有下载相关的接口都在本文件：info（元信息）+ f（实际下载）。
@@ -39,32 +40,17 @@
 #   真要并发可以给 meta.json 加 flock）。
 
 require_relative '../../_base_'
+require_relative '_lib_'
+
+ensure_share_root!
 require 'fileutils'
 
 # 全局数据目录，可用 SPIDER_DATA 环境变量覆盖
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
-
-FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
-
 # ---------- helpers ----------
 
-def dir_of(token)   = File.join(SHARE_ROOT, token)
-def meta_path(token) = File.join(dir_of(token), 'meta.json')
-def data_path(token) = File.join(dir_of(token), 'data')
 
-def load_meta(token)
-  p = meta_path(token)
-  return nil unless File.file?(p)
-  JSON.parse(File.read(p)) rescue nil
-end
 
-def save_meta(token, m)
-  File.write(meta_path(token), m.to_json)
-end
 
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
 
 # Content-Disposition 里用的文件名：跟 create/upload 同一套规则（Unicode 安全），
 # 另外把 " 和 CR/LF 去掉 —— 这两个进了 header 会破坏响应头结构。
@@ -132,8 +118,15 @@ Q.get %r{^/info/(?<token>[a-f0-9]{16})$} do |req, rsp|
 end
 
 # ---------- GET: 下载 ----------
+#
+#   GET /tool/share/download/<token>?p=<password>
+#
+# 原来这层是 /f/<token>，中间的 f 是为了跟 /info/<token> 区分。现在
+# 「info」是字母、「<token>」是 16 位 hex，两者正则上不可能撞，直接省掉这层。
+# 同理 /info/<token> 也可以砍，但 info 这个词有语义（"这是元信息不是文件"），
+# 留着当自解释的路径。
 
-Q.get %r{^/f/(?<token>[a-f0-9]{16})$} do |req, rsp|
+Q.get %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
   token = req.named(:token)
   m = load_meta(token)
   return json(rsp, 404, ok: false, error: 'not found') if m.nil?
@@ -188,9 +181,26 @@ Q.get %r{^/f/(?<token>[a-f0-9]{16})$} do |req, rsp|
   rsp.type(mime).body(path).finish
 end
 
-# ---------- GET / : 状态 ----------
+# ---------- GET / : 详情页（?t=<token>）或状态 ----------
+#
+# 这个目录名 tool/share/download 跟 URL 前缀同名，spider 的路径解析会把
+# /tool/share/download/* 全派发到这里（index 拦不到）。所以详情页的 HTML
+# 渲染逻辑放在本脚本，不在 index。
+#
+#   GET /tool/share/download?t=<token>   → dist/download.html（下载详情页）
+#   GET /tool/share/download             → 状态 JSON（调试用）
 
-Q.get '/' do |_req, rsp|
+DOWNLOAD_PAGE = 'dist/download.html'
+
+Q.get '/' do |req, rsp|
+  t = req.param('t').to_s
+  if !t.empty?
+    unless File.file?(DOWNLOAD_PAGE)
+      return rsp.fail_404.type_text.body("#{DOWNLOAD_PAGE} not found").finish
+    end
+    return rsp.type_html.body(DOWNLOAD_PAGE).finish
+  end
+
   n = Dir.glob(File.join(SHARE_ROOT, '*')).count { |d| File.directory?(d) }
   rsp.type_json.body({ ok: true, shares: n, root: SHARE_ROOT }.to_json).finish
 end

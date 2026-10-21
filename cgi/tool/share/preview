@@ -25,15 +25,7 @@
 # Content-Disposition 用 inline，让浏览器把它当页面内容渲染而不是下载。
 
 require_relative '../../_base_'
-
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
-
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
-
-def dir_of(token)   = File.join(SHARE_ROOT, token)
-def meta_path(token) = File.join(dir_of(token), 'meta.json')
+require_relative '_lib_'
 
 # 分享是否已失效（次数耗尽 或 已到期），跟 download 的判定保持一致
 def dead?(m)

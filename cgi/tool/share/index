@@ -1,12 +1,21 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# tool/share/index — 文件分享页面 + 分享链接重定向 + 公开分享广场
+# tool/share/index — 文件分享页面 + 分享链接重定向
 #
-#   GET /tool/share                        → dist/page.html（上传 + 我的分享）
+#   GET /tool/share                        → dist/page.html（提取 / 上传 / 我的分享 / 公开分享）
+#   GET /tool/share/view?t=<tok>           → 预览页（dist/view.html）
+#   GET /tool/share/download?t=<tok>       → 下载详情页（路由在 download 脚本里）
 #   GET /tool/share?t=<token>              → 302 /tool/share/download?t=<token>
 #   GET /tool/share/<token>                → 302 /tool/share/download/info/<token>
-#   GET /tool/share/page                   → dist/public.html（所有公开的分享）
-#   GET /tool/share/page/list              → JSON，只含 pub=1 且已完成的分享
+#
+# 详情页 / 预览页不带 .html 后缀 —— spider 的 URL→脚本解析是从路径尾部
+# 往前剥文件名，而 cgi/tool/share/download 这个目录名会让 /tool/share/download
+# 直接派发给 download 脚本（index 拦不到）。所以详情页的「渲染 HTML」那段
+# 逻辑写在 download 脚本的 Q.get '/' 里，带 ?t= 时出页面，不带时出状态 JSON。
+#
+# 公开分享不再有独立广场页 —— 直接内嵌在 page.html 下方，
+# 数据源跟「我的分享」同一个脚本：GET /tool/share/list?pub=1
+# （服务端按 pub=1 且 done=1 过滤，私密元信息不会漏出去）。
 #
 # 预览在独立脚本 tool/share/preview（GET /tool/share/preview/<token>）。
 #
@@ -35,20 +44,19 @@
 #   GET    /tool/share/preview  公开分享的内联预览（不扣次数，私密不给）
 
 require_relative '../../_base_'
+require_relative '_lib_'
 require 'uri'
 require 'fileutils'
 
 PAGE        = 'dist/page.html'
-PUBLIC_PAGE = 'dist/public.html'
-PREVIEW_JS  = 'preview.js.txt'   # 见下方「共享静态资源」注释：不能叫 .js
+VIEW_PAGE = 'dist/view.html'
 TOKEN       = /\A[a-f0-9]{16}\z/
 DL         = '/tool/share/download'
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
 
 # 302 到实际下载端点，保留 ?p=（分享密码）?d=（强制下载）等 query
 def to_download(rsp, token, extra = {})
   q = extra.transform_keys(&:to_s).reject { |_k, v| v.nil? || v.to_s.empty? }
-  loc = q.empty? ? "#{DL}/f/#{token}" : "#{DL}/f/#{token}?#{URI.encode_www_form(q)}"
+  loc = q.empty? ? "#{DL}/#{token}" : "#{DL}/#{token}?#{URI.encode_www_form(q)}"
   rsp.redirect_to(loc).finish
 end
 
@@ -73,110 +81,14 @@ Q.get %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   to_download(rsp, req.named(:token))
 end
 
-# ══════════════════════════════════════════════════════════════
-#  公开分享广场：/tool/share/page
+# GET /view —— 独立预览页（?t=<token>）
+# 不支持的类型（exe/apk/zip…）会在页面上提示改用下载。
 #
-#   GET /tool/share/page        → dist/public.html（单文件页面）
-#   GET /tool/share/page/list   → JSON，只回 pub=1 且已完成的分享
-#
-# 为什么过滤必须放服务端：
-#   「我的分享」用 list?c=<clientId>，那是个人的，返回什么都行。
-#   但广场是给任何人看的 —— 如果这里不按 pub 过滤，私密分享的
-#   文件名/大小/类型就会随 JSON 发给每一个访问者（哪怕前端不显示），
-#   那等于把私密元信息泄露了。所以 pub=1 这道闸在服务端做。
-#
-# 只列 done=1：没传完的（done=0）是半成品，还没对外发过链接，
-# 不该出现在公开广场里（也要留着给上传者续传，不能清理掉）。
-#
-# 懒清理跟 list 保持一致：碰到 dead 标记 / 已失效的已完成分享就物理删除。
-# ══════════════════════════════════════════════════════════════
-
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
-
-# 分享是否已失效（次数耗尽 或 已到期）
-def share_dead?(m)
-  return true if m['max'].to_i > 0 && m['left'].to_i <= 0
-  exp_at = m['exp_at'].to_i
-  return true if exp_at > 0 && Time.now.to_i >= exp_at
-  false
-end
-
-# 单条分享的公开视图（只挑广场要展示的字段，别把 pw/by 之类漏出去）
-def public_item(mp, m)
-  token = File.basename(File.dirname(mp))
-  {
-    token:  token,
-    name:   m['name'],
-    size:   m['size'].to_i,
-    type:   m['type'].to_s,
-    max:    m['max'].to_i,
-    left:   m['left'].to_i,
-    # 前端据此决定要不要给「预览」按钮（私密的不给，预览端点也只服务 pub=1）
-    pub:    m.fetch('pub', 1).to_i,
-    # 公开分享也可能自己设了密码 —— 只告诉前端「有没有」，不给明文
-    has_pw: !m['pw'].to_s.empty?,
-    exp_at: m['exp_at'].to_i,
-    at:     m['at'].to_i
-  }
-end
-
-# GET /page/list —— 公开分享的 JSON 列表
-Q.get %r{^/page/list/?$} do |_req, rsp|
-  items = []
-  Dir.glob(File.join(SHARE_ROOT, '*', 'meta.json')).each do |mp|
-    m = (JSON.parse(File.read(mp)) rescue nil)
-    next unless m.is_a?(Hash)
-
-    # 懒清理（跟 list 一样）：已 dead 或已失效的已完成分享 → 物理删除
-    if m['dead'] || (share_dead?(m) && m['done'].to_i != 0)
-      FileUtils.rm_rf(File.dirname(mp))
-      next
-    end
-
-    # ★ 核心过滤：只要公开 + 已完成的
-    next unless m.fetch('pub', 1).to_i != 0
-    next unless m['done'].to_i != 0
-
-    items << public_item(mp, m)
+# 注意：详情页是 /tool/share/download?t=<token>，路由在 download 脚本里
+# （那个目录名跟这个 URL 前缀同名，spider 会先把请求派给它，index 拦不到）。
+Q.get %r{^/view/?$} do |_req, rsp|
+  unless File.file?(VIEW_PAGE)
+    return rsp.fail_404.type_text.body("#{VIEW_PAGE} not found").finish
   end
-
-  items.sort_by! { |i| -i[:at] }   # 新的在前
-  rsp.type_json.body({ ok: true, data: items }.to_json).finish
-end
-
-# ---------- 共享静态资源 ----------
-#
-#   GET /tool/share/preview.js   → 预览逻辑（page.html / public.html 共用）
-#
-# 为什么文件叫 preview.js.txt 放在脚本旁边、而不是 dist/preview.js：
-#   spider 的 URL→脚本解析（src/tcp_class/http_func.rs::parse_req_path）会
-#   从 URL 路径一路往上剥，只要 **某个前缀是真实存在的文件**，就把它当成
-#   CGI 脚本去 exec。于是 /tool/share/dist/preview.js 会被派发去执行
-#   preview.js 这个「文件」—— Ruby 跑 JS 直接崩，浏览器那边表现是
-#   script 加载失败 + previewCfg is not defined（空响应，不是 404）。
-#
-#   所以这个 JS 改叫 preview.js.txt（Spider 不会当脚本名），
-#   再由本脚本按虚拟路径 /tool/share/preview.js 吐出去。
-#   URL 里没有对应的真实文件 → 解析落到 index → 命中下面这条路由。
-#
-# 同理 page.html / public.html 也不在 URL 里直接引用，
-# 而是由本脚本以 dist/… 相对路径读出来内联返回。
-#
-# 缓存：no-cache。改了 JS 刷新页面就能拿到新版本，不用等 CDN/浏览器缓存。
-Q.get %r{^/preview\.js$} do |_req, rsp|
-  unless File.file?(PREVIEW_JS)
-    return rsp.fail_404.type_text.body("#{PREVIEW_JS} not found").finish
-  end
-  rsp.header_field('Cache-Control', 'no-cache')
-  rsp.type('application/javascript; charset=utf-8').body(PREVIEW_JS).finish
-end
-
-# GET /page —— 公开分享广场页面
-Q.get %r{^/page/?$} do |_req, rsp|
-  unless File.file?(PUBLIC_PAGE)
-    return rsp.fail_404.type_text.body("#{PUBLIC_PAGE} not found").finish
-  end
-  rsp.type_html.body(PUBLIC_PAGE).finish
+  rsp.type_html.body(VIEW_PAGE).finish
 end

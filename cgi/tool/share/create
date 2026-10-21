@@ -27,15 +27,12 @@
 #   $SPIDER_DATA/<token>/data         finish 时按序合并而成
 
 require_relative '../../_base_'
+require_relative '_lib_'
+
+ensure_share_root!
 require 'securerandom'
 require 'fileutils'
 
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
-
-FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
-
-def dir_of(token)    = File.join(SHARE_ROOT, token)
-def meta_path(token) = File.join(dir_of(token), 'meta.json')
 # 文件名清洗：保留 Unicode 字母/数字（\p{L}\p{N}），只干掉路径分隔符和控制字符。
 #   原来用 [^\w.\- ]，但 Ruby 的 \w 只认 ASCII —— 中文会被整片替换成 _，
 #   「报告.txt」变成「__.txt」，等于文件名丢失。必须用 \p{L}\p{N} + /u。
@@ -47,9 +44,6 @@ def sanitize_name(s)
   n.empty? ? 'file' : n
 end
 
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
 
 Q.post '/' do |req, rsp|
   size = req.param('size').to_i

@@ -23,18 +23,12 @@
 #   所以不能用「参数缺失」来表示不改，统一用 -1 / 不传参数 / 空串区分。
 
 require_relative '../../_base_'
+require_relative '_lib_'
+
+ensure_share_root!
 require 'fileutils'
 
-SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
 
-FileUtils.mkdir_p(SHARE_ROOT) unless File.directory?(SHARE_ROOT)
-
-def dir_of(token)   = File.join(SHARE_ROOT, token)
-def meta_path(token) = File.join(dir_of(token), 'meta.json')
-
-def json(rsp, code, payload)
-  rsp.code(code).type_json.body(payload.to_json).finish
-end
 
 Q.post %r{^/?(?<token>[a-f0-9]{16})/?$} do |req, rsp|
   token = req.named(:token)
