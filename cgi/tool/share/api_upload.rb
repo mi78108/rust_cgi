@@ -159,6 +159,32 @@ module ShareUpload
     s.ok(rsp, s.to_info)
   end
 
+  # ---------- GET /<token> : 下载文件本体 ----------
+  #
+  # attachment + 扣一次配额。
+  #
+  # 密码校验（密码错的不消耗下载次数）
+  # 私密分享（pub=0）强制要求正确密码：哪怕历史数据里 pw 意外为空，
+  # 也不能放行（否则「私密」形同虚设）。公开（pub=1）行为不变：设了密码才校验。
+  def content(req, rsp, token)
+    s = Share.find(token)
+    return Share.missing(rsp) if s.nil?
+    return Share.missing(rsp) if s.reap!(purge: :mark)
+
+    unless s.alive?
+      return s.fail(rsp, 410, s.dead_message, data: { name: s.name, size: s.size })
+    end
+
+    unless s.authorized?(pw: req.param('p'))
+      return s.fail(rsp, 401, '密码错误',
+                    data: { name: s.name, size: s.size, has_pw: true,
+                            pub: s.public? ? 1 : 0 })
+    end
+
+    return s.fail(rsp, 404, 'file gone') unless s.data_exists?
+    s.serve_attachment(rsp)
+  end
+
   # ---------- DELETE /<token> : 删除分享 ----------
   #
   # 两种授权任一即可：归属（cid）或正确密码。

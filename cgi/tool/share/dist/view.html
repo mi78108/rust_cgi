@@ -214,8 +214,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
 
 <script>
 'use strict';
-const API_CONTENT = '/tool/share/download';   // 预览取文件本体
-const API_SHARE = '/tool/share';            // 元信息
+const API_SHARE = '/tool/share';
 // 两种入口都要支持：
 //   /tool/share/<token>/view   路径式（新）
 //   /tool/share/view?t=<token> query 式（旧，保留兼容）
@@ -303,7 +302,7 @@ async function init(t) {
   $('name').textContent = d.name;
   $('size').textContent = fmtSize(d.size);
   $('ico').textContent = ico(d.type, d.name);
-  $('dl-link').href = `/tool/share/download?t=${t}`;
+  $('dl-link').href = `${API_SHARE}/${t}/page`;
 
   const bits = [];
   if (d.pub === 0) bits.push('私密 · 需密码');

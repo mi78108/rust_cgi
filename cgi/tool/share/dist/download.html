@@ -214,10 +214,11 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
 
 <script>
 'use strict';
-// 文件本体走 /download（元信息已迁到 /<token>/info）
-const API_CONTENT = '/tool/share/download';
 const API_SHARE = '/tool/share';
-const TOKEN = new URLSearchParams(location.search).get('t');
+// 两种入口：/tool/share/<token>/page（新）· /?t=<token>（旧，兼容）
+const TOKEN = new URLSearchParams(location.search).get('t')
+           || (location.pathname.match(/\/([a-f0-9]{16})\/page\/?$/) || [])[1]
+           || '';
 
 const $ = (id) => document.getElementById(id);
 
@@ -272,7 +273,7 @@ async function jfetch(url, opts) {
 // 注意用 documentElement.textContent 而不是 body.textContent：
 // JSON 响应在 Chrome 里不生成 <body>，body 是 null。
 function startDownload(tok, pw) {
-  const url = `${API_CONTENT}/${tok}` + (pw ? `?p=${encodeURIComponent(pw)}` : '');
+  const url = `${API_SHARE}/${tok}` + (pw ? `?p=${encodeURIComponent(pw)}` : '');
   const errBox = $('err');
   errBox.textContent = '';
 
@@ -312,7 +313,7 @@ function fail(msg) {
 }
 
 async function init(t) {
-  if (!t) return fail('缺少分享 token —— 请在 /tool/share 页面输入，或访问 /tool/share/download?t=<token>');
+  if (!t) return fail('缺少分享 token —— 请在 /tool/share 页面输入，或访问 /tool/share/<token>/page');
 
   let status, json;
   try {

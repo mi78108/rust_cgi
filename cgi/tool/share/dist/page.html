@@ -200,7 +200,7 @@ footer code{color:var(--ink-2);background:var(--bg-2);padding:1px 5px;border:1px
       </div>
       <button class="btn" id="btn-get">提取</button>
       <div class="err" id="get-err"></div>
-      <div class="note">也可以直接访问 <code>/tool/share/download?t=&lt;token&gt;</code></div>
+      <div class="note">也可以直接访问 <code>/tool/share/&lt;token&gt;/page</code></div>
     </div>
   </section>
 
@@ -1050,7 +1050,7 @@ $('btn-upload').addEventListener('click', async () => {
     resumeTarget = null;
 
     // 分享链接给详情页而不是文件本体 —— 私密分享要能在那儿输密码
-    const full = `${location.origin}/tool/share/download?t=${d.token}`;
+    const full = `${location.origin}/tool/share/${d.token}/page`;
     $('done-url').textContent = full;
     $('done-copy').value = full;
     $('done-name').textContent = d.name;
@@ -1137,7 +1137,7 @@ async function loadList() {
         const kind = previewKind(it);
         acts = `<button data-act="copy" data-url="${it.url}">复制链接</button>` +
                (kind ? `<button data-act="pv" data-tok="${it.token}">预览</button>` : '') +
-               `<a class="act" href="${location.origin}/tool/share/download?t=${it.token}">打开</a>` +
+               `<a class="act" href="${location.origin}/tool/share/${it.token}/page">打开</a>` +
                (it.editable
                  ? `<button data-act="edit" data-tok="${it.token}">修改</button>` +
                    `<button class="danger" data-act="cancel" data-tok="${it.token}">取消分享</button>`
@@ -1260,7 +1260,7 @@ async function loadPublic() {
       box.appendChild(el);
 
       el.querySelector('[data-act="dl"]').addEventListener('click', () => {
-        location.href = `/tool/share/download?t=${it.token}`;
+        location.href = `${API.ROOT}/${it.token}/page`;
       });
       const pv = el.querySelector('[data-act="pv"]');
       if (pv) pv.addEventListener('click', () => {
@@ -1275,7 +1275,7 @@ async function loadPublic() {
 /* ---------- 提取分享文件 ---------- */
 
 // 从用户输入里抠出 16 位 hex token。
-// 容忍三种形态：纯 token、完整分享链接、/tool/share/download?t=xxx 链接。
+// 容忍三种形态：纯 token、完整分享链接、/tool/share/<token>/page 链接。
 function parseToken(s) {
   const m = String(s || '').match(/[a-f0-9]{16}/i);
   return m ? m[0].toLowerCase() : null;
@@ -1288,7 +1288,7 @@ function goGet() {
     $('get-tok').focus();
     return;
   }
-  location.href = `/tool/share/download?t=${t}`;
+  location.href = `${API.ROOT}/${t}/page`;
 }
 
 $('btn-get').addEventListener('click', goGet);
@@ -1317,7 +1317,7 @@ async function initResume(tok) {
 // 详情页已独立成 /tool/share/download —— ?t=<token> 直接重定向过去，
 // 本页只负责上传 + 列表 + 提取框。
 if (TOKEN) {
-  location.replace(`/tool/share/download?t=${TOKEN}`);
+  location.replace(`${API.ROOT}/${TOKEN}/page`);
 } else {
   show('upload');
   loadList();
