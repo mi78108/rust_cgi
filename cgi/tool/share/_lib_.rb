@@ -384,10 +384,16 @@ class Share
 
   # 一次性上传（不分片）：直接写 data，meta.done = 1。
   # 分片上传走 create → PUT part → finish 那条路，不走这里。
+  #
+  # token 省略时用 SecureRandom 生成；给了就用给的 ——
+  # 调用方自己指定 token 的场景（POST /<token>）走这条路。
   def self.upload_direct!(name:, type:, content:, max: 0, exp_h: 0, pub: 1,
-                         pw: '', owner: '', now: Time.now.to_i)
-    token = SecureRandom.hex(8)
+                         pw: '', owner: '', now: Time.now.to_i, token: nil)
+    token ||= SecureRandom.hex(8)
     FileUtils.mkdir_p(dir_of(token))
+    # 覆盖已有分享时清掉残留的 part/ —— 那是之前分片上传留下的半成品，
+    # 留着既占空间，又会让 missing_parts 的判断失真（以为还有片没传）。
+    FileUtils.rm_rf(File.join(dir_of(token), 'part'))
     File.binwrite(data_path(token), content)
 
     meta = {

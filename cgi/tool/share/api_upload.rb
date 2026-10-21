@@ -27,7 +27,9 @@ module ShareUpload
   # 配置参数从哪来：query 优先，没有就取 multipart 里的同名字段。
   # 两种都支持是因为路由分流靠「query 是否为空」—— 不带 query 时
   # 一次性上传的配置只能跟着文件一起走 multipart。
-  def create_share(req, rsp)
+  #
+  # token 给了就用给的（POST /<token>），没给就随机生成。
+  def create_share(req, rsp, token = nil)
     form = req.body_form_data
     return json(rsp, 400, ok: false, error: 'not multipart/form-data') if form.nil?
 
@@ -36,6 +38,18 @@ module ShareUpload
 
     content = item.content
     return json(rsp, 400, ok: false, error: 'empty file') if content.empty?
+
+    # 指定 token 时查重：
+    #   已完成（done=1）→ 409，不能让人凭 token 覆盖别人的分享
+    #   未完成（done=0）→ 允许覆盖，那本来就是半成品（重传 / 换文件继续传）
+    if token
+      existing = Share.find(token)
+      if existing && existing.done?
+        return json(rsp, 409, ok: false,
+                    error: '这个 token 已被使用',
+                    data: { name: existing.name, size: existing.size })
+      end
+    end
 
     # query 优先，其次 multipart 字段（form[key] 返回 FormItem 或 nil）
     #
@@ -73,7 +87,8 @@ module ShareUpload
                              exp_h:   exp_h,
                              pub:     pub,
                              pw:      pw,
-                             owner:   opt.call('c', '').to_s)
+                             owner:   opt.call('c', '').to_s,
+                             token:   token)
 
     json(rsp, 200, ok: true, data: s.to_upload_info)
   end

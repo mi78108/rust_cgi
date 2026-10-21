@@ -82,6 +82,15 @@ Q.post '/' do |req, rsp|
   end
 end
 
+
+# POST /<token> —— 一次性上传到指定 token
+#   token 已完成（done=1）→ 409，不允许覆盖
+#   token 未完成（done=0）→ 允许覆盖（半成品重传）
+#   token 不存在         → 直接创建
+Q.post %r{^/(?<token>[a-f0-9]{16})/?$} do |req, rsp|
+  ShareUpload.create_share(req, rsp, req.named(:token))
+end
+
 # complete 排在 <token> 前面 —— 否则 PUT 不受影响，但 POST 会先命中短路径
 Q.post %r{^/(?<token>[a-f0-9]{16})/complete$} do |req, rsp|
   ShareUpload.complete(req, rsp, req.named(:token))
