@@ -1,6 +1,6 @@
 <!-- posts/static/read.html — 独立阅读页模板 (SSR 骨架)
      /root/posts/read/<slug> 和 /root/notes/read/<slug> 共用这一份。
-     后端只替换 {{TITLE}} / {{EXCERPT}} / {{SLUG}} / {{KIND}} / {{ASSET_JS}};
+     后端只替换 @<{title}> / @<{excerpt}> / @<{slug}> / notes / /root/notes/assets/notes.js;
      正文/编辑/分页由 asset JS 读 data-article-slug 接管, 与 SPA 抽屉共用 articleTpl()。
      样式内联: 独立页是单页, 不引外部 CSS 少一次请求, 且与 index.html 的 .dr-body 同源。 -->
 
@@ -9,11 +9,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{TITLE}} · hawk / {{KIND}}</title>
-<meta name="description" content="{{EXCERPT}}">
-<meta property="og:title" content="{{TITLE}}">
+<title>@<{title}> · hawk / notes</title>
+<meta name="description" content="@<{excerpt}>">
+<meta property="og:title" content="@<{title}>">
 <meta property="og:type" content="article">
-<meta property="og:description" content="{{EXCERPT}}">
+<meta property="og:description" content="@<{excerpt}>">
 <style>
   :root{
     --bg:#f4f1de; --bg-2:#ecead7; --ink:#0f0f12; --ink-2:#2a2a30;
@@ -88,11 +88,11 @@
 </head>
 <body>
 <div class="wrap">
-  <main id="app-root" data-article-slug="{{SLUG}}">
+  <main id="app-root" data-article-slug="@<{slug}>">
     <div class="state">loading…</div>
   </main>
 </div>
 <script src="/root/assets/markdown-it-14.1.0.min.js"></script>
-<script src="{{ASSET_JS}}"></script>
+<script src="/root/notes/assets/notes.js"></script>
 </body>
 </html>

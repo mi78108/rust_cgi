@@ -22,17 +22,6 @@ def excerpt_from_body(body)
   String(body.to_s)[0, 160].gsub(/[#>*_`\-\n]/, ' ').squeeze(' ').strip
 end
 
-def render_read_page(slug:, title:, excerpt:)
-  fields = {
-    'TITLE'    => esc_html(title),
-    'EXCERPT'  => esc_html(excerpt),
-    'SLUG'     => esc_html(slug),
-    'KIND'     => 'posts',
-    'ASSET_JS' => '/root/posts/assets/posts.js',
-  }
-  File.read(READ_TPL, encoding: 'utf-8').gsub(/{{(\w+)}}/) { fields.fetch($1) }
-end
-
 def render_404_page(slug)
   esc = esc_html(slug)
   "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>404 · #{esc}</title>" \
@@ -49,10 +38,10 @@ Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
     next
   end
 
-  html = render_read_page(
-    slug:    slug,
-    title:   post[:title],
-    excerpt: excerpt_from_body(post[:body]),
-  )
-  rsp.type('text/html; charset=utf-8').body(html).finish
+  rsp.type_html
+     .body(File.read(READ_TPL, encoding: 'utf-8'))
+     .render(title:   esc_html(post[:title]),
+             excerpt: esc_html(excerpt_from_body(post[:body])),
+             slug:    esc_html(slug))
+     .finish
 end
