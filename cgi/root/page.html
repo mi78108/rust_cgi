@@ -674,6 +674,38 @@
   </div>
 </section>
 
+<!-- tools (静态列表: 工具无 index API, 直接跳独立页) -->
+<section class="wrap strip-section" aria-label="tools">
+  <header>
+    <h2><span class="dim">// </span>Tools</h2>
+    <a href="/tool/chat" class="btn ghost" style="font-size:13px;padding:6px 12px">Open chat →</a>
+  </header>
+  <div id="tools-mount">
+    <div class="item-list">
+      <div class="item" data-href="/tool/chat">
+        <div class="m">chat</div>
+        <div class="t">在线聊天室</div>
+        <div class="e">WebSocket 实时聊天, 多人房间。</div>
+      </div>
+      <div class="item" data-href="/tool/editdoc">
+        <div class="m">editdoc</div>
+        <div class="t">协作编辑器</div>
+        <div class="e">多人同时编辑同一份文档。</div>
+      </div>
+      <div class="item" data-href="/tool/json">
+        <div class="m">json</div>
+        <div class="t">JSON viewer</div>
+        <div class="e">格式化 / 校验 / 树形查看 JSON。</div>
+      </div>
+      <div class="item" data-href="/tool/share">
+        <div class="m">share</div>
+        <div class="t">文件分享</div>
+        <div class="e">分片上传, 断点续传。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="wrap stats" aria-label="numbers">
   <div class="stat"><div class="n"><span id="stat-count">8</span></div><div class="lbl">total posts</div></div>
   <div class="stat"><div class="n" id="stat-online">1</div><div class="lbl">online users</div></div>
@@ -925,6 +957,11 @@
     if (!el || el.hidden) return;
     if (e.key === 'Escape'){ hideDrawer(); return; }
     if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleDrawerFs(); }
+  });
+
+  // tools 列表是静态 HTML, 点击直接跳独立页 (不进 drawer)
+  document.querySelectorAll('#tools-mount .item[data-href]').forEach(it => {
+    it.addEventListener('click', () => { location.href = it.dataset.href; });
   });
 
   mountWidget();
