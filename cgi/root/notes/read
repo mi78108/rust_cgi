@@ -2,27 +2,56 @@
 # frozen_string_literal: true
 # root/notes/read — GET /root/notes/read/<slug>
 #
-# 跟 /root/posts/read 完全同构 (共用 root/_lib_.rb + posts/static/read.html)。
-# page.html 的 notes widget 抽屉走 iframe → 这个端点,
-# 主页不需要引 markdown-it / notes.js。
+# 独立阅读页 (单链 URL)。page.html 的 notes widget 抽屉走 iframe → 这个端点,
+# 主页因此不需要引 markdown-it / notes.js。
+#
+# 模板 notes/static/read.html + 下面的渲染函数都归 notes 所有;
+# /root/posts/read 是独立的一套 (后续两者样式/导航会分叉, 不共用)。
 
 require_relative File.expand_path('../../_base_', __dir__)
 require_relative '_lib'
-require_relative '../_lib_'
+
+READ_TPL = File.expand_path('static/read.html', __dir__)
+
+def esc_html(s)
+  String(s).gsub(/[&<>"']/) { |c| { '&'=>'&amp;','<'=>'&lt;','>'=>'&gt;','"'=>'&quot;',"'"=>'&#39;' }[c] }
+end
+
+def excerpt_from_body(body)
+  String(body.to_s)[0, 160].gsub(/[#>*_`\-\n]/, ' ').squeeze(' ').strip
+end
+
+def render_read_page(slug:, title:, excerpt:)
+  fields = {
+    'TITLE'    => esc_html(title),
+    'EXCERPT'  => esc_html(excerpt),
+    'SLUG'     => esc_html(slug),
+    'KIND'     => 'notes',
+    'ASSET_JS' => '/root/notes/assets/notes.js',
+  }
+  File.read(READ_TPL, encoding: 'utf-8').gsub(/{{(\w+)}}/) { fields.fetch($1) }
+end
+
+def render_404_page(slug)
+  esc = esc_html(slug)
+  "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>404 · #{esc}</title>" \
+    "<style>body{font-family:ui-monospace,monospace;padding:40px;background:#f4f1de;color:#0f0f12}</style>" \
+    "</head><body><h1>404 · notes not found</h1><p>slug: <code>#{esc}</code></p>" \
+    "<p><a href=\"/root/notes\">← /root/notes</a></p></body></html>"
+end
 
 Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
   slug = req.named(:slug)
   note = find_note(slug)
   if note.nil?
-    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_html('notes', slug)).finish
+    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_page(slug)).finish
     next
   end
 
-  html = render_read_page_html(
-    kind:    'notes',
+  html = render_read_page(
     slug:    slug,
-    title:   esc_html(note[:title]),
-    excerpt: esc_html(excerpt_from_body(note[:body])),
+    title:   note[:title],
+    excerpt: excerpt_from_body(note[:body]),
   )
   rsp.type('text/html; charset=utf-8').body(html).finish
 end
