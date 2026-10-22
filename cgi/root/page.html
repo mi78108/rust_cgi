@@ -381,6 +381,8 @@
   .fcol h4{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.18em;color:var(--ink);margin:0 0 14px;text-transform:uppercase}
   .fcol ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
   .fcol li a{color:var(--ink-2);font-size:14px}
+  /* 占位链接: 还没填真实地址, 显示为不可点的虚线文字 */
+  .fcol li .pending{color:var(--muted);cursor:default;border-bottom:1px dashed var(--muted)}
   .fcol li a:hover{color:var(--ink);text-decoration:underline}
   .flegal{
     display:flex;justify-content:space-between;align-items:center;
@@ -722,7 +724,7 @@
   <div class="sys-grid" id="sys-grid">
     <div class="sys-card">
       <div class="k">load avg</div>
-      <div class="v"><span id="sys-load">@<{v[:load][0]}></span></div>
+      <div class="v"><span id="sys-load">@<{v[:load][0] || '—'}></span></div>
     </div>
     <div class="sys-card">
       <div class="k">ram used</div>
@@ -730,7 +732,7 @@
     </div>
     <div class="sys-card">
       <div class="k">uptime</div>
-      <div class="v"><span id="sys-uptime">@<{v[:uptime_s] / 60 / 60}> h</span></div>
+      <div class="v"><span id="sys-uptime">@<{v[:uptime_s] / 86400}>d @<{(v[:uptime_s] % 86400) / 3600}>h</span></div>
     </div>
   </div>
 </section>
@@ -764,19 +766,19 @@
     <div class="fcol">
       <h4>ELSEWHERE</h4>
       <ul>
-        <li><a href="#gh">GitHub</a></li>
-        <li><a href="#mastodon">Mastodon</a></li>
-        <li><a href="#matrix">Matrix</a></li>
-        <li><a href="#mail">Mail</a></li>
+        <li><span class="pending">GitHub</span></li>
+        <li><span class="pending">Mastodon</span></li>
+        <li><span class="pending">Matrix</span></li>
+        <li><a href="mailto:mi78108@live.com">Mail</a></li>
       </ul>
     </div>
     <div class="fcol">
       <h4>CONTACT</h4>
       <ul>
         <li><a href="/tool/chat">Reach out</a></li>
-        <li><a href="#pgp">PGP key</a></li>
-        <li><a href="#collab">Collaborate</a></li>
-        <li><a href="#colophon">Colophon</a></li>
+        <li><span class="pending">PGP key</span></li>
+        <li><span class="pending">Collaborate</span></li>
+        <li><span class="pending">Colophon</span></li>
       </ul>
     </div>
     <div class="fcol">
@@ -992,6 +994,7 @@
 
   function pad2(n){ return String(n).padStart(2, '0'); }
   function fmtClock(ts){
+    if (!isFinite(ts)) return '—';
     const d = new Date(ts * 1000);
     return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
   }
@@ -1002,6 +1005,26 @@
          : h > 0 ? `${h}h ${pad2(m)}m`
          : `${m}m`;
   }
+  // 服务端一次 flush 可能把多条 JSON 粘在一起. 按括号深度切分:
+  // 只在深度归零的 '}' 之后切, 嵌套对象里的 '}' 不算边界; 字符串内的括号需跳过.
+  function splitGluedJson(text){
+    const out = [];
+    let depth = 0, start = 0, inStr = false, esc = false;
+    for (let i = 0; i < text.length; i++){
+      const c = text[i];
+      if (esc){ esc = false; continue; }
+      if (c === '\\'){ if (inStr) esc = true; continue; }
+      if (c === '"'){ inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{') depth++;
+      else if (c === '}'){
+        depth--;
+        if (depth === 0){ out.push(text.slice(start, i + 1)); start = i + 1; }
+      }
+    }
+    return start < text.length ? out.concat(text.slice(start)) : out;
+  }
+
   function fmtKb(kb){
     if (!kb || kb <= 0) return '—';
     if (kb >= 1048576) return (kb / 1048576).toFixed(1) + ' GB';
@@ -1012,29 +1035,29 @@
   function applyProcs(list){
     setText('stat-online', list.length);
     setText('stat-names', list.map(p => p.name).join(', ') || '—');
-    if (list.length){
-      const newest = list.reduce((a, b) => (a.last_seen > b.last_seen ? a : b));
-      setText('sys-ts', fmtClock(newest.last_seen));
-    }
+    // last_seen 由客户端心跳带, 首屏握手阶段可能还没有; 缺失就显示 '—' 而不是 NaN
+    const seen = list.map(p => p.last_seen).filter(isFinite);
+    setText('sys-ts', seen.length ? fmtClock(Math.max(...seen)) : '—');
   }
   function applySystem(s){
-    console.log(s,typeof s)
     if (!s || typeof s !== 'object') return;
     // sys strip
-    if (s.load && s.load[0] != null){
-      setHtml('sys-load', `${s.load[0]} <span class="u">/ ${s.load[1]} / ${s.load[2]}</span>`);
+    const load = Array.isArray(s.load) ? s.load : [];
+    if (load.slice(0, 3).every(v => typeof v === 'number' && isFinite(v))){
+      setHtml('sys-load', `${load[0]} <span class="u">/ ${load[1]} / ${load[2]}</span>`);
     }
-    if (s.mem){
-      const u = fmtKb(s.mem.used_kb) + (s.mem.used_pct != null ? ' <span class="u">' + s.mem.used_pct + '%</span>' : '');
+    if (s.mem && s.mem.used_kb > 0){
+      const u = fmtKb(s.mem.used_kb) + (isFinite(s.mem.used_pct) ? ' <span class="u">' + s.mem.used_pct + '%</span>' : '');
       setHtml('sys-mem', u);
     }
     const up = fmtUptime(s.uptime_s);
     setText('sys-uptime', up);
     // fastfetch terminal 字段
     setText('ff-uptime', up);
-    if (s.mem){
+    if (s.mem && s.mem.used_kb > 0){
       const total = fmtKb(s.mem.total_kb), used = fmtKb(s.mem.used_kb);
-      setText('ff-mem', `${used} / ${total} (${s.mem.used_pct || 0}%)`);
+      const pct = isFinite(s.mem.used_pct) ? s.mem.used_pct : 0;
+      setText('ff-mem', `${used} / ${total} (${pct}%)`);
     }
     if (s.last_seen_s > 0){
       const d = Math.max(0, Math.floor(Date.now() / 1000 - s.last_seen_s));
@@ -1075,16 +1098,19 @@
         },30*1000)
       });
       ws.addEventListener('message', ev => {
-        let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
-        console.log(msg)
-        if (!msg || !msg.type) return;
-        switch (msg.type){
-          case 'update': applyProcs(Array.isArray(msg.data) ? msg.data : []); break;
-          case 'system': applySystem(msg.data || msg.value|| {}); break;
-          case 'pong':   applySystem(msg.system  || msg.data || msg.value || {}); break;
-          case 'ping':   wsSend({op:'pong'}); break;
-          case 'hello':  /* 握手回包, 无 ui 更新 */ break;
-          case 'error':  console.warn('[root/ws] server error', msg); break;
+        // 服务端一次 flush 可能把多条 JSON 粘在一起 (}{ 边界), 逐条解析
+        for (const chunk of splitGluedJson(String(ev.data))) {
+          let msg;
+          try{ msg = JSON.parse(chunk); }catch(e){ continue; }
+          if (!msg || !msg.type) continue;
+          switch (msg.type){
+            case 'update': applyProcs(Array.isArray(msg.data) ? msg.data : []); break;
+            case 'system': applySystem(msg.data || msg.value|| {}); break;
+            case 'pong':   applySystem(msg.system  || msg.data || msg.value || {}); break;
+            case 'ping':   wsSend({op:'pong'}); break;
+            case 'hello':  /* 握手回包, 无 ui 更新 */ break;
+            case 'error':  console.warn('[root/ws] server error', msg); break;
+          }
         }
       });
       ws.addEventListener('close', () => { if (!stopped) scheduleRetry(); });
