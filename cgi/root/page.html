@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>hawk / personal site — notes, posts, stack</title>
+<title>hawk / personal site — posts, stack</title>
 <style>
   /* ---------- tokens ---------- */
   :root{
@@ -248,7 +248,7 @@
   .ff-info dd .dim{color:var(--term-dim)}
   @media (max-width:880px){.ff-body{grid-template-columns:1fr}}
 
-  /* ---------- mount containers (notes/posts strips) ---------- */
+  /* ---------- mount containers (posts strip) ---------- */
   .strip-section{
     /* margin removed to align with header/footer */
   }
@@ -441,7 +441,7 @@
     .dr-head{padding:10px 14px}
     .dr-body{padding:18px 18px 28px}
     /* 移动端隐藏 fullscreen toggle (drawer 已是 100vw 全屏) */
-    #notes-drawer-fs,#posts-drawer-fs{display:none}
+    #posts-drawer-fs{display:none}
     /* drawer 适配 iPhone 底部 home indicator 安全区 */
     .dr-body{padding-bottom:max(28px, env(safe-area-inset-bottom))}
     /* 移动端取消 brutalist box-shadow 偏移, 防止元素溢出视口右边 */
@@ -508,7 +508,7 @@
     .caret,.badge-live::before{animation:none}
   }
 
-  /* ---------- drawer (mounted from page.html, hosts notes/posts readers) ---------- */
+  /* ---------- drawer (mounted from page.html, hosts posts reader) ---------- */
   .dr-mask{
     position:fixed;inset:0;background:rgba(15,15,18,.4);z-index:9000;
     opacity:0;pointer-events:none;transition:opacity .18s ease;
@@ -591,15 +591,13 @@
     <span>hawk<span style="color:var(--muted)">/portfolio</span></span>
   </a>
   <nav class="nav-links">
-    <a href="/root/notes">Notes</a>
     <a href="/root/posts">Posts</a>
     <a href="/root/stack">Stack</a>
     <a href="/root/now">Now</a>
     <a href="/tool/chat">Contact</a>
   </nav>
   <div class="nav-right">
-    <a href="/root/notes.rss" class="sign">RSS</a>
-    <a href="/root/notes" class="btn primary">Read notes →</a>
+    <a href="/root/posts" class="btn primary">Read posts →</a>
   </div>
 </header>
 
@@ -617,15 +615,14 @@
         <span>JUMP</span>
         TO SECTION
       </div>
-      <input id="sub" type="text" placeholder="notes, sensors, chatroom…" autocomplete="off" spellcheck="false">
+      <input id="sub" type="text" placeholder="posts, sensors, chatroom…" autocomplete="off" spellcheck="false">
       <div class="dot">↵ enter</div>
       <button id="checkBtn">GO</button>
     </div>
-    <p class="preview">→ <b id="preview">notes</b> <span id="status">— jump to first match</span></p>
+    <p class="preview">→ <b id="preview">posts</b> <span id="status">— jump to first match</span></p>
 
     <div class="hero-cta">
-      <a href="/root/notes" class="btn primary">读最新笔记</a>
-      <a href="/root/posts" class="btn ghost">看长文 →</a>
+      <a href="/root/posts" class="btn primary">看长文 →</a>
     </div>
   </div>
 
@@ -665,17 +662,6 @@
     </div>
   </div>
 </main>
-
-<!-- latest notes (主页 widget: 自己 fetch /root/notes/list/all 渲染, 点击 → drawer iframe 复用单链页) -->
-<section class="wrap strip-section" aria-label="latest notes">
-  <header>
-    <h2><span class="dim">// </span>Latest notes</h2>
-    <a href="/root/notes" class="btn ghost" style="font-size:13px;padding:6px 12px">Open notes →</a>
-  </header>
-  <div id="notes-mount" data-prefix="notes">
-    <div class="state">loading notes…</div>
-  </div>
-</section>
 
 <!-- latest posts (同上, 数据源 /root/posts/list) -->
 <section class="wrap strip-section" aria-label="latest posts">
@@ -731,17 +717,15 @@
   <div class="wrap fgrid">
     <div class="fbrand">
       <a class="brand" href="/root"><span class="logo">H</span><span>hawk<span style="color:var(--muted)">/portfolio</span></span></a>
-      <p>A small, sharp personal site on Gentoo. Notes, posts, and the honest current state of the stack.</p>
+      <p>A small, sharp personal site on Gentoo. Long-form posts, and the honest current state of the stack.</p>
       <span class="x">hawk / portfolio</span>
     </div>
     <div class="fcol">
       <h4>SITE</h4>
       <ul>
-        <li><a href="/root/notes">Notes</a></li>
         <li><a href="/root/posts">Posts</a></li>
         <li><a href="/root/now">Now</a></li>
         <li><a href="/root/sitemap">Sitemap</a></li>
-        <li><a href="/root/notes.rss">RSS</a></li>
       </ul>
     </div>
     <div class="fcol">
@@ -786,33 +770,21 @@
   const servedEl = document.getElementById('servedVal');
   const lastEl   = document.getElementById('lastSeenVal');
 
-  /* stats: 总文章数 = notes + posts, 动态求和 */
-  Promise.all([
-    fetch('/root/notes/list/all').then(r => r.ok ? r.json() : {ok:false, data:{notes:[]}}).then(r => r.ok ? r.data.notes : []).catch(() => []),
-    fetch('/root/posts/list').then(r => r.ok ? r.json() : {ok:false, data:{posts:[]}}).then(r => r.ok ? r.data.posts : []).catch(() => []),
-  ]).then(([notes, posts]) => {
-    const total = (notes || []).length + (posts || []).length;
-    const el = document.getElementById('stat-count');
-    if (el) el.textContent = total;
-  });
+  /* stats: 文章数 = posts */
+  fetch('/root/posts/list')
+    .then(r => r.ok ? r.json() : {ok:false, data:{posts:[]}})
+    .then(r => {
+      const el = document.getElementById('stat-count');
+      if (el) el.textContent = r.ok ? r.data.posts.length : 0;
+    })
+    .catch(() => {});
 </script>
 
-<!-- 主页首屏不引 markdown-it / notes.js / posts.js (主页 widget drawer 不需要 markdown)。
-     首次点击 widget 抽屉时, 由 openInDrawer 动态注入 markdown-it + 对应的模块 JS,
-     之后用 window.{NotesApp,PostsApp}.articleTpl + renderMd 渲染。-->
+<!-- 主页首屏不引 markdown-it / posts.js (主页 widget drawer 不需要 markdown)。
+     首次点击 widget 抽屉时, 由 openInDrawer 动态注入 markdown-it + posts.js,
+     之后用 window.PostsApp.articleTpl + renderMd 渲染。-->
 
-<!-- 主页面 drawer (from widget clicks, 不引 markdown-it / posts.js / notes.js 直到首次点击) -->
-<div id="notes-mask" class="dr-mask" hidden></div>
-<aside id="notes-drawer" class="dr" hidden aria-label="notes reader" role="dialog">
-  <div class="dr-head">
-    <span class="dots"><i></i><i></i><i></i></span>
-    <span class="title" id="notes-drawer-title">Notes</span>
-    <button id="notes-drawer-fs" type="button" aria-label="toggle fullscreen" title="全屏 / 恢复 (F)">⛶</button>
-    <button id="notes-drawer-close" type="button" aria-label="close">ESC ✕</button>
-  </div>
-  <div id="notes-drawer-body" class="dr-body"></div>
-</aside>
-
+<!-- 主页面 drawer (from widget clicks, 不引 markdown-it / posts.js 直到首次点击) -->
 <div id="posts-mask" class="dr-mask" hidden></div>
 <aside id="posts-drawer" class="dr posts" hidden aria-label="posts reader" role="dialog">
   <div class="dr-head">
@@ -828,15 +800,11 @@
   /* ============ page.html widgets + drawer (lazy-load 模块 JS) ============
      widget 自己 fetch list API 渲染 6 个 item. 点击 → drawer (dr-body 自己渲染).
      首次点击某 prefix 的 widget 时, 动态注入 markdown-it CDN + /root/{prefix}/assets/{prefix}.js,
-     然后用 window.{NotesApp,PostsApp}.articleTpl + renderMd 渲染 article.
-     主页首屏因此不下载任何 markdown-it / posts.js / notes.js. */
+     然后用 window.PostsApp.articleTpl + renderMd 渲染 article.
+     主页首屏因此不下载任何 markdown-it / posts.js. */
 
-  const WIDGET_CONFIG = {
-    notes: { list: '/root/notes/list/all', mountId: 'notes-mount', limit: 6, asset: '/root/notes/assets/notes.js' },
-    posts: { list: '/root/posts/list',      mountId: 'posts-mount', limit: 6, asset: '/root/posts/assets/posts.js' },
-  };
   // markdown-it 本地 vendor (走 /root/assets 共享静态路由) — jsdelivr CDN 在部分网络环境不可达,
-  // 加载失败会让 notes.js / posts.js 的 renderMd() 静默降级成纯文本。
+  // 加载失败会让 posts.js 的 renderMd() 静默降级成纯文本。
   const MARKDOWN_IT_SRC = '/root/assets/markdown-it-14.1.0.min.js';
   const fmtDateW = iso => {
     try{
@@ -858,31 +826,27 @@
     });
   }
 
-  async function ensureModuleLoaded(prefix){
-    const cfg = WIDGET_CONFIG[prefix];
-    const appKey = prefix === 'notes' ? 'NotesApp' : 'PostsApp';
-    if (window[appKey] && window[appKey].articleTpl && window[appKey].renderMd) return;
-    // markdown-it 先 (notes.js / posts.js 都会用它), 模块 JS 后
+  async function ensurePostsModule(){
+    if (window.PostsApp && window.PostsApp.articleTpl && window.PostsApp.renderMd) return;
+    // markdown-it 先 (posts.js 会用它), 模块 JS 后
     if (!window.markdownit) await loadScriptOnce(MARKDOWN_IT_SRC);
-    await loadScriptOnce(cfg.asset);
+    await loadScriptOnce('/root/posts/assets/posts.js');
   }
 
-  async function mountWidget(prefix){
-    const cfg = WIDGET_CONFIG[prefix];
-    if (!cfg) return;
-    const root = document.getElementById(cfg.mountId);
+  async function mountWidget(){
+    const root = document.getElementById('posts-mount');
     if (!root) return;
     try{
-      const r = await fetch(cfg.list, { headers: { 'Accept': 'application/json' } });
+      const r = await fetch('/root/posts/list', { headers: { 'Accept': 'application/json' } });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const raw = await r.json();
       const data = (raw && raw.ok) ? raw.data : raw;
-      const items = (data.posts || data.notes || []).slice(0, cfg.limit);
+      const items = (data.posts || []).slice(0, 6);
       root.innerHTML = '<div class="item-list">' + items.map(it => {
         const tags = (it.tags || []).map(t => `<span>#${escHtmlW(t)}</span>`).join('');
         const meta = `${escHtmlW(fmtDateW(it.updated_at || it.created_at))} · ${it.reading_min} min`;
         return `
-          <div class="item" data-slug="${escHtmlW(it.slug)}" data-prefix="${prefix}">
+          <div class="item" data-slug="${escHtmlW(it.slug)}">
             <div class="m">${meta}</div>
             <div class="t">${escHtmlW(it.title)}</div>
             <div class="e">${escHtmlW(it.summary || it.excerpt || '')}</div>
@@ -891,84 +855,79 @@
         `;
       }).join('') + '</div>';
       root.querySelectorAll('.item').forEach(it => {
-        it.addEventListener('click', () => openInDrawer(it.dataset.prefix, it.dataset.slug));
+        it.addEventListener('click', () => openInDrawer(it.dataset.slug));
       });
     } catch(err){
       root.innerHTML = '<div class="state err">fetch failed: ' + escHtmlW(err.message) + '</div>';
     }
   }
 
-  function showDrawer(prefix){
-    const el  = document.getElementById(prefix + '-drawer');
-    const msk = document.getElementById(prefix + '-mask');
+  function showDrawer(){
+    const el  = document.getElementById('posts-drawer');
+    const msk = document.getElementById('posts-mask');
     if (!el) return;
     el.hidden = false; msk.hidden = false;
     requestAnimationFrame(() => { el.classList.add('open'); msk.classList.add('open'); });
   }
-  function hideDrawer(prefix){
-    const el  = document.getElementById(prefix + '-drawer');
-    const msk = document.getElementById(prefix + '-mask');
+  function hideDrawer(){
+    const el  = document.getElementById('posts-drawer');
+    const msk = document.getElementById('posts-mask');
     if (!el) return;
     el.classList.remove('open'); msk.classList.remove('open');
     setTimeout(() => { el.hidden = true; }, 240);
   }
-  function toggleDrawerFs(prefix){
-    const el = document.getElementById(prefix + '-drawer');
+  function toggleDrawerFs(){
+    const el = document.getElementById('posts-drawer');
     if (!el) return;
     const isFs = el.classList.toggle('fullscreen');
-    const btn = document.getElementById(prefix + '-drawer-fs');
+    const btn = document.getElementById('posts-drawer-fs');
     if (btn){ btn.textContent = isFs ? '🗗' : '⛶'; btn.title = isFs ? '恢复 (F)' : '全屏 (F)'; }
   }
 
-  async function openInDrawer(prefix, slug){
-    const titleEl = document.getElementById(prefix + '-drawer-title');
-    const bodyEl  = document.getElementById(prefix + '-drawer-body');
+  async function openInDrawer(slug){
+    const titleEl = document.getElementById('posts-drawer-title');
+    const bodyEl  = document.getElementById('posts-drawer-body');
     if (!bodyEl) return;
-    titleEl.textContent = (prefix === 'notes' ? 'Notes' : 'Posts') + ' · ' + slug;
+    titleEl.textContent = 'Posts · ' + slug;
     bodyEl.innerHTML = '<div class="state">loading…</div>';
-    showDrawer(prefix);
+    showDrawer();
     try{
-      await ensureModuleLoaded(prefix);
-      const api = window[prefix === 'notes' ? 'NotesApp' : 'PostsApp'];
+      await ensurePostsModule();
+      const api = window.PostsApp;
       if (!api || !api.articleTpl){ bodyEl.innerHTML = '<div class="state err">module load failed</div>'; return; }
-      const r = await fetch(`/root/${prefix}/get/${encodeURIComponent(slug)}`, { headers: { 'Accept': 'application/json' } });
+      const r = await fetch(`/root/posts/get/${encodeURIComponent(slug)}`, { headers: { 'Accept': 'application/json' } });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const raw = await r.json();
       const doc = (raw && raw.ok) ? raw.data : raw;
       bodyEl.innerHTML = api.articleTpl(doc);
       // prev/next 在主页 drawer 里要"原地切", 不跳独立页 (SPA 的 openArticle 找不到主页 drawer DOM 会 fallback)
-      bindDrawerPnav(bodyEl, prefix, doc.slug);
+      bindDrawerPnav(bodyEl, doc.slug);
     } catch(err){
       bodyEl.innerHTML = '<div class="state err">fetch failed: ' + escHtmlW(err.message) + '</div>';
     }
   }
 
-  function bindDrawerPnav(scope, prefix, slug){
+  function bindDrawerPnav(scope, slug){
     scope.querySelectorAll('.pn:not(.disabled)').forEach(a => {
       a.addEventListener('click', e => {
         e.preventDefault();
         e.stopImmediatePropagation();
-        openInDrawer(prefix, a.dataset.slug);
+        openInDrawer(a.dataset.slug);
       });
     });
   }
 
-  ['notes','posts'].forEach(prefix => {
-    document.getElementById(prefix + '-drawer-close')?.addEventListener('click', () => hideDrawer(prefix));
-    document.getElementById(prefix + '-drawer-fs')?.addEventListener('click', () => toggleDrawerFs(prefix));
-    document.getElementById(prefix + '-mask')?.addEventListener('click', () => hideDrawer(prefix));
-  });
+  document.getElementById('posts-drawer-close')?.addEventListener('click', hideDrawer);
+  document.getElementById('posts-drawer-fs')?.addEventListener('click', toggleDrawerFs);
+  document.getElementById('posts-mask')?.addEventListener('click', hideDrawer);
   document.addEventListener('keydown', e => {
-    for (const prefix of ['notes','posts']){
-      const el = document.getElementById(prefix + '-drawer');
-      if (!el || el.hidden) continue;
-      if (e.key === 'Escape'){ hideDrawer(prefix); return; }
-      if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleDrawerFs(prefix); return; }
-    }
+    const el = document.getElementById('posts-drawer');
+    if (!el || el.hidden) return;
+    if (e.key === 'Escape'){ hideDrawer(); return; }
+    if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleDrawerFs(); }
   });
 
-  mountWidget('notes');
-  mountWidget('posts');
+  mountWidget();
 
   /* ============ 主站 ws (实时更新入口) ============ */
   const USERNAME_KEY = 'hawk.username';

@@ -1,17 +1,16 @@
 # frozen_string_literal: true
-# posts/_lib.rb — 长文章数据模块 (跟 notes/_lib.rb 同构)
+# posts/_lib.rb — 长文章数据模块
 #
 # 数据源: ./root/data/posts/<yyyy>/<mm>/<slug>.md  (按 frontmatter date 的年月分目录,
 # 目录建后不再变动; slug 定位靠递归 glob)
-# frontmatter 跟 notes 一致: title / date / updated / tags
+# frontmatter: title / date / updated / tags (summary 可选)
 #
-# API (跟 notes 同构, 前端可直接复用 drawer):
+# API:
 #   GET /root/posts                 → 列表
 #   GET /root/posts/api/tags        → 标签云
 #   GET /root/posts/api/posts/<slug> → 单篇 (含 prev/next)
 #
-# 跟 notes 的差别: posts 适合长文, 加一个字段:
-#   summary  (frontmatter 可选) — 列表卡片用的 1-2 句话摘要
+# summary (frontmatter 可选) — 列表卡片用的 1-2 句话摘要, 缺省时从正文截 200 字
 
 require 'date'
 require 'time'

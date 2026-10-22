@@ -1,8 +1,9 @@
 <!-- posts/static/read.html — 独立阅读页模板 (SSR 骨架)
-     /root/posts/read/<slug> 和 /root/notes/read/<slug> 共用这一份。
-     后端只替换 @<{title}> / @<{excerpt}> / @<{slug}> / posts / /root/posts/assets/posts.js;
-     正文/编辑/分页由 asset JS 读 data-article-slug 接管, 与 SPA 抽屉共用 articleTpl()。
-     样式内联: 独立页是单页, 不引外部 CSS 少一次请求, 且与 index.html 的 .dr-body 同源。 -->
+     由 posts/read 用 rsp.type_html.body(File.read(...)).render(title:, excerpt:, slug:) 渲染。
+     后端只 SSR <title>/<meta>/<header>; 正文/编辑/分页由 posts.js 读 data-article-slug 接管,
+     与 SPA 抽屉共用 articleTpl()。
+     样式内联: 独立页是单页, 外链 CSS 反而多一次请求, 且与 index.html 的 .dr-body 同源。
+     注意: @<{...}> 用 [^}]* 匹配, 占位符里别写带 {} 的 block。 -->
 
 <!DOCTYPE html>
 <html lang="zh-CN">
