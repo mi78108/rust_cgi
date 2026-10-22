@@ -23,7 +23,7 @@ MIME = {
   '.txt'  => 'text/plain; charset=utf-8',
 }.freeze
 
-PUB_ROOT = 'dist'
+PUB_ROOT = 'dist' unless const_defined?(:PUB_ROOT)
 
 def serve_file(rsp, real_path, mime)
   rsp.type(mime).body(real_path).finish
