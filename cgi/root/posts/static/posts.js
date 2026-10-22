@@ -270,7 +270,7 @@
             <textarea name="body" id="editor-body" required placeholder="# hello&#10;&#10;write something..."></textarea>
             <div id="editor-monaco" class="editor-monaco" hidden></div>
           </div>
-          <div class="half"><label>preview</label><div id="editor-preview" class="preview"></div></div>
+          <div class="half"><label class="preview-lbl">preview</label><div id="editor-preview" class="preview"></div></div>
         </div>
         <div class="actions">
           <button type="button" id="editor-cancel">cancel</button>

@@ -140,7 +140,7 @@
   .head .crumb{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
   .head .crumb a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 
-  .editor{padding:18px 22px 22px;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
+  .editor{padding:18px 22px 22px;display:flex;flex-direction:column;gap:8px}
   .editor label{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;margin-bottom:2px}
   .editor input,.editor textarea{
     width:100%;box-sizing:border-box;
@@ -175,15 +175,18 @@
     overflow:visible;resize:none;
   }
   .editor .row{display:flex;gap:10px;align-items:stretch;min-height:0}
-  .editor .row.split{flex-direction:row;gap:14px;flex:1;min-height:0}
+  .editor .row.split{flex-direction:row;gap:14px;align-items:stretch}
   .editor .half{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
-  .editor .row.split > .half:first-child{flex:7 1 0;min-height:0;min-width:0}
-  /* textarea 无默认高度规则, 在 flex 列容器里撑满剩余空间 */
-  .editor .row.split > .half:first-child > textarea{flex:1;min-height:140px}
-  .editor .row.split > .half:first-child > .editor-monaco{flex:1;min-height:140px}
-  .editor .row.split > .half:last-child{flex:3 1 360px;min-height:0}    /* preview 占 3/8 */
+  .editor .row.split > .half:first-child{flex:7 1 0;min-width:0}
+  /* field-sizing:content → textarea 随内容自动增高, 不出内部滚动条; 高度由内容驱动 */
+  .editor .row.split > .half:first-child > textarea{
+    field-sizing:content;min-height:220px;max-height:none;overflow-y:hidden;resize:none}
+  .editor .row.split > .half:first-child > .editor-monaco{min-height:220px}
+  .editor .row.split > .half:last-child{flex:3 1 360px}    /* preview 占 3/8 */
+  /* 预览侧补一个与编辑侧 label 同高的占位 label, 使两栏内容顶对齐 */
+  .editor .row.split > .half:last-child > .preview-lbl{visibility:hidden;height:22px;margin-bottom:2px;overflow:hidden}
   .editor .preview{
-    flex:1;min-height:0;border:1px solid var(--ink);background:#fff;color:var(--ink);
+    min-height:220px;border:1px solid var(--ink);background:#fff;color:var(--ink);
     padding:8px 12px;overflow-y:visible;font-size:13.5px;line-height:1.55;
     font-family:Georgia,serif;white-space:normal;
   }
