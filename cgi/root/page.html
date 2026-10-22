@@ -655,9 +655,10 @@
       <input id="sub" type="text" placeholder="搜索文章标题、正文、标签…" autocomplete="off" spellcheck="false">
       <div class="dot">↵ enter</div>
       <button id="checkBtn">GO</button>
+      <!-- 结果面板放在 .check 内, 用它的 position:relative 做锚点 -->
+      <div id="search-results" class="search-results" hidden></div>
     </div>
     <p class="preview">→ <b id="preview">试试 systemd</b> <span id="status">输入关键词搜索</span></p>
-    <div id="search-results" class="search-results" hidden></div>
 
     <div class="hero-cta">
       <a href="/root/posts" class="btn primary">看长文 →</a>
