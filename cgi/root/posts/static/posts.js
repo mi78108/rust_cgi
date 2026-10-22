@@ -36,11 +36,20 @@
     }catch(e){ return iso; }
   };
 
+  // markdown-it 实例。代码块高亮交给 highlight.js (window.hljs, 由 index.html/read.html 先加载)。
+  // hljs 缺席时退化为纯文本 <pre>, 不报错。
   const md = window.markdownit
     ? window.markdownit({
         html: false, linkify: true, breaks: false, typographer: true,
-        highlight: (str, lang) =>
-          `<pre class="hljs"><code class="language-${escHtml(lang || 'text')}">${md.utils.escapeHtml(str)}</code></pre>`,
+        highlight: (str, lang) => {
+          const l = (lang || '').trim().toLowerCase();
+          if (window.hljs && l && window.hljs.getLanguage(l)){
+            try{
+              return `<pre class="hljs"><code class="language-${escHtml(l)}">${window.hljs.highlight(str, {language:l, ignoreIllegals:true}).value}</code></pre>`;
+            }catch(e){ /* 落到下面的纯文本分支 */ }
+          }
+          return `<pre class="hljs"><code class="language-${escHtml(l || 'text')}">${md.utils.escapeHtml(str)}</code></pre>`;
+        },
       })
     : null;
   function renderMd(src){
