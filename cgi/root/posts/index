@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 # root/posts/index — posts 子模块入口
-#   GET /                          → SPA HTML (static/index.html)  ← 这里
+#   GET /                          → SPA HTML (dist/index.html)  ← 这里
 # 其他路由按端点拆到独立文件 (list / tags / get / create / update / assets)。
 
 require_relative File.expand_path('../../_base_', __dir__)
 
-SPA_FILE = File.expand_path('static/index.html', __dir__)
+SPA_FILE = File.expand_path('dist/index.html', __dir__)
 
 Q.get '/*' do |_req, rsp|
   if File.file?(SPA_FILE)
