@@ -179,14 +179,16 @@
   .editor .half{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
   .editor .row.split > .half:first-child{flex:7 1 0;min-width:0}
   /* field-sizing:content → textarea 随内容自动增高, 不出内部滚动条; 高度由内容驱动 */
+  /* min-height 用 calc: 空内容时编辑区也占满首屏, 内容变多时由 field-sizing 向下延伸。
+     250px = dr-head 57 + dr-body padding 28×2 + 三行输入 58 + label 22 + actions 41 + gap */
   .editor .row.split > .half:first-child > textarea{
-    field-sizing:content;min-height:220px;max-height:none;overflow-y:hidden;resize:none}
+    field-sizing:content;min-height:calc(100vh - 381px);max-height:none;overflow-y:hidden;resize:none}
   .editor .row.split > .half:first-child > .editor-monaco{min-height:220px}
   .editor .row.split > .half:last-child{flex:3 1 360px}    /* preview 占 3/8 */
   /* 预览侧补一个与编辑侧 label 同高的占位 label, 使两栏内容顶对齐 */
   .editor .row.split > .half:last-child > .preview-lbl{visibility:hidden;height:22px;margin-bottom:2px;overflow:hidden}
   .editor .preview{
-    min-height:220px;border:1px solid var(--ink);background:#fff;color:var(--ink);
+    min-height:calc(100vh - 381px);border:1px solid var(--ink);background:#fff;color:var(--ink);
     padding:8px 12px;overflow-y:visible;font-size:13.5px;line-height:1.55;
     font-family:Georgia,serif;white-space:normal;
   }
