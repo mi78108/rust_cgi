@@ -5,11 +5,11 @@
 # 独立阅读页 (单链 URL):
 #   https://.../root/posts/read/<slug>
 # 后端只 SSR <title>/<meta>/<header>; 正文/编辑/分页都走客户端 posts.js 接管。
-# HTML 模板跟 /root/notes/read 共用 _read_tpl.rb。
+# HTML 模板跟 /root/notes/read 共用 posts/static/read.html (渲染函数在 root/_lib_.rb)。
 
 require_relative File.expand_path('../../_base_', __dir__)
 require_relative '_lib'
-require_relative '_read_tpl'
+require_relative '../_lib_'
 
 Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
   slug = req.named(:slug)

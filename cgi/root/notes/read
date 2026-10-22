@@ -2,13 +2,13 @@
 # frozen_string_literal: true
 # root/notes/read — GET /root/notes/read/<slug>
 #
-# 跟 /root/posts/read 完全同构 (复用同一个 _read_tpl.rb)。
+# 跟 /root/posts/read 完全同构 (共用 root/_lib_.rb + posts/static/read.html)。
 # page.html 的 notes widget 抽屉走 iframe → 这个端点,
 # 主页不需要引 markdown-it / notes.js。
 
 require_relative File.expand_path('../../_base_', __dir__)
 require_relative '_lib'
-require_relative '../posts/_read_tpl'
+require_relative '../_lib_'
 
 Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
   slug = req.named(:slug)
