@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/search — GET /root/search?q=<kw>
+#
+# 全站公共搜索端点。当前只有 posts 一个来源, 后续接 notes/tools 时
+# 在下面加一个 search_posts / search_tools 分支, results 里用 kind 区分。
+#
+#   GET /root/search?q=systemd
+#   → { ok:true, data:{
+#         q:"systemd", count:2,
+#         results:[ { kind:"post", slug, title, href, tags, updated_at, score, snippet } ] } }
+#
+# 匹配范围: title + summary + tags + body (body 只用于判定和取片段, 不整篇返回)
+# 权重: title 100 > tags 40 > summary 20 > body 10, 按 score 降序取前 20
+
+require_relative File.expand_path('../_base_', __dir__)
+require_relative 'posts/_lib'
+
+SNIPPET_PAD = 60
+
+# 取命中位置前后的纯文本片段 (高亮交给前端, 后端只管定位+截断)
+def snippet_for(body, kw)
+  idx = body.downcase.index(kw)
+  return nil unless idx
+  # 按字符切 (body 是 UTF-8), 避免截断多字节字符
+  chars = body.each_char.to_a
+  from  = [idx - SNIPPET_PAD, 0].max
+  to    = [idx + kw.length + SNIPPET_PAD, chars.size].min
+  frag  = chars[from...to].join.strip
+  frag  = "…#{frag}" if from > 0
+  frag  = "#{frag}…" if to < chars.size
+  frag
+end
+
+# 正文里的 markdown 标记会干扰片段阅读, 粗略去掉
+def strip_md(text)
+  text.gsub(/```.*?```/m, ' ')           # 代码块
+      .gsub(/`([^`]*)`/, '\1')            # 行内代码
+      .gsub(/!\[[^\]]*\]\([^)]*\)/, ' ')  # 图片
+      .gsub(/\[([^\]]*)\]\([^)]*\)/, '\1')# 链接留文字
+      .gsub(/^[#>\-*+\s]+/, '')           # 标题/引用/列表符号
+      .gsub(/\*\*?|__?/, '')               # 强调
+end
+
+# 各来源统一返回 { kind:, slug:, title:, href:, tags:, reading_min:, updated_at:, score:, snippet: }
+def search_posts(q, kw)
+  all_posts.filter_map do |p|
+    full = find_post(p[:slug])
+    next unless full
+
+    score = 0
+    score += 100 if full[:title].to_s.downcase.include?(kw)
+    score += 40  if full[:tags].join(' ').downcase.include?(kw)
+    score += 20  if p[:summary].to_s.downcase.include?(kw)
+    body_md     = strip_md(full[:body])
+    score += 10  if body_md.downcase.include?(kw)
+    next if score.zero?
+
+    {
+      kind:        'post',
+      slug:        full[:slug],
+      title:       full[:title],
+      href:        "/root/posts/read/#{full[:slug]}",
+      summary:     p[:summary],
+      tags:        full[:tags],
+      reading_min: full[:reading_min],
+      updated_at:  full[:updated_at],
+      score:       score,
+      snippet:     snippet_for(body_md, q),
+    }
+  end
+end
+
+Q.get '/*' do |req, rsp|
+  q = req.param('q').to_s.strip
+  if q.empty?
+    rsp.ok_json({ ok: true, data: { q: q, count: 0, results: [] } }).finish
+    next
+  end
+
+  kw   = q.downcase
+  hits = search_posts(q, kw)
+  # 后续: hits += search_tools(q, kw) / search_notes(q, kw)
+  hits.sort_by! { |h| -h[:score] }
+
+  rsp.ok_json({ ok: true, data: { q: q, count: hits.size, results: hits.first(20) } }).finish
+end

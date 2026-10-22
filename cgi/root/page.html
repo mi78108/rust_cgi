@@ -1026,19 +1026,19 @@
 
   function srRender(data, q){
     if (!data.results.length){
-      srBox.innerHTML = '<div class="sr-empty">没有匹配 “' + escHtmlW(q) + '” 的文章</div>';
+      srBox.innerHTML = '<div class="sr-empty">没有匹配 “' + escHtmlW(q) + '” 的内容</div>';
       return;
     }
     const rows = data.results.map(r => {
       const text = r.snippet || r.summary || '';
       const tags = (r.tags || []).map(t => '<span>#' + escHtmlW(t) + '</span>').join('');
-      return '<a class="sr-item" href="/root/posts/read/' + encodeURIComponent(r.slug) + '">' +
+      return '<a class="sr-item" href="' + escHtmlW(r.href) + '">' +
         '<div class="t">' + hl(r.title, q) + '</div>' +
         '<div class="s">' + hl(text, q) + '</div>' +
         '<div class="m"><span>' + escHtmlW(String(r.updated_at).slice(0, 10)) + '</span>' +
         '<span>' + r.reading_min + ' min</span>' + tags + '</div></a>';
     }).join('');
-    srBox.innerHTML = '<div class="sr-head"><span>SEARCH · POSTS</span><span>' +
+    srBox.innerHTML = '<div class="sr-head"><span>SEARCH · ALL</span><span>' +
       data.count + ' HIT' + (data.count > 1 ? 'S' : '') + '</span></div>' + rows;
   }
 
@@ -1049,7 +1049,7 @@
     srBox.hidden = false;
     srBox.innerHTML = '<div class="sr-empty">搜索中…</div>';
     try{
-      const r = await fetch('/root/posts/search?q=' + encodeURIComponent(q),
+      const r = await fetch('/root/search?q=' + encodeURIComponent(q),
                             { headers: { 'Accept': 'application/json' } });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
