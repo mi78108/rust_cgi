@@ -69,6 +69,8 @@
   }
   function hideDrawer(){
     if (!drEl) return;
+    // 编辑器打开时默认全屏, 关闭时一并退出, 免得下次看文章预览也全屏
+    if (drEl.classList.contains('fullscreen')) toggleFs();
     drEl.classList.remove('open'); drMask.classList.remove('open');
     setTimeout(() => { drEl.hidden = true; }, 240);
   }
@@ -249,6 +251,8 @@
 
   function openEditor(slug){
     drTitle.textContent = slug ? 'edit · ' + slug : 'new post';
+    // 编辑器要左右分栏(编辑 + 预览), 620/720px 的抽屉宽度不够, 默认全屏
+    if (drEl && !drEl.classList.contains('fullscreen')) toggleFs();
     drBody.className = 'dr-body';
     drBody.innerHTML = `
       <form class="editor" id="editor-form">
