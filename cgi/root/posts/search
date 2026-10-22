@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# root/posts/search — GET /root/posts/search?q=<kw>
+#
+# 全站搜索的第一版: 只搜 posts (后续接 tools 时在这里加一个来源分支)。
+#
+#   GET /root/posts/search?q=systemd
+#   → { ok:true, data:{ q:"systemd", count:2, results:[
+#         { slug, title, tags, updated_at, score, snippet:"…命中片段…" } ] } }
+#
+# 匹配范围: title + summary + tags + body (body 只用于命中判定和取片段, 不整篇返回)。
+# 排序: 标题命中权重最高, 其次 tags, 最后 body; 同权重按 updated_at 倒序。
+
+require_relative File.expand_path('../../_base_', __dir__)
+require_relative '_lib'
+
+SNIPPET_PAD = 60
+
+def esc_html(s)
+  String(s).gsub(/[&<>"']/) { |c| { '&'=>'&amp;','<'=>'&lt;','>'=>'&gt;','"'=>'&quot;',"'"=>'&#39;' }[c] }
+end
+
+# 取命中位置前后的纯文本片段 (高亮交给前端, 后端只管定位+截断)
+def snippet_for(body, kw)
+  idx = body.downcase.index(kw)
+  return nil unless idx
+  # 按字符切 (body 是 UTF-8), 避免截断多字节字符
+  chars = body.each_char.to_a
+  from  = [idx - SNIPPET_PAD, 0].max
+  to    = [idx + kw.length + SNIPPET_PAD, chars.size].min
+  frag  = chars[from...to].join.strip
+  frag  = "…#{frag}" if from > 0
+  frag  = "#{frag}…" if to < chars.size
+  frag
+end
+
+# 正文里的 markdown 标记会干扰片段阅读, 粗略去掉
+def strip_md(text)
+  text.gsub(/```.*?```/m, ' ')      # 代码块
+      .gsub(/`([^`]*)`/, '\1')         # 行内代码
+      .gsub(/!\[[^\]]*\]\([^)]*\)/, ' ') # 图片
+      .gsub(/\[([^\]]*)\]\([^)]*\)/, '\1') # 链接留文字
+      .gsub(/^[#>\-*+\s]+/, '')        # 标题/引用/列表符号
+      .gsub(/\*\*?|__?/, '')            # 强调
+end
+
+Q.get '/*' do |req, rsp|
+  q = req.param('q').to_s.strip
+  if q.empty?
+    rsp.ok_json({ ok: true, data: { q: q, count: 0, results: [] } }).finish
+    next
+  end
+
+  kw    = q.downcase
+  hits  = []
+
+  all_posts.each do |p|
+    slug = p[:slug]
+    # 列表里的 hash 没有 body, 这里单独取一次
+    full = find_post(slug)
+    next unless full
+
+    title_l = full[:title].to_s.downcase
+    tags_l  = full[:tags].join(' ').downcase
+    sum_l   = p[:summary].to_s.downcase
+    body_l  = strip_md(full[:body]).downcase
+
+    score = 0
+    score += 100 if title_l.include?(kw)
+    score += 40  if tags_l.include?(kw)
+    score += 20  if sum_l.include?(kw)
+    score += 10  if body_l.include?(kw)
+    next if score.zero?
+
+    hits << {
+      slug:       slug,
+      title:      full[:title],
+      summary:    p[:summary],
+      tags:       full[:tags],
+      reading_min: full[:reading_min],
+      updated_at: full[:updated_at],
+      score:      score,
+      snippet:    snippet_for(strip_md(full[:body]), q),
+    }
+  end
+
+  # 同分按更新时间倒序 (all_posts 已按 updated_at desc, 这里稳定排序即可)
+  hits.sort_by! { |h| -h[:score] }
+
+  rsp.ok_json({ ok: true, data: { q: q, count: hits.size, results: hits.first(20) } }).finish
+end

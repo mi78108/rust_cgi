@@ -155,6 +155,36 @@
   }
   .preview b{color:var(--ink);font-weight:600}
 
+  /* ---------- 全局搜索结果 ---------- */
+  .search-results{
+    border:1px solid var(--ink);background:var(--bg);
+    box-shadow:4px 4px 0 var(--ink);margin:0 0 20px;
+    max-height:min(420px, 52vh);overflow-y:auto;
+  }
+  .search-results[hidden]{display:none}
+  .search-results .sr-head{
+    position:sticky;top:0;background:var(--ink);color:var(--lime);
+    font-family:"JetBrains Mono",monospace;font-weight:600;font-size:11px;
+    letter-spacing:.12em;padding:8px 14px;display:flex;justify-content:space-between;gap:12px;
+  }
+  .search-results .sr-item{
+    display:block;padding:12px 14px;border-bottom:1px solid var(--ink);
+    text-decoration:none;color:var(--ink);cursor:pointer;
+  }
+  .search-results .sr-item:last-child{border-bottom:0}
+  .search-results .sr-item:hover{background:var(--bg-2)}
+  .search-results .sr-item .t{font-weight:700;font-size:15px;line-height:1.3;margin-bottom:3px}
+  .search-results .sr-item .s{font-size:13px;color:var(--ink-2);line-height:1.5}
+  .search-results .sr-item .s mark{background:var(--yellow);color:var(--ink);font-weight:600}
+  .search-results .sr-item .m{
+    font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--muted);
+    letter-spacing:.1em;margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;
+  }
+  .search-results .sr-empty,.search-results .sr-err{
+    padding:18px 14px;font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--muted);
+  }
+  .search-results .sr-err{color:var(--red)}
+
   .hero-cta{display:flex;gap:14px;flex-wrap:wrap}
 
   /* ---------- terminal mockup card ---------- */
@@ -615,14 +645,15 @@
 
     <div class="check">
       <div class="pre">
-        <span>JUMP</span>
-        TO SECTION
+        <span>SEARCH</span>
+        EVERYTHING
       </div>
-      <input id="sub" type="text" placeholder="posts, sensors, chatroom…" autocomplete="off" spellcheck="false">
+      <input id="sub" type="text" placeholder="搜索文章标题、正文、标签…" autocomplete="off" spellcheck="false">
       <div class="dot">↵ enter</div>
       <button id="checkBtn">GO</button>
     </div>
-    <p class="preview">→ <b id="preview">posts</b> <span id="status">— jump to first match</span></p>
+    <p class="preview">→ <b id="preview">试试 systemd</b> <span id="status">输入关键词搜索</span></p>
+    <div id="search-results" class="search-results" hidden></div>
 
     <div class="hero-cta">
       <a href="/root/posts" class="btn primary">看长文 →</a>
@@ -961,6 +992,71 @@
     if (e.key === 'Escape'){ hideDrawer(); return; }
     if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleDrawerFs(); }
   });
+
+  /* ---------- 全局搜索 (第一版: 只搜 posts, 后续加 tools 来源) ---------- */
+  const srInput = document.getElementById('sub');
+  const srBtn   = document.getElementById('checkBtn');
+  const srBox   = document.getElementById('search-results');
+  const srPrev  = document.getElementById('preview');
+  const srHint  = document.getElementById('status');
+  let srTimer = null;
+
+  // 转义后再把命中词包进 <mark>
+  function hl(text, kw){
+    let out = escHtmlW(text || '');
+    if (!kw) return out;
+    const safe = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return out.replace(new RegExp('(' + safe + ')', 'gi'), '<mark>$1</mark>');
+  }
+
+  function srRender(data, q){
+    if (!data.results.length){
+      srBox.innerHTML = '<div class="sr-empty">没有匹配 “' + escHtmlW(q) + '” 的文章</div>';
+      return;
+    }
+    const rows = data.results.map(r => {
+      const text = r.snippet || r.summary || '';
+      const tags = (r.tags || []).map(t => '<span>#' + escHtmlW(t) + '</span>').join('');
+      return '<a class="sr-item" href="/root/posts/read/' + encodeURIComponent(r.slug) + '">' +
+        '<div class="t">' + hl(r.title, q) + '</div>' +
+        '<div class="s">' + hl(text, q) + '</div>' +
+        '<div class="m"><span>' + escHtmlW(String(r.updated_at).slice(0, 10)) + '</span>' +
+        '<span>' + r.reading_min + ' min</span>' + tags + '</div></a>';
+    }).join('');
+    srBox.innerHTML = '<div class="sr-head"><span>SEARCH · POSTS</span><span>' +
+      data.count + ' HIT' + (data.count > 1 ? 'S' : '') + '</span></div>' + rows;
+  }
+
+  async function srRun(){
+    const q = srInput.value.trim();
+    if (!q){ srBox.hidden = true; srHint.textContent = '输入关键词搜索'; return; }
+    srHint.textContent = '搜索中…';
+    srBox.hidden = false;
+    srBox.innerHTML = '<div class="sr-empty">搜索中…</div>';
+    try{
+      const r = await fetch('/root/posts/search?q=' + encodeURIComponent(q),
+                            { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      const d = j.data;
+      srPrev.textContent = q;
+      srHint.textContent = d.count ? d.count + ' 条匹配' : '无匹配';
+      srRender(d, q);
+    }catch(err){
+      srBox.hidden = false;
+      srBox.innerHTML = '<div class="sr-err">搜索失败: ' + escHtmlW(err.message) + '</div>';
+      srHint.textContent = '出错了';
+    }
+  }
+
+  // 输入防抖 250ms, 不用每次都打后端
+  srInput?.addEventListener('input', () => {
+    clearTimeout(srTimer);
+    if (!srInput.value.trim()){ srBox.hidden = true; srHint.textContent = '输入关键词搜索'; return; }
+    srTimer = setTimeout(srRun, 250);
+  });
+  srInput?.addEventListener('keydown', e => { if (e.key === 'Enter'){ clearTimeout(srTimer); srRun(); } });
+  srBtn?.addEventListener('click', () => { clearTimeout(srTimer); srRun(); });
 
   // tools 列表是静态 HTML, 点击直接跳独立页 (不进 drawer)
   document.querySelectorAll('#tools-mount .item[data-href]').forEach(it => {
