@@ -683,19 +683,19 @@
   hawk@gentoo</pre>
         <dl class="ff-info" id="ff-info">
           <dt>OS</dt><dd>Gentoo Linux x86_64</dd>
-          <dt>Kernel</dt><dd id="ff-kernel">6.18.35-gentoo-r1-hawk</dd>
-          <dt>Uptime</dt><dd id="ff-uptime">—</dd>
-          <dt>Shell</dt><dd>zsh 5.9</dd>
-          <dt>Resolution</dt><dd id="ff-res">—</dd>
-          <dt>DE</dt><dd>xterm</dd>
-          <dt>WM</dt><dd>i3</dd>
-          <dt>Terminal</dt><dd>st-256color</dd>
-          <dt>CPU</dt><dd>AMD Ryzen 9 7950X (16) @ 5.700GHz</dd>
+          <dt>Kernel</dt><dd id="ff-kernel">@<{`uname -r`}></dd>
+          <dt>Uptime</dt><dd id="ff-uptime">@<{`uptime`}></dd>
+          <dt>Shell</dt><dd>@<{`zsh --version`}></dd>
+<!--          <dt>Resolution</dt><dd id="ff-res">—</dd>-->
+<!--          <dt>DE</dt><dd>xterm</dd>-->
+<!--          <dt>WM</dt><dd>i3</dd>-->
+<!--          <dt>Terminal</dt><dd>st-256color</dd>-->
+          <dt>CPU</dt><dd>@<{`cat /proc/cpuinfo | grep 'model name' | head -n1 | cut -d: -f2`}></dd>
           <dt>GPU</dt><dd>AMD Radeon RX 7900 XTX</dd>
           <dt>Memory</dt><dd id="ff-mem">—</dd>
           <dt>Disk</dt><dd>2.0 TB / 4.0 TB (50%)</dd>
           <dt>Network</dt><dd id="ff-net">192.168.7.1 / 1 GbE</dd>
-          <dt>Packages</dt><dd>1842 (portage)</dd>
+          <dt>Packages</dt><dd>@<{`cat /var/lib/portage/world  | wc -l`}> (portage)</dd>
         </dl>
       </div>
     </div>
