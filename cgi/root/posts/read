@@ -10,7 +10,7 @@
 # /root/notes/read 是独立的一套 (后续两者样式/导航会分叉, 不共用)。
 
 require_relative File.expand_path('../../_base_', __dir__)
-require_relative '_lib'
+require_relative '_lib_'
 
 READ_TPL = File.expand_path('static/read.html', __dir__)
 
@@ -32,7 +32,7 @@ end
 
 Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
   slug = req.named(:slug)
-  post = find_post(slug)
+  post = Post.find(slug)
   if post.nil?
     rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_page(slug)).finish
     next

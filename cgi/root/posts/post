@@ -2,19 +2,25 @@
 # frozen_string_literal: true
 # root/posts/post — 创建
 #
-#   POST /root/posts/post/all      → 创建 (body: {slug?, title, body, author?, tags})
+#   POST /root/posts/post/new → body: { slug?, title, body, summary?, tags? }
 
 require_relative File.expand_path('../../_base_', __dir__)
-require_relative '_lib'
+require_relative '_lib_'
 
 Q.post '/new' do |req, rsp|
   # next unless require_write_auth(req, rsp)
-  data = parse_body(req, rsp) || next
-  result = create_post(data)
-  if result[:ok]
-    post = find_post(result[:slug])
-    rsp.ok_json({ ok: true, data: post_with_prev_next(result[:slug], post) }).finish
-  else
-    rsp.code(400).status('Bad Request').ok_json({ ok: false, error: result[:error] }).finish
+  data = Post::Api.parse_body(req)
+  if data.nil?
+    rsp.code(400).status('Bad Request').ok_json({ ok: false, error: 'invalid json' }).finish
+    next
   end
+
+  result = Post.create(slug: data[:slug].to_s, **Post::Api.write_params(data))
+  unless result[:ok]
+    rsp.code(400).status('Bad Request').ok_json({ ok: false, error: result[:error] }).finish
+    next
+  end
+
+  post = Post.find(result[:slug])
+  rsp.ok_json({ ok: true, data: Post.with_prev_next(result[:slug], post) }).finish
 end

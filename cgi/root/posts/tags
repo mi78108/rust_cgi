@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# root/posts/tags — GET /root/posts/tags/all
+# root/posts/tags — GET /root/posts/tags
 
 require_relative File.expand_path('../../_base_', __dir__)
-require_relative '_lib'
+require_relative '_lib_'
 
 Q.get '/*' do |_req, rsp|
-  rsp.ok_json({ ok: true, data: { tags: post_tag_counts } }).finish
+  rsp.ok_json({ ok: true, data: { tags: Post.tag_counts } }).finish
 end

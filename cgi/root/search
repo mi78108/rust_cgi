@@ -14,7 +14,7 @@
 # 权重: title 100 > tags 40 > summary 20 > body 10, 按 score 降序取前 20
 
 require_relative File.expand_path('../_base_', __dir__)
-require_relative 'posts/_lib'
+require_relative 'posts/_lib_'
 
 SNIPPET_PAD = 60
 
@@ -42,29 +42,27 @@ def strip_md(text)
       .gsub(/\*\*?|__?/, '')               # 强调
 end
 
-# 各来源统一返回 { kind:, slug:, title:, href:, tags:, reading_min:, updated_at:, score:, snippet: }
+# 各来源统一返回 { kind:, slug:, title:, href:, tags:, reading_min:, updated_at, score:, snippet: }
 def search_posts(q, kw)
-  all_posts.filter_map do |p|
-    full = find_post(p[:slug])
-    next unless full
-
+  # full: true → 带 body (搜索要扫正文)
+  Post.list(full: true).filter_map do |p|
     score = 0
-    score += 100 if full[:title].to_s.downcase.include?(kw)
-    score += 40  if full[:tags].join(' ').downcase.include?(kw)
+    score += 100 if p[:title].to_s.downcase.include?(kw)
+    score += 40  if p[:tags].join(' ').downcase.include?(kw)
     score += 20  if p[:summary].to_s.downcase.include?(kw)
-    body_md     = strip_md(full[:body])
+    body_md     = strip_md(p[:body].to_s)
     score += 10  if body_md.downcase.include?(kw)
     next if score.zero?
 
     {
       kind:        'post',
-      slug:        full[:slug],
-      title:       full[:title],
-      href:        "/root/posts/read/#{full[:slug]}",
+      slug:        p[:slug],
+      title:       p[:title],
+      href:        "/root/posts/read/#{p[:slug]}",
       summary:     p[:summary],
-      tags:        full[:tags],
-      reading_min: full[:reading_min],
-      updated_at:  full[:updated_at],
+      tags:        p[:tags],
+      reading_min: p[:reading_min],
+      updated_at:  p[:updated_at].iso8601,
       score:       score,
       snippet:     snippet_for(body_md, q),
     }

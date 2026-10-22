@@ -2,21 +2,28 @@
 # frozen_string_literal: true
 # root/posts/put — 更新
 #
-#   PUT /root/posts/put/<slug>      → 更新 (body: {title?, body?, author?, tags?})
+#   PUT /root/posts/put/<slug> → body: { title?, body?, summary?, tags? }
 
 require_relative File.expand_path('../../_base_', __dir__)
-require_relative '_lib'
+require_relative '_lib_'
 
 Q.put(%r{^/(?<slug>.+)$}) do |req, rsp|
   # next unless require_write_auth(req, rsp)
   slug = req.named(:slug)
-  data = parse_body(req, rsp) || next
-  result = update_post(slug, data)
-  if result[:ok]
-    post = find_post(slug)
-    rsp.ok_json({ ok: true, data: post_with_prev_next(slug, post) }).finish
-  else
-    code = result[:error] == 'not found' ? 404 : 400
-    rsp.code(code).status(code == 404 ? 'Not Found' : 'Bad Request').ok_json({ ok: false, error: result[:error] }).finish
+  data = Post::Api.parse_body(req)
+  if data.nil?
+    rsp.code(400).status('Bad Request').ok_json({ ok: false, error: 'invalid json' }).finish
+    next
   end
+
+  result = Post.update(slug: slug, **Post::Api.write_params(data))
+  unless result[:ok]
+    code = result[:error] == 'not found' ? 404 : 400
+    rsp.code(code).status(code == 404 ? 'Not Found' : 'Bad Request')
+       .ok_json({ ok: false, error: result[:error] }).finish
+    next
+  end
+
+  post = Post.find(slug)
+  rsp.ok_json({ ok: true, data: Post.with_prev_next(slug, post) }).finish
 end
