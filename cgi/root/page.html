@@ -116,6 +116,7 @@
     background:var(--bg);
     box-shadow:4px 4px 0 var(--ink);
     margin:10px 0 14px;
+    position:relative;   /* .search-results 绝对定位的锚点 */
   }
   .check .pre{
     padding:14px 14px;background:var(--ink);color:var(--lime);
@@ -155,10 +156,13 @@
   }
   .preview b{color:var(--ink);font-weight:600}
 
-  /* ---------- 全局搜索结果 ---------- */
+  /* ---------- 全局搜索结果 (悬浮面板, 不占文档流) ---------- */
+  /* .check 加 position:relative 作为定位锚点; 结果面板 absolute 挂在它下方,
+     页面内容不被挤压。z-index 高于 strip-section 等常规区块。 */
   .search-results{
+    position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:9200;
     border:1px solid var(--ink);background:var(--bg);
-    box-shadow:4px 4px 0 var(--ink);margin:0 0 20px;
+    box-shadow:4px 4px 0 var(--ink);
     max-height:min(420px, 52vh);overflow-y:auto;
   }
   .search-results[hidden]{display:none}
@@ -1067,6 +1071,17 @@
   });
   srInput?.addEventListener('keydown', e => { if (e.key === 'Enter'){ clearTimeout(srTimer); srRun(); } });
   srBtn?.addEventListener('click', () => { clearTimeout(srTimer); srRun(); });
+
+  // 点击搜索框外关闭面板 (浮层不挡页面, 但点外面就该收起)
+  document.addEventListener('click', e => {
+    if (srBox.hidden) return;
+    if (!srBox.contains(e.target) && !srInput.contains(e.target) && e.target !== srBtn){
+      srBox.hidden = true;
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !srBox.hidden) srBox.hidden = true;
+  });
 
   // tools 列表是静态 HTML, 点击直接跳独立页 (不进 drawer)
   document.querySelectorAll('#tools-mount .item[data-href]').forEach(it => {
