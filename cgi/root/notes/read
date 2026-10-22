@@ -14,7 +14,7 @@ Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|
   slug = req.named(:slug)
   note = find_note(slug)
   if note.nil?
-    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_html('note', slug)).finish
+    rsp.code(404).status('Not Found').type('text/html; charset=utf-8').body(render_404_html('notes', slug)).finish
     next
   end
 
