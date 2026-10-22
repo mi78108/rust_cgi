@@ -303,7 +303,8 @@
   @media (max-width:880px){.sys-grid{grid-template-columns:1fr}}
   /* 3-col grid on wide screens */
   @media (min-width:880px){
-    .strip-section .item-list{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink);margin:0 -28px}
+    .strip-section .item-list{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--ink);border-bottom:0;margin:0 -28px}
+    /* item 的 border-left:0 是为了列间不双线; grid 首列的左边线由 list 的 border 提供 */
     .strip-section .item{border-radius:0;border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);border-left:0;min-height:200px;padding:22px 28px 24px}
   }
 
