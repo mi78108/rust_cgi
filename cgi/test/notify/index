@@ -20,4 +20,6 @@
 require_relative '../../_env_/ruby/_base_'
 
 PUB_ROOT = '123'
-load 'pub'
+# 用 Cgi_Root 拼绝对路径加载 pub (Cgi_Root 是 spider 注入的 cgi 根目录绝对路径,
+# 见 src/tcp_class/tcp_func.rs:74)。这样无论 CWD / $LOAD_PATH 怎么设都能找到。
+load File.join(ENV.fetch('Cgi_Root', Dir.pwd), 'pub')
