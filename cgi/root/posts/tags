@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 # root/posts/tags — GET /root/posts/tags
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
 Q.get '/*' do |_req, rsp|

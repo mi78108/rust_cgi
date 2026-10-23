@@ -17,8 +17,8 @@
 #   因此 demo 模板里的代码用 puts，不要依赖表达式返回值。
 #   并且 @<{}> 内不能含 {}（gsub 找不到配对），用 do/end 或简单表达式。
 
-require_relative '../_base_'
-require_relative '../_ext_form_'
+require_relative '../_env_/ruby/_base_'
+require_relative '../_env_/ruby/_ext_form_'
 
 Q.on_close do
   Q.log 'bye'

@@ -34,7 +34,7 @@
 # 存储：$SPIDER_DATA/<token>/{meta.json, data, part/<n>}
 #      SPIDER_DATA 未设置时默认 /tmp/share。
 
-require_relative '../../_base_'
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
 PAGE        = 'dist/page.html'

@@ -4,7 +4,7 @@
 #
 #   POST /root/posts/post/new → body: { slug?, title, body, summary?, tags? }
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
 Q.post '/new' do |req, rsp|

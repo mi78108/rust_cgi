@@ -21,7 +21,7 @@
 # 房间名白名单 [A-Za-z0-9_-]{1,32}，跟 chat/ws 端点的清洗规则一致。
 # 不合法的当 default，避免拼出坏 URL / open redirect。
 
-require_relative '../../_base_'
+require_relative '../../_env_/ruby/_base_'
 
 ROOM_MAX     = 32
 DEFAULT_ROOM = 'default'

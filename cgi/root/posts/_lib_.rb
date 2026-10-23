@@ -25,6 +25,8 @@ require 'timeout'
 require 'fileutils'
 
 class Post
+  # __dir__ 定位 (不能只靠相对路径): 本文件被 cgi/root/posts/* (CWD=cgi/root/posts)
+  # 和 cgi/root/search (CWD=cgi/root) 两处 require, 两者 CWD 差一层, 相对路径必有一个错
   ROOT = File.expand_path('../data/posts', __dir__)
 
   # ── 存储层 ────────────────────────────────────────────

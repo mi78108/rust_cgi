@@ -27,8 +27,8 @@
 #     {type:'peers', peers}             房内 peer 全量（refresh 回应）
 #     {type:'error', msg}
 
-require_relative '../../_base_'
-require_relative '../../_ext_notify_'
+require_relative '../../_env_/ruby/_base_'
+require_relative '../../_env_/ruby/_ext_notify_'
 
 # 单条消息长度上限（防止有人狂刷）
 MSG_MAX     = 4 * 1024

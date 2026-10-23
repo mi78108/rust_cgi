@@ -17,7 +17,7 @@
 #   - 每次 ws 连接 fork 一个 CGI 进程，exit 时 mcast 释放
 #   - 双向场景若需更长生命周期，得让 spider 常驻 mcast 并通过 fd/pipe 灌给 CGI
 
-require_relative '../../_base_'
+require_relative '../../_env_/ruby/_base_'
 
 PUB_ROOT = '123'
 load 'pub'

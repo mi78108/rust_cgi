@@ -4,9 +4,9 @@
 #   GET /                          → SPA HTML (dist/index.html)  ← 这里
 # 其他路由按端点拆到独立文件 (list / tags / get / create / update / assets)。
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 
-SPA_FILE = File.expand_path('dist/index.html', __dir__)
+SPA_FILE = 'dist/index.html'
 
 Q.get '/*' do |_req, rsp|
   if File.file?(SPA_FILE)

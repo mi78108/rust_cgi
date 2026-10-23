@@ -4,7 +4,7 @@
 #
 # 路由只做: 取全量 → 序列化 → 包响应。业务在 Post / Post::Api。
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
 Q.get '/*' do |_req, rsp|

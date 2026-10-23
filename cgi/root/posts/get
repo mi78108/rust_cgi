@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 # root/posts/get — GET /root/posts/get/<slug>
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
 Q.get(%r{^/(?<slug>[^/]+)$}) do |req, rsp|

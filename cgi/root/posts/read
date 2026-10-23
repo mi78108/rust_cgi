@@ -9,10 +9,10 @@
 # 模板 posts/dist/read.html + 下面的渲染函数都归 posts 所有;
 # /root/notes/read 是独立的一套 (后续两者样式/导航会分叉, 不共用)。
 
-require_relative File.expand_path('../../_base_', __dir__)
+require_relative '../../_env_/ruby/_base_'
 require_relative '_lib_'
 
-READ_TPL = File.expand_path('dist/read.html', __dir__)
+READ_TPL = 'dist/read.html'
 
 def esc_html(s)
   String(s).gsub(/[&<>"']/) { |c| { '&'=>'&amp;','<'=>'&lt;','>'=>'&gt;','"'=>'&quot;',"'"=>'&#39;' }[c] }

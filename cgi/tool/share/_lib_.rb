@@ -7,7 +7,7 @@
 #       所有业务判断（有效期、授权、配额、懒清理）都在这里。
 #
 # 用法：
-#   require_relative '../../_base_'
+#   require_relative '../../tool/share/_base_'
 #   require_relative '_lib_'
 #
 #   Q.get %r{^/(?<token>[a-f0-9]{16})$} do |req, rsp|
@@ -32,7 +32,7 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 require 'uri'
-require_relative '../../_ext_form_'
+require_relative '../../_env_/ruby/_ext_form_'
 
 SHARE_ROOT = ENV.fetch('SPIDER_DATA', nil).to_s.empty? ? '/tmp/share' : ENV['SPIDER_DATA']
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-require_relative '_base_'
+require_relative './_env_/ruby/_base_'
 
 Q.get do |_,p|
   p.redirect_to 'root'

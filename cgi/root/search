@@ -13,7 +13,7 @@
 # 匹配范围: title + summary + tags + body (body 只用于判定和取片段, 不整篇返回)
 # 权重: title 100 > tags 40 > summary 20 > body 10, 按 score 降序取前 20
 
-require_relative File.expand_path('../_base_', __dir__)
+require_relative '../_env_/ruby/_base_'
 require_relative 'posts/_lib_'
 
 SNIPPET_PAD = 60

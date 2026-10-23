@@ -10,8 +10,8 @@
 # spider 是 fork-per-request (每个请求一个 ruby 子进程), 所以本进程只会
 # 服务一个 ws 连接, 进程内单例 mcast / $peers 不会跨连接泄漏.
 
-require_relative '../_base_'
-require_relative '../_ext_notify_'
+require_relative '../_env_/ruby/_base_'
+require_relative '../_env_/ruby/_ext_notify_'
 require_relative '_ws_lib'
 
 # ── GET / → 主页面 ───────────────────────────────────

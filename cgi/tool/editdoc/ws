@@ -20,8 +20,8 @@
 #   spider 是 fork-per-request, 每个 ws 连接一个 ruby 进程, 各自持有 SocketNotify 实例.
 #   广播靠 UDP 组播 (239.255.0.1:5000) 跨进程, 仅限同机 —— demo 足够.
 
-require_relative '../../_base_'
-require_relative '../../_ext_notify_'
+require_relative '../../_env_/ruby/_base_'
+require_relative '../../_env_/ruby/_ext_notify_'
 
 # 单帧上限: SocketNotify 的 PACKET_LIMIT (60KB, 与 _ext_notify_.rb 保持一致)。
 # 注意 UDP 单包硬上限 ~65507 字节, 且大包会被 IP 分片 —— 丢包时 weavo 会走
