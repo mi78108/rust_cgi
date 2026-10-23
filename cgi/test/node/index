@@ -1,0 +1,250 @@
+#!/usr/bin/env node
+// test/node/index — _env_/node/_base_.mjs 端到端测试
+//
+// node 风格用法示例: rsp.json() / rsp.status().json() / 挂载同一 handler /
+// 正则命名捕获（没有 <name> 占位符）。
+//
+// 覆盖: route / 命名捕获 / query / body / json / form / multipart /
+// ok 家族 / redirect / chunked / SSE / 文件 / Cookie / 状态码 / WS / 404
+
+import fs from 'node:fs';
+import { Q } from '../../_env_/node/_base_.mjs';
+
+const HERE = new URL('.', import.meta.url).pathname;
+
+// ============================================================
+// 0) 索引
+// ============================================================
+Q.get('/', (req, rsp) => {
+  const rows = [
+    ['/test/node',                '索引页'],
+    ['/test/node/info',           'req 基本信息'],
+    ['/test/node/q?user=alice',   'query + 默认值'],
+    ['/test/node/u/42',           '正则命名捕获'],
+    ['/test/node/mounted',        '同一 handler 挂 GET+PUT'],
+    ['/test/node/render',         '{{key}} 模板'],
+    ['/test/node/json',           'rsp.json'],
+    ['/test/node/teapot',         'rsp.status(418).json'],
+    ['/test/node/missing',        '404'],
+    ['/test/node/boom',           '抛异常 → 500'],
+    ['/test/node/go',             '302'],
+    ['/test/node/stream',         'chunked 生成器'],
+    ['/test/node/sse',            'SSE'],
+    ['/test/node/dl',             '文件下载'],
+    ['POST /test/node/echo',      'raw body'],
+    ['POST /test/node/json',      'req.json()'],
+    ['POST /test/node/form',      'urlencoded body'],
+    ['POST /test/node/upload',    'multipart'],
+    ['POST /test/node/seen',      '读 Cookie'],
+    ['GET  /test/node/cookie',    '写 Cookie'],
+    ['GET  /test/node/headers',   '自定义 header'],
+    ['WS   /test/node/ws',        'WebSocket echo'],
+  ];
+  let html = '<h1>_base_.mjs</h1><p>node 风格 CGI —— rsp.json() / 正则命名捕获</p>\n'
+    + '<table border=1 cellpadding=4><tr style="background:#eee"><th>Endpoint</th><th>演示</th></tr>\n';
+  for (const [url, desc] of rows) {
+    const href = url.replace(/^(GET|POST|WS)\s+/, '');
+    html += `<tr><td><a href="${href}">${url}</a></td><td>${desc}</td></tr>\n`;
+  }
+  rsp.html(html + '</table>');
+});
+
+// ============================================================
+// 1) req 基本信息
+// ============================================================
+Q.get('/info', (req, rsp) => rsp.json({
+  method: req.method,
+  version: req.version,
+  path: req.path,                              // restful 部分
+  scriptPath: req.scriptPath,                  // 完整 URL
+  contentType: req.contentType,
+  contentLength: req.contentLength,
+  headers: { host: req.header('host'), ua: req.header('user-agent') },
+  cookies: req.cookies,
+  peer: req.peer,
+  argv: req.argv,
+  bufferSize: Q.BUFFER_SIZE,
+  script: { name: Q.scriptName(), dir: Q.scriptDir() },
+}));
+
+// ============================================================
+// 2) query + 默认值
+// ============================================================
+Q.get('/q', (req, rsp) => rsp.json({
+  raw: req.query_,
+  all: req.query,
+  user: req.q('user'),
+  userOr: req.q('user', 'guest'),
+  qty: req.q('qty', 0),
+  missing: req.q('nope', 'fallback'),
+  cookie: req.cookie('seen', 'none'),
+}));
+
+// ============================================================
+// 3) 正则命名捕获 —— 没有 <name> 占位符, (?<id>) 就是它
+// ============================================================
+Q.get(/^\/u\/(?<id>\d+)$/, (req, rsp) => rsp.json({
+  note: 'RegExp named capture',
+  id: req.named('id'),
+  idOr: req.named('nope', 'default'),
+  argv0: req.argv[0],
+  q: req.q('user', 'guest'),
+}));
+
+// 挂载: 同一个 handler 挂两个 method
+const mounted = (req, rsp) => rsp.json({ method: req.method, path: req.path });
+Q.get('/mounted', mounted);
+Q.put('/mounted', mounted);
+
+// ============================================================
+// 4) {{key}} 模板 —— node 里没有 eval, 用占位符
+// ============================================================
+Q.get('/render', (req, rsp) => {
+  const items = ['apple', 'banana', 'cherry'];
+  rsp.vars({
+    user: req.q('user', 'world'),
+    n: items.length,
+    list: items.map((x) => `<li>${x}</li>`).join('\n'),
+    title: 'render demo',
+  });
+  rsp.html('<h1>{{title}}</h1>\n<p>hi {{user}}, {{n}} items</p>\n<ul>\n{{list}}\n</ul>\n');
+});
+
+// ============================================================
+// 5) 状态码 —— rsp.status().json()
+//
+// 一个 handler 演示任意状态码: ?code=418 → 418
+// ============================================================
+Q.get('/json', (req, rsp) => rsp.json({ ok: true, n: 3, items: ['a', 'b'] }));
+
+Q.get('/teapot', (req, rsp) => rsp.status(418).json({ error: 'short and stout' }));
+
+// 通用状态码端点（测试用）
+Q.get('/status', (req, rsp) => {
+  const code = Number(req.q('code', 200));
+  rsp.status(code).json({ code });
+});
+
+// ============================================================
+// 6) 错误 —— 404 / 500
+// ============================================================
+Q.get('/missing', (req, rsp) => rsp.status(404).json({ error: 'not found' }));
+
+Q.get('/boom', () => {
+  throw new Error('intentional boom');
+});
+
+// ============================================================
+// 7) redirect
+// ============================================================
+Q.get('/go', (req, rsp) => rsp.redirect('/test/node/info'));
+Q.get('/perm', (req, rsp) => rsp.redirect('/test/node/info', 301));
+
+// ============================================================
+// 8) chunked
+// ============================================================
+Q.get('/stream', (req, rsp) => {
+  rsp.stream((i) => (i < 5 ? `tick ${i}\n` : null));
+});
+
+Q.get('/sse', (req, rsp) => {
+  rsp.stream('text/event-stream', (i) => (i < 5 ? `data: tick ${i}\n\n` : null));
+});
+
+// ============================================================
+// 9) 文件 —— rsp.file(path, 'as.txt')
+// ============================================================
+Q.get('/dl', (req, rsp) => {
+  const fn = req.q('fn', 'page.html');
+  const p = new URL(`../../test/${fn}`, import.meta.url).pathname;
+  if (!fs.existsSync(p)) {
+    rsp.status(404).json({ error: 'no such file', tried: p });
+    return;
+  }
+  rsp.file(p, fn);                    // attachment
+});
+
+// ============================================================
+// 10) body 家族
+// ============================================================
+Q.post('/echo', (req, rsp) => rsp.json({
+  contentType: req.contentType,
+  contentLength: req.contentLength,
+  size: req.body.raw.length,
+  head: req.body.text.slice(0, 200),
+}));
+
+Q.post('/json', (req, rsp) => rsp.json({
+  parsed: req.json(),                 // 解析失败 → null
+  raw: req.body.text.slice(0, 200),
+}));
+
+Q.post('/form', (req, rsp) => rsp.json({
+  query: req.query,                   // req.q 只看 query
+  form: req.form,                     // body 里的
+  qA: req.q('a'),                    // null —— a 在 body
+  formA: req.form.a,
+}));
+
+// ============================================================
+// 11) multipart
+// ============================================================
+Q.post('/upload', (req, rsp) => {
+  const form = req.formData();
+  if (!form) {
+    rsp.status(400).text('expected multipart/form-data');
+    return;
+  }
+  const saved = [];
+  for (const item of form.files) {
+    const target = `/tmp/q_node_${process.pid}_${item.filename}`;
+    fs.writeFileSync(target, item.content);
+    saved.push({ name: item.name, filename: item.filename, to: target, size: item.size });
+  }
+  rsp.json({
+    items: [...form].map((i) => i.toJSON()),
+    filesSaved: form.files.length,
+    saved,
+  });
+});
+
+// ============================================================
+// 12) Cookie
+// ============================================================
+Q.post('/seen', (req, rsp) => rsp.json({
+  cookies: req.cookies,
+  seen: req.cookie('seen', 'none'),
+}));
+
+Q.get('/cookie', (req, rsp) => {
+  rsp.cookie('session', 'abc123', { maxAge: 3600, httpOnly: true, sameSite: 'Lax' })
+    .cookie('preference', 'dark', { maxAge: 86400 })
+    .cookie('tracking', 'off', { secure: true })
+    .json({ cookiesSet: 3 });
+});
+
+// ============================================================
+// 13) header
+// ============================================================
+Q.get('/headers', (req, rsp) => {
+  rsp.set('X-Custom-A', 'aaa')
+    .set('X-Custom-B', 'bbb')
+    .del('Content-Type')
+    .type('application/json')
+    .json({ demo: 'set / append / del' });
+});
+
+// ============================================================
+// 14) onClose
+// ============================================================
+Q.onClose(() => {
+  process.stderr.write(`[onClose] pid=${process.pid} ${Q.REQ_METHOD} ${Q.REQ_PATH}\n`);
+  return 'closed';
+});
+
+// ============================================================
+// 15) WebSocket echo
+// ============================================================
+Q.ws('/ws', (req) => {
+  req.onMessage((msg) => `echo: ${msg}`);
+});
