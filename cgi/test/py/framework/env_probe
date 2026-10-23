@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+# 宿主机 python3 探针 —— spider 直接 exec 本文件, 所以它跑得起来就说明解释器可用
+import sys, json, os, platform
+
+out = {
+    "ok": True,
+    "version": sys.version.split()[0],
+    "version_full": sys.version.replace("\n", " "),
+    "implementation": platform.python_implementation(),
+    "executable": sys.executable,
+    "argv0": sys.argv[0] if sys.argv else None,
+    "cwd": os.getcwd(),
+    "stdin_isatty": sys.stdin.isatty(),
+    "stdout_isatty": sys.stdout.isatty(),
+    "env_req_keys": sorted(k for k in os.environ if k.startswith("Req_")),
+    "cgi_root": os.environ.get("Cgi_Root"),
+    "script_dir": os.environ.get("Req_Script_Dir"),
+}
+
+body = json.dumps(out).encode()
+sys.stdout.write(f"HTTP/1.0 200 OK\r\nConnection: close\r\n"
+                 f"Content-Type: application/json; charset=utf-8\r\n"
+                 f"Content-Length: {len(body)}\r\n\r\n")
+sys.stdout.flush()
+sys.stdout.buffer.write(body)
+sys.stdout.flush()

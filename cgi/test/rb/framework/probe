@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# cgi/test/framework/probe — 环境探针
+#
+# 回答三个问题:
+#   1. spider 看到的 __FILE__ / CWD / SCRIPT_DIR 是什么路径
+#   2. 容器里 cp 进去的文件, 宿主机的 spider 能不能看到
+#   3. require_relative 相对解析用的是哪个基准
+#
+# GET /test/framework/probe
+
+require_relative '../../../_env_/ruby/_base_'
+
+Q.get '/' do |_req, rsp|
+  here = File.dirname(File.expand_path(__FILE__))
+  helper_rb = File.join(here, 'notify_helper.rb')
+  sibling = File.expand_path('../../pub', __FILE__)
+
+  rsp.ok_json(
+    file: __FILE__,
+    expanded_file: File.expand_path(__FILE__),
+    dir_here: here,
+    cwd: Dir.pwd,
+    script_dir: Q.script_dir,
+    script_cwd: Q.script_cwd,
+    cgi_root: Q::CGI_ROOT,
+    fixture_page_exists: File.file?(File.join(here, 'page.html')),
+    helper_rb_path: helper_rb,
+    helper_rb_exists: File.file?(helper_rb),
+    helper_dir_listing: (Dir.glob(File.join(here, '*')).map { |p| File.basename(p) } rescue ['<err>']),
+    sibling_pub_exists: File.file?(sibling),
+    load_ok: begin
+      load helper_rb
+      'ok'
+    rescue StandardError, ScriptError => e
+      "#{e.class}: #{e.message}"
+    end,
+    define_ok: defined?(CaptureNotify) ? 'CaptureNotify defined' : 'undefined'
+  ).finish
+end

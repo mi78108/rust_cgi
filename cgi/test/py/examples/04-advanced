@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""04-advanced — 流式、文件、WebSocket、上传、静态资源.
+
+演示这些容易踩坑的形态:
+  * stream(): chunked 响应, 分块产出
+  * send_file(): 静态文件 + Content-Disposition
+  * Q.ws + req.on_ws_data(): WebSocket 双向
+  * multipart 上传(需 import _ext_form_)
+  * 加载 cgi/pub 做静态资源服务
+  * cookie / 重定向 / 自定义 header
+
+    curl -s  http://172.19.0.1:8080/test/pyex/04/advanced/stream
+    curl -sI http://172.19.0.1:8080/test/pyex/04/advanced/download
+    curl -sI http://172.19.0.1:8080/test/pyex/04/advanced/cookie
+    curl -s  http://172.19.0.1:8080/test/pyex/04/advanced/redirect
+    curl -s -F 'f=@/etc/hostname' http://172.19.0.1:8080/test/pyex/04/advanced/upload
+    curl -s  http://172.19.0.1:8080/test/pyex/04/advanced/static/style.css
+"""
+
+import json
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.join(os.environ['Cgi_Root'], '_env_', 'python'))
+
+from _base_ import Q, Body  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CGI_ROOT = os.environ['Cgi_Root']
+
+
+# ── 索引 ─────────────────────────────────────────────────────────────────
+@Q.get('/')
+def index(req, rsp):
+    """MAP_PATH=/ 就是脚本自身 URL。"""
+    rsp.ok_json({
+        'endpoints': [
+            'GET  /stream       chunked, 生成器风格',
+            'GET  /stream2      chunked, Body 块接口',
+            'GET  /download     文件下载 (Content-Disposition)',
+            'GET  /cookie       Set-Cookie + 读 cookie',
+            'GET  /redirect     302',
+            'GET  /redirect301  301',
+            'GET  /upload       上传表单 (GET)',
+            'POST /upload       收 multipart',
+            'GET  /static       静态资源索引',
+            'GET  /static/*     静态资源 (走 cgi/pub)',
+            'WS   /ws           WebSocket echo',
+            'GET  /events       SSE 风格长连接',
+            'GET  /headers      自定义 header',
+        ],
+        'argv': list(Q.ARGV),
+        'argv_count': req.argv_count,
+        'peer': Q.PEER_ADDR,
+    }).finish()
+
+
+# ── chunked 流式 ─────────────────────────────────────────────────────────
+# stream() 切 Transfer-Encoding: chunked。block 收一个计数器,
+# 返回 chunk 字符串, 返回 None/''/False 停止。
+@Q.get('/stream')
+def stream(req, rsp):
+    rsp.type('text/plain; charset=utf-8').stream(
+        lambda i: f'chunk {i}\n' if i < 5 else None
+    )
+
+
+# 也可以用 Body 的流式接口自己控制粒度:
+@Q.get('/stream2')
+def stream2(req, rsp):
+    def pump(emit, chunk_size):
+        for i in range(10):
+            emit(f'line {i:02d} ' + '.' * (i * 3) + '\n')
+    rsp.type_text().set_body(None, pump).stream()
+
+
+# ── 静态文件下载 ────────────────────────────────────────────────────────
+@Q.get('/download')
+def download(req, rsp):
+    path = os.path.join(HERE, 'sample.txt')
+    if not os.path.isfile(path):
+        return rsp.fail_404().ok_text('sample.txt 不存在').finish()
+    # send_file 设 Content-Disposition; 文件不存在时自动转 404
+    rsp.send_file(path,
+                  mime='text/plain; charset=utf-8',
+                  download_as='sample.txt').finish()
+
+
+# ── Cookie ──────────────────────────────────────────────────────────────
+@Q.get('/cookie')
+def cookie(req, rsp):
+    rsp.cookie_set('sid', 'abc123', max_age=3600, httponly=True, samesite='Lax')
+    rsp.cookie_set('theme', 'dark', max_age=86_400)
+    rsp.cookie_set('track', 'off', secure=True)
+    # 读回来看看
+    rsp.ok_json({
+        'set': 3,
+        'incoming': req.cookies,
+        'seen': req.cookie('sid', 'none'),
+    }).finish()
+
+
+# ── 重定向 ──────────────────────────────────────────────────────────────
+@Q.get('/redirect')
+def redirect(req, rsp):
+    target = req.param('to', '/test/pyex/04/advanced')
+    rsp.redirect_to(target).finish()
+
+
+@Q.get('/redirect301')
+def redirect301(req, rsp):
+    rsp.redirect_to('/test/pyex/04/advanced', code=301).finish()
+
+
+# ── multipart 上传 ──────────────────────────────────────────────────────
+@Q.get('/upload')
+def upload_form(req, rsp):
+    rsp.ok_html(
+        '<form method="POST" enctype="multipart/form-data" action="/test/pyex/04/advanced/upload">'
+        '<input type="file" name="f"><button>上传</button></form>'
+    ).finish()
+
+
+@Q.post('/upload')
+def upload(req, rsp):
+    # body_form_data 需要 _ext_form_ —— 不 import 就 NameError
+    from _ext_form_ import Form  # noqa: F401
+
+    form = req.body_form_data()
+    if form is None:
+        return rsp.fail_400().type_text().set_body(
+            '需要 multipart/form-data').finish()
+
+    saved = []
+    for item in form.each_file():
+        target = f'/tmp/pyex_upload_{os.getpid()}_{item.filename}'
+        item.save_to(target)
+        saved.append({**item.to_h(), 'to': target})
+
+    rsp.ok_json({
+        'parts': len(form),
+        'files': form.files_count(),
+        'items': [i.to_h() for i in form.items],
+        'saved': saved,
+    }).finish()
+
+
+# ── 静态资源 ─────────────────────────────────────────────────────────────
+# cgi/pub 是 Ruby 写的静态文件服务器, Python 侧不能直接 exec —— 没有
+# 定义 Q.route / Q.get 这些 Ruby 专有调用。
+# 用框架自己的 Body 抽象直接发文件, 和 Ruby 版的 pub 行为对齐:
+# MIME 按扩展名查, 路径做穿越防护。
+MIME = {
+    '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
+    '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif',
+    '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
+}
+STATIC_ROOT = os.path.join(CGI_ROOT, 'pub')
+# pub 本身是个**文件**(Ruby 的静态服务器), 不是资源目录。真正可serve 的
+# 静态资源在各业务目录下(例如 root/dist、root/posts/dist)。这里把它们
+# 收集成一个可 serve 的白名单, 与 pub 的思路一致(按相对路径取)。
+STATIC_MOUNTS = {
+    'posts': os.path.join(CGI_ROOT, 'root', 'posts', 'dist'),
+    'root': os.path.join(CGI_ROOT, 'root', 'dist'),
+}
+
+
+
+@Q.get('/static')
+def static_index(req, rsp):
+    listing = {}
+    for mount, root in STATIC_MOUNTS.items():
+        listing[mount] = sorted(os.listdir(root))[:20] if os.path.isdir(root) else []
+    rsp.ok_json({
+        'mounts': listing,
+        'usage': '/static/posts/index.html  ·  /static/root/style.css',
+    }).finish()
+
+
+# 用一个入口处理 /static 下的一切, 内部按 MAP_PATH 分流。这样不用纠结
+# 多条 pattern 的注册顺序与优先级。
+#
+# 两个实测出来的约束:
+#   1) '/*' 不是子路径通配符 —— 框架只在 pattern **正好等于** '/*' 时才
+#      无条件命中(`if pattern == '/*': return True` 早返回);
+#      '/static/*' 里的 * 只当正则元字符, 匹配不了多段。
+#   2) '<name>' 只吃单段([^/]+), 所以 '/static/<path>' 匹配不到
+#      '/static/posts/index.html'。要任意段数必须用 re.Pattern。
+@Q.get(re.compile(r'/static(/.*)?'))
+def static_or_fallback(req, rsp):
+    # req.path 就是 MAP_PATH, 去掉 '/static/' 前缀就是相对路径
+    rel = req.path[len('/static/'):] if req.path.startswith('/static/') else ''
+    if not rel or rel.endswith('/'):
+        return static_index(req, rsp)
+
+    mount, _, name = rel.partition('/')
+    if not name:
+        return rsp.fail_404().type_text().set_body(
+            '用法: /static/<mount>/<file>\n').finish()
+
+    root = STATIC_MOUNTS.get(mount)
+    if not root:
+        return rsp.fail_404().type_text().set_body(
+            f'unknown mount: {mount}\n可用: {", ".join(STATIC_MOUNTS)}\n').finish()
+    # 穿越防护
+    if '..' in name or name.startswith('/') or '..' in mount:
+        return rsp.fail_400().type_text().set_body(f'invalid path: {mount}/{name}').finish()
+
+    full = os.path.join(root, name)
+    if not os.path.isfile(full):
+        return rsp.fail_404().type_text().set_body(
+            f'not found: {mount}/{name}\n'
+            f'该 mount 下有: {", ".join(sorted(os.listdir(root))[:10])}\n').finish()
+
+    mime = MIME.get(os.path.splitext(full)[1].lower())
+    if mime is None:
+        return rsp.fail_404().type_text().set_body(
+            f'unsupported extension: {os.path.splitext(full)[1]}').finish()
+
+    # set_body 传路径字符串会被 Body.wrap 识别成文件 → FileBody, 分块读
+    rsp.type(mime).set_body(full).finish()
+
+
+# ── WebSocket ───────────────────────────────────────────────────────────
+# spider 负责握手与帧编解码, CGI 只看到裸 payload。
+# req.on_ws_data 循环读帧; block 返回值会被写回客户端。
+@Q.ws('/ws')
+def ws_echo(req, rsp):
+    Q.log('[ws] client connected')
+    Q.on_close(lambda: Q.log('[ws] client disconnected'))
+
+    def on_frame(chunk: bytes):
+        # chunk 是裸 bytes, 不含 ws frame 头
+        try:
+            text = chunk.decode('utf-8')
+        except UnicodeDecodeError:
+            return b'error: not utf-8\n'
+        return f'echo: {text}\n'.encode()
+
+    req.on_ws_data(on_frame)
+
+
+# 一个 SSE 风格的长连接示例(普通 HTTP, 不是 ws)
+@Q.get('/events')
+def events(req, rsp):
+    rsp.type('text/event-stream').stream(
+        lambda i: f'event: tick\ndata: {i}\n\n' if i < 5 else None
+    )
+
+
+# ── 自定义 header + 大 body ─────────────────────────────────────────────
+@Q.get('/headers')
+def headers(req, rsp):
+    rsp.header_field('X-Powered-By', 'spider/py')
+    rsp.header_field('X-Request-Map', req.path)
+    rsp.ok_json({'ok': True}).finish()
+
+
+Q.run()

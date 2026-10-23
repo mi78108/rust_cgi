@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""02-json-api — 一个完整的 JSON API: 分层 + 校验 + 错误响应.
+
+演示真实业务端点的写法:
+  * 领域逻辑与 HTTP 翻译分开(类 + Api 模块), 路由文件只做「取参 → 调方法 → 包响应」
+  * 参数校验集中在一处, 错误响应格式统一
+  * 一个文件承载多个 method / 多条路由
+
+    curl -s  http://172.19.0.1:8080/test/pyex/02/json-api
+    curl -s  http://172.19.0.1:8080/test/pyex/02/json-api?q=python
+    curl -s -X POST -H 'content-type: application/json' \
+         -d '{"title":"hello","tags":["a","b"]}' \
+         http://172.19.0.1:8080/test/pyex/02/json-api
+    curl -s -X DELETE http://172.19.0.1:8080/test/pyex/02/json-api/1
+"""
+
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.environ['Cgi_Root'], '_env_', 'python'))
+
+from _base_ import Q  # noqa: E402
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 领域层 —— 和 HTTP 无关, 可以单独测
+# ═══════════════════════════════════════════════════════════════════════════
+class Note:
+    """内存笔记集合(fork-per-request, 每个请求都是新实例)。"""
+
+    _seq = 0
+
+    def __init__(self, title: str, body: str = '', tags: list[str] | None = None):
+        Note._seq += 1
+        self.id = Note._seq
+        self.title = title
+        self.body = body
+        self.tags = tags or []
+        self.created_at = datetime.now(timezone.utc)
+
+    @classmethod
+    def all(cls) -> list['Note']:
+        return sorted(SEED, key=lambda n: n.id, reverse=True)
+
+    @classmethod
+    def find(cls, nid: int) -> 'Note | None':
+        return next((n for n in SEED if n.id == nid), None)
+
+    @classmethod
+    def search(cls, kw: str) -> list['Note']:
+        kw = kw.lower()
+        return [n for n in cls.all()
+                if kw in n.title.lower()
+                or kw in n.body.lower()
+                or any(kw in t.lower() for t in n.tags)]
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'title': self.title,
+            'body': self.body,
+            'tags': self.tags,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
+SEED: list[Note] = [
+    Note('Rust 所有权', '借用检查在编译期完成', ['rust', 'memory']),
+    Note('Ruby CGI', 'fork-per-request 的一次性请求', ['ruby', 'cgi']),
+    Note('Python 装饰器', '路由注册就是装饰器', ['python', 'framework']),
+]
+
+# 中文标签 —— 验证 UTF-8 在 query / JSON 里都不乱码
+SEED.append(Note('中文标题测试', '正文也含中文：你好世界', ['中文', 'utf8']))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HTTP 边界层 —— 只做翻译
+# ═══════════════════════════════════════════════════════════════════════════
+class Api:
+    """把 HTTP 请求翻译成对 Note 的调用。"""
+
+    MAX_TITLE = 200
+    MAX_BODY = 10_000
+    MAX_TAGS = 10
+
+    # 注意 Rsp 的链式 API: code / status / body / header 是 **property**,
+    # 不是方法 —— 写 rsp.code(500) 会报 "'int' object is not callable"。
+    # 设 code 的正确方式是 `rsp.code = 500`, 或者用 fail_4xx() 这类方法
+    # (它们内部同时设 code 和 status)。所以下面统一用 fail_xxx。
+    @staticmethod
+    def ok(rsp, data, code=200, status='OK'):
+        # 注意: 不能在设好 code 之后再调 ok_json —— 它内部走 ok() 会把
+        # _code 重置成 200。所以要么先 ok_json 再改 code, 要么像这里
+        # 直接设 code/status 再 set_body。
+        rsp.code = code
+        rsp.status = status
+        rsp.type_json().set_body(json.dumps(
+            {'ok': True, 'data': data},
+            ensure_ascii=False, separators=(',', ':'))).finish()
+
+    @staticmethod
+    def err(rsp, msg, code=400, **extra):
+        # code → 对应的 fail_xxx 方法; 400/403/404/405/500 是框架内置的
+        setter = {400: rsp.fail_400, 403: rsp.fail_403, 404: rsp.fail_404,
+                  405: rsp.fail_405, 500: rsp.fail_500}.get(code)
+        if setter is None:
+            # 没有内置的, 直接赋 property (status 也要一起, 否则状态行会是 "500 OK")
+            rsp.code = code
+            rsp.status = {201: 'Created', 204: 'No Content'}.get(code, 'Error')
+        else:
+            setter()
+        rsp.type_json().set_body(json.dumps(
+            {'ok': False, 'error': msg, **extra},
+            ensure_ascii=False, separators=(',', ':'))).finish()
+
+    @classmethod
+    def list_params(cls, req) -> dict | str:
+        """校验 list 的 query 参数。返回 dict 通过, 返回 str 是错误信息。"""
+        try:
+            limit = int(req.param('limit', 20))
+        except ValueError:
+            return 'limit 必须是数字'
+        if not 1 <= limit <= 100:
+            return 'limit 必须在 1..100 之间'
+        return {
+            'q': req.param('q', '').strip(),
+            'tag': req.param('tag', ''),
+            'limit': limit,
+        }
+
+    @classmethod
+    def create_params(cls, data) -> dict | str:
+        """校验 body。返回 dict 表示通过, 返回 str 是错误信息。"""
+        if not isinstance(data, dict):
+            return 'body 必须是 JSON 对象'
+        title = str(data.get('title', '')).strip()
+        if not title:
+            return 'title 不能为空'
+        if len(title) > cls.MAX_TITLE:
+            return f'title 超过 {cls.MAX_TITLE} 字符'
+        body = str(data.get('body', ''))
+        if len(body) > cls.MAX_BODY:
+            return f'body 超过 {cls.MAX_BODY} 字符'
+        tags = data.get('tags', [])
+        if not isinstance(tags, list):
+            return 'tags 必须是数组'
+        tags = [str(t)[:32] for t in tags if str(t).strip()][:cls.MAX_TAGS]
+        return {'title': title, 'body': body, 'tags': tags}
+
+
+# ── GET /  —— 列表 + 搜索 ──────────────────────────────────────────────────
+@Q.get('/')
+def list_notes(req, rsp):
+    p = Api.list_params(req)
+    if isinstance(p, str):            # str = 校验失败
+        return Api.err(rsp, p, 400, field='limit')
+
+    q, tag, limit = p['q'], p['tag'], p['limit']
+    items = Note.search(q) if q else Note.all()
+    if tag:
+        items = [n for n in items if tag in n.tags]
+
+    Api.ok(rsp, {
+        'q': q,
+        'count': len(items),
+        'returned': min(len(items), limit),
+        'notes': [n.to_dict() for n in items[:limit]],
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ── GET /<id>  —— 详情 ─────────────────────────────────────────────────────
+# 两点注意:
+#   1) pattern **按注册顺序**匹配, 且 '<id>' 吃掉任意非斜杠段 —— 所以 'nope'
+#      也会命中这里, 而不是下面的兜底路由。
+#   2) 想把 id 约束成纯数字, **不能**写 '/<[0-9]+>' —— 框架会先把 <...>
+#      当命名占位符替换成 (?P<id>[^/]+), 里面的 [0-9]+ 会被搅乱
+#      (实测那样写依然能匹配 'nope')。正解是用 re.Pattern, 框架原生支持。
+@Q.get(re.compile(r'/(?P<id>\d+)'))
+def get_note(req, rsp):
+    nid = int(req.named('id'))       # pattern 已保证是纯数字
+    note = Note.find(nid)
+    if note is None:
+        return Api.err(rsp, f'note {nid} 不存在', 404, id=nid)
+    Api.ok(rsp, note.to_dict())
+
+
+# ── POST /  —— 创建 ───────────────────────────────────────────────────────
+# 注意 body 只能读一次(STDIN 是用干的管道), 所以先 body_json 一次,
+# 不要先 req.body() 再 body_json()。
+@Q.post('/')
+def create_note(req, rsp):
+    data = req.body_json()
+    if data is None:
+        return Api.err(rsp, 'body 不是合法 JSON', 400)
+
+    params = Api.create_params(data)
+    if isinstance(params, str):
+        return Api.err(rsp, params, 422, field='title')
+
+    note = Note(**params)
+    SEED.insert(0, note)
+    Api.ok(rsp, note.to_dict(), code=201, status='Created')
+
+
+# ── DELETE /<id>  —— 删除 ─────────────────────────────────────────────────
+@Q.delete(re.compile(r'/(?P<id>\d+)'))
+def delete_note(req, rsp):
+    nid = int(req.named('id'))
+    note = Note.find(nid)
+    if note is None:
+        return Api.err(rsp, f'note {nid} 不存在', 404)
+    SEED.remove(note)
+    Api.ok(rsp, {'deleted': note.id})
+
+
+# ── 兜底 ──────────────────────────────────────────────────────────────────
+@Q.route('/*')
+def not_found(req, rsp):
+    Api.err(rsp, f'没有这个端点: {req.path}', 404,
+            hint='试试 GET / · GET /1 · POST / · ?q=中文')
+
+
+Q.run()

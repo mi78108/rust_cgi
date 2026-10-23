@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""cgi/test/parity/http/py — HTTP 响应字节对拍 (Python 侧).
+
+与 cgi/test/parity/http/rb 做同样的事: 每种 ?case= 返回一种响应形态,
+两边用 curl 抓原始响应字节再 diff —— 确认 header 顺序、大小写、CRLF、
+Content-Length、chunked 分帧全部一致。
+
+    curl -si 'http://172.19.0.1:8080/test/parity/http/py?case=json'
+    curl -si 'http://172.19.0.1:8080/test/parity/http/rb?case=json'
+"""
+
+import sys, os, json
+
+_pydir = os.path.join(os.environ.get('Cgi_Root', os.getcwd()), '_env_', 'python')
+sys.path.insert(0, _pydir)
+
+from _base_ import Q  # noqa: E402
+
+NAME = os.environ.get('Req_Param_case', 'json')
+
+
+# 注意: '/*' 是「**非空** restful 通配」, 只在 MAP_PATH 非空时命中。
+# MAP_PATH='/'(脚本自身 URL) 要另外注册 '/' 才跑得到 —— 漏了这条的话
+# 直接访问本脚本会 404, 只有带 /users/42 之类路径才通。
+
+def _case(req, rsp):
+    if NAME == 'json':
+        rsp.ok_json({'ok': True, 'n': 42, 's': 'x'}).finish()
+    elif NAME == 'html':
+        rsp.ok_html('<h1>hi</h1>').finish()
+    elif NAME == 'text':
+        rsp.ok_text('line1\nline2\n').finish()
+    elif NAME == 'redirect':
+        rsp.redirect_to('/target').finish()
+    elif NAME == 'redirect301':
+        rsp.redirect_to('/perm', code=301).finish()
+    elif NAME == 'notfound':
+        # separators 紧凑输出 —— 对齐 Ruby 的 Hash#to_json
+        rsp.fail_404().type_json().set_body(
+            json.dumps({'error': 'nope'}, separators=(',', ':'))).finish()
+    elif NAME == 'badreq':
+        rsp.fail_400().type_text().set_body('bad\n').finish()
+    elif NAME == 'server':
+        rsp.fail_500().type_html().set_body('<h1>boom</h1>').finish()
+    elif NAME == 'cookie':
+        (rsp.cookie_set('a', '1', max_age=60, httponly=True, samesite='Lax')
+            .cookie_set('b', '2')
+            .ok_json({'set': 2}).finish())
+    elif NAME == 'header':
+        (rsp.header_field('X-A', 'aaa')
+            .header_field('X-B', 'bbb')
+            .header_remove('Content-Type')
+            .ok_json({'h': 1}).finish())
+    elif NAME == 'file':
+        here = os.path.dirname(os.path.abspath(__file__))
+        rsp.send_file(os.path.join(here, '..', 'page.html'),
+                      mime='text/plain').finish()
+    elif NAME == 'empty':
+        rsp.ok_json(None).finish()
+    elif NAME == 'unicode':
+        rsp.ok_text('报告 café').finish()
+    elif NAME == 'chunked':
+        rsp.stream(lambda i: f'tick {i}\n' if i < 3 else None)
+    elif NAME == '404raw':
+        rsp.fail_404().type_text().set_body('nope\n').finish()
+    else:
+        rsp.ok_json({'case': NAME}).finish()
+
+
+# MAP_PATH='/' 与非空 restful 两种形态都要能跑
+Q.route('/', method=['GET'])(_case)
+Q.route('/*', method=['GET'])(_case)
+
+Q.run()

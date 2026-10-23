@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# cgi/test/parity/http/rb — HTTP 响应字节对拍 (Ruby 侧)
+#
+# 每个 ?case= 返回一种响应形态。Python 侧 cgi/test/parity/http/py 做同样的事。
+# 用 curl 分别抓两边的**原始响应字节**再 diff, 即确认两个实现在 HTTP 层
+# 产出的 header 顺序、大小写、CRLF、Content-Length 全部一致。
+#
+#   curl -sD - -o body_rb 'http://172.19.0.1:8080/test/parity/http/rb?case=json'
+#   curl -sD - -o body_py 'http://172.19.0.1:8080/test/parity/http/py?case=json'
+#   diff <(curl -si .../rb?case=json) <(curl -si .../py?case=json)
+#
+# case: json | html | text | redirect | notfound | cookie | header | file
+#       | empty | chunked | unicode | 404raw
+
+require_relative '../../../../_env_/ruby/_base_'
+
+NAME = ENV.fetch('Req_Param_case', 'json')
+
+Q.route '/*', method: :GET do |_req, rsp|
+  case NAME
+  when 'json'     then rsp.ok_json({ ok: true, n: 42, s: 'x' }).finish
+  when 'html'     then rsp.ok_html('<h1>hi</h1>').finish
+  when 'text'     then rsp.ok_text("line1\nline2\n").finish
+  when 'redirect' then rsp.redirect_to('/target').finish
+  when 'redirect301' then rsp.redirect_to('/perm', code: 301).finish
+  when 'notfound' then rsp.fail_404.type_json.body({ error: 'nope' }.to_json).finish
+  when 'badreq'   then rsp.fail_400.type_text.body("bad\n").finish
+  when 'server'   then rsp.fail_500.type_html.body('<h1>boom</h1>').finish
+  when 'cookie'
+    rsp.cookie_set('a', '1', max_age: 60, httponly: true, samesite: 'Lax')
+       .cookie_set('b', '2')
+       .ok_json({ set: 2 }).finish
+  when 'header'
+    rsp.header_field('X-A', 'aaa')
+       .header_field('X-B', 'bbb')
+       .header_remove('Content-Type')
+       .ok_json({ h: 1 }).finish
+  when 'file'
+    rsp.send_file(File.join(__dir__, '..', 'page.html'), mime: 'text/plain').finish
+  when 'empty'   then rsp.ok_json(nil).finish
+  when 'unicode' then rsp.ok_text('报告 café').finish
+  when 'chunked' then rsp.stream { |i| i < 3 ? "tick #{i}\n" : nil }
+  when '404raw'
+    # 不注册任何匹配路由时, 由 END 兜底块发 404 —— 这里直接走到那步
+    rsp.fail_404.type_text.body("nope\n").finish
+  else
+    rsp.ok_json({ case: NAME }).finish
+  end
+end

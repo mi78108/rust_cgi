@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""01-basics — 最简的四个端点.
+
+演示框架最小的骨架: 导入 → 装饰器注册路由 → 取参 → 响应 → finish。
+
+    curl -s http://172.19.0.1:8080/test/pyex/01/basics
+    curl -s 'http://172.19.0.1:8080/test/pyex/01/basics?user=hawk'
+    curl -s http://172.19.0.1:8080/test/pyex/01/basics/hello/hawk
+
+注意:
+  * spider 剥 URL 直到找到存在的文件。这个文件叫 `basics`, 所以
+    /test/pyex/01/basics          → MAP_PATH=/
+    /test/pyex/01/basics/hello/x  → MAP_PATH=/hello/x
+  * 路由匹配的是 MAP_PATH(脚本位置之后的部分), 不是完整 URL。
+"""
+
+import os
+import sys
+
+# 框架不在 sys.path 上, 用 Cgi_Root(spider 注入的绝对路径) 拼出来。
+sys.path.insert(0, os.path.join(os.environ['Cgi_Root'], '_env_', 'python'))
+
+from _base_ import Q  # noqa: E402
+
+
+# ── 1. 返回 JSON ──────────────────────────────────────────────────────────
+# ok_json 会设 Content-Type + Content-Length(紧凑输出, 与 Ruby 侧字节一致)。
+@Q.get('/')
+def index(req, rsp):
+    rsp.ok_json({
+        'hello': 'world',
+        'framework': 'python',
+        'ruby_version': Q.REQ_VERSION,
+        'map_path': Q.MAP_PATH,
+    }).finish()
+
+
+# ── 2. 取 query 参数 ─────────────────────────────────────────────────────
+# param(key, default) —— 第二个参数是默认值, 不用自己判空。
+@Q.get('/q')
+def query(req, rsp):
+    rsp.ok_json({
+        'user': req.param('user', 'anonymous'),   # 没传 → 'anonymous'
+        'page': int(req.param('page', 1)),        # 自己转类型
+        'header_host': req.header_host,           # 方法糖
+    }).finish()
+
+
+# ── 3. 命名捕获 ──────────────────────────────────────────────────────────
+# '/user/<name>' 自动转成 (?P<name>[^/]+), 用 req.named('name') 读。
+# 也可以用糖: req.named_name
+@Q.get('/user/<name>')
+def user(req, rsp):
+    name = req.named('name')
+    # 故意拼一个不存在的 URL, 看框架怎么处理
+    rsp.ok_json({
+        'name': name,
+        'profile_url': f'/test/pyex/01/basics/user/{name}',
+        'argv': list(Q.ARGV),          # restful 段, 1 起始的 Req_Argv_N
+        'argv_count': req.argv_count,
+    }).finish()
+
+
+# ── 4. 多段捕获 + 方法糖 ────────────────────────────────────────────────
+# '/greet/<lang>/<name>' 是两个捕获组。
+@Q.get('/greet/<lang>/<name>')
+def greet(req, rsp):
+    greetings = {'zh': '你好', 'en': 'Hello', 'ja': 'こんにちは'}
+    g = greetings.get(req.named_lang, 'Hi')
+    rsp.ok_text(f'{g}, {req.named_name}!\n').finish()
+
+
+# 被 import 时要手动驱动; 直接 exec 时由 shebang 启动, 同样需要 run()。
+Q.run()

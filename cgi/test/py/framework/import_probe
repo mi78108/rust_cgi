@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""最小启动测试 —— 逐步定位 import 失败点."""
+
+import sys, os, traceback
+
+OUT = []
+here = os.path.dirname(os.path.abspath(__file__))
+envdir = os.path.join(os.path.dirname(os.path.dirname(here)), '_env_', 'python')
+# 直接用 Req_Script_Dir 的三级父目录 = cgi 根
+cgi_root = os.environ.get('Cgi_Root', '')
+pydir = os.path.join(cgi_root, '_env_', 'python')
+
+OUT.append(('cgi_root', cgi_root))
+OUT.append(('pydir', pydir))
+OUT.append(('pydir exists', os.path.isdir(pydir)))
+OUT.append(('files', sorted(os.listdir(pydir)) if os.path.isdir(pydir) else []))
+
+sys.path.insert(0, pydir)
+OUT.append(('sys.path[0]', sys.path[0]))
+
+try:
+    import _base_
+    OUT.append(('import _base_', 'OK'))
+except BaseException as e:
+    OUT.append(('import _base_ FAILED', f'{type(e).__name__}: {e}'))
+    OUT.append(('traceback', traceback.format_exc()))
+
+try:
+    import _ext_form_
+    OUT.append(('import _ext_form_', 'OK'))
+except BaseException as e:
+    OUT.append(('import _ext_form_ FAILED', f'{type(e).__name__}: {e}'))
+
+try:
+    import _ext_notify_
+    OUT.append(('import _ext_notify_', 'OK'))
+except BaseException as e:
+    OUT.append(('import _ext_notify_ FAILED', f'{type(e).__name__}: {e}'))
+
+body = ('\n'.join(f'{k}: {v}' for k, v in OUT)).encode()
+sys.stdout.buffer.write(b'HTTP/1.0 200 OK\r\nConnection: close\r\n'
+                        b'Content-Type: text/plain; charset=utf-8\r\n'
+                        + f'Content-Length: {len(body)}\r\n\r\n'.encode())
+sys.stdout.buffer.write(body)
+sys.stdout.buffer.flush()

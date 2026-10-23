@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# cgi/test/framework/body_probe — req.body 的可重复读语义
+#
+# Q.read(length) = STDIN.read(length)。STDIN 是已被读干的管道, 所以第二次
+# read 返回 nil。此探针按 ?mode= 决定先调哪个方法, 逐次记录结果。
+#
+#   MODE=body      curl -X POST -d '{"probe":"zzz"}' .../body_probe?mode=body
+#   MODE=json      curl -X POST -d '{"probe":"zzz"}' .../body_probe?mode=json
+#   MODE=text      curl -X POST -d 'plain'          .../body_probe?mode=text
+#   MODE=all       (默认) body → body → body_json → body_text → STDIN.read
+#
+# 结论: body / body_json / body_text 共享同一个 STDIN, 只有第一个被调用的能拿到
+# 数据, 之后一律 nil。需要 body 又需要 body_json 时, 先 body 一次再自己 JSON.parse。
+
+require_relative '../../../_env_/ruby/_base_'
+
+MODE = ENV['Req_Param_mode'].to_s.empty? ? 'all' : ENV['Req_Param_mode'].to_s
+
+def record(n, label)
+  v = yield
+  { call: n, label: label, value: v, class: v.class.name,
+    bytesize: v.is_a?(String) ? v.bytesize : nil }
+rescue StandardError, ScriptError => e
+  { call: n, label: label, error: "#{e.class}: #{e.message}" }
+end
+
+def run(req, rsp)
+  c = []
+  n = 0
+
+  case MODE
+  when 'body'
+    n += 1; c << record(n, 'body (首个)') { req.body }
+  when 'json'
+    n += 1; c << record(n, 'body_json (首个)') { req.body_json }
+    n += 1; c << record(n, 'body (其后)') { req.body }
+  when 'text'
+    n += 1; c << record(n, 'body_text (首个)') { req.body_text }
+    n += 1; c << record(n, 'body (其后)') { req.body }
+  else
+    n += 1; c << record(n, 'body (首个)') { req.body }
+    n += 1; c << record(n, 'body (第二次)') { req.body }
+    n += 1; c << record(n, 'body_json (第三次)') { req.body_json }
+    n += 1; c << record(n, 'body_text (第四次)') { req.body_text }
+    n += 1; c << record(n, 'STDIN.read 直读') { STDIN.read(1024) }
+  end
+
+  rsp.ok_json(
+    ok: true,
+    mode: MODE,
+    map_path: Q::MAP_PATH,
+    body_length: req.body_length,
+    body_type: req.body_type,
+    calls: c
+  ).finish
+end
+
+# 注意: '/*' 是「**非空** restful 通配」, 只在 MAP_PATH 非空时命中。
+# 想要 MAP_PATH='/'(脚本自身 URL, 比如不带 ?mode= 直接访问) 也能跑,
+# 必须**另外**注册一条 '/' —— 之前只写了 '/*', 结果直接访问 404。
+Q.route '/',  method: %i[GET POST] do |req, rsp|
+  run(req, rsp)
+end
+
+Q.route '/*', method: %i[GET POST] do |req, rsp|
+  run(req, rsp)
+end

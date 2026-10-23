@@ -12,3 +12,7 @@ Cargo.lock
 node_modules
 .vscode
 .zed
+
+# Python 框架的字节码缓存 (fork-per-request 下并发写)
+__pycache__/
+*.pyc

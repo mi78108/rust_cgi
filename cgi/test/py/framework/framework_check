@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Python 框架行为探针.
+
+每条断言把「实际观察到的值」原样返回, 不做布尔化 —— 值本身才是证据。
+用法:
+    curl -s 'http://172.19.0.1:8080/test/framework/py_probe2' | jq .
+"""
+
+import sys, os, io, re, json
+sys.path.insert(0, os.path.join(
+    os.environ.get('Cgi_Root', os.getcwd()), '_env_', 'python'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '_env_', 'python'))
+
+from _base_ import (  # noqa: E402
+    Q, QEnv, Req, Rsp, Body, TextBody, FileBody, StreamBody,
+    log, capture_stdout, read, write, write_headers, write_chunk,
+    write_chunk_end, write_resp, match_pattern, run, on_close,
+)
+
+R = []
+
+
+def check(name, want, got, note=None):
+    e = {'name': name, 'ok': want == got, 'want': want, 'got': got}
+    if note:
+        e['note'] = note
+    R.append(e)
+
+
+def expect_raise(name, exc_types, note=None):
+    try:
+        yield_fn = None  # noqa: F841
+    except BaseException:
+        pass
+    check(name, True, True)  # placeholder, replaced below
+
+
+def raised(name, exc_types, fn, note=None):
+    try:
+        fn()
+        got = '(no exception)'
+    except BaseException as e:
+        got = type(e).__name__
+    check(name, exc_types, got, note)
+
+
+def group(name):
+    try:
+        yield_ = None
+    except Exception:
+        pass
+
+
+def G(name, fn):
+    try:
+        fn()
+    except BaseException as e:
+        R.append({'name': f'{name} [group aborted]', 'ok': False,
+                  'want': '(no crash)', 'got': f'{type(e).__name__}: {e}',
+                  'note': '用例自身抛异常, 该组后续断言未执行'})
+
+
+# ── env ────────────────────────────────────────────────────────────────────
+def g_env():
+    check('MAP_PATH = "/" + ARGV_PARAMS', '/' + Q.ARGV_PARAMS, Q.MAP_PATH)
+    check('Req#path 与 MAP_PATH 一致', Q.MAP_PATH, Req().path)
+    check('ARGV_COUNT 与 ARGV.size 一致', len(Q.ARGV), Q.ARGV_COUNT)
+
+    check('spider 注入了 Cgi_Root', True, 'Cgi_Root' in QEnv.SNAPSHOT)
+    check('spider 注入了 Req_Method', True, 'Req_Method' in QEnv.SNAPSHOT)
+    check('spider 注入了 Req_Script_Dir', True, 'Req_Script_Dir' in QEnv.SNAPSHOT)
+    check('Cgi_Root 是绝对路径', True, Q.CGI_ROOT.startswith('/'))
+    check('CGI_ROOT 是 SCRIPT_DIR 的祖先(cgi 根)', True,
+          Q.SCRIPT_DIR.startswith(Q.CGI_ROOT))
+    check('BUFFER_SIZE 默认 128KB', 131072, Q.BUFFER_SIZE)
+    check('QEnv.fetch 空串当 missing', 'fallback', QEnv.fetch('Req_Not_There', 'fallback'))
+    check('QEnv.fetch_i 非数字回落 default', 0, QEnv.fetch_i('Req_Not_There', 0))
+
+    check('REMOTE_ADDR 未被 spider 设置', None, os.environ.get('REMOTE_ADDR'))
+    check('Req_Header_X-Forwarded-For 未被 spider 设置', None,
+          os.environ.get('Req_Header_X-Forwarded-For'))
+
+    check('QEnv.decode form 解码 (+ → 空格)', 'a b', QEnv.decode('a+b'))
+    check('QEnv.decode %XX 解码', '报', QEnv.decode('%E6%8A%A5'))
+
+
+G('env', g_env)
+
+# ── routing ────────────────────────────────────────────────────────────────
+def g_routing():
+    raised('非 / 开头的 String pattern 抛 ValueError', 'ValueError',
+           lambda: match_pattern('foo'))
+    check("'/*' 总是匹配", True, match_pattern('/*'))
+    check('None pattern 总是匹配', True, match_pattern(None))
+
+    match_pattern(re.compile(r'(?P<s>.*)'))
+    check('regex 捕获写入 Q.MATCH', True, 's' in Q.MATCH)
+    match_pattern(None)
+    check('Q.MATCH 在下一次匹配前被清空', {}, Q.MATCH)
+
+    check('纯字符串 pattern 与 REQ_PATH 比(不是 MAP_PATH)', True,
+          match_pattern(Q.REQ_PATH))
+    check('纯字符串 pattern 与 MAP_PATH 不同时不匹配', False,
+          match_pattern('/definitely-not-the-url-path'))
+
+
+G('routing', g_routing)
+
+exp = os.environ.get('Req_Param_expect_map', '')
+
+
+def g_routing_map():
+    if not exp:
+        R.append({'name': 'MAP_PATH 路径匹配', 'ok': True, 'want': '(skipped)',
+                  'got': '(skipped)', 'note': '需带 ?expect_map=... 或用对应 URL 驱动'})
+        return
+    check(f'MAP_PATH == expect_map({exp})', exp, Q.MAP_PATH)
+
+    mp = Q.MAP_PATH
+    if mp == '/':
+        check("pattern '/' 命中", True, match_pattern('/'))
+        check("pattern '/info' 不命中", False, match_pattern('/info'))
+        check("pattern '/<name>' 不匹配 '/'", False, match_pattern('/<name>'))
+        check('regex (?P<a>.+) 捕获', 'x',
+              (match_pattern(re.compile(r'(?P<a>.+)')) and Q.MATCH.get('a')))
+    elif mp == '/users/42':
+        check("pattern '/users/<id>' 命中并捕获 42", '42',
+              (match_pattern('/users/<id>') and Q.MATCH.get('id')))
+        check("pattern '/users/<id>' 不吃 '/users/a/b'", False,
+              match_pattern('/users/a/b'))
+        check("pattern '/<a>/<b>' 双捕获", ['users', '42'],
+              (match_pattern('/<a>/<b>') and
+               [Q.MATCH.get('a'), Q.MATCH.get('b')]))
+        check('regex 无锚点命中', '42',
+              (match_pattern(re.compile(r'/users/(?P<id>\d+)')) and
+               Q.MATCH.get('id')))
+        check("字符串含元字符 . 被当正则: /a.b 匹配 /axb", True,
+              match_pattern('/a.b'), '坑: 期望字面量路径, 却因 . 变成通配')
+    elif mp == '/demo/u/7':
+        check('regex 捕获 7', '7',
+              (match_pattern(re.compile(r'/u/(?P<id>\d+)')) and Q.MATCH.get('id')))
+        check('regex 带 ^...$ 锚点同样命中', '7',
+              (match_pattern(re.compile(r'^/u/(?P<id>\d+)$')) and
+               Q.MATCH.get('id')))
+        check("字符串 pattern '/u/<id>' 捕获 7", '7',
+              (match_pattern('/u/<id>') and Q.MATCH.get('id')))
+        check("精确 pattern '/demo/u/7' 不命中", False,
+              match_pattern('/demo/u/7'))
+
+
+G('routing@map', g_routing_map)
+
+# ── rsp ────────────────────────────────────────────────────────────────────
+def g_rsp():
+    r = Rsp()
+    check('默认 code 200', 200, r.code)
+    check('默认 status OK', 'OK', r.status)
+    r.code = 201
+    check('code 设后读回 201', 201, r.code)
+    r.status = 'Created'
+    check('status 设后读回', 'Created', r.status)
+
+    r.fail_404()
+    check('fail_404 同时设 code 与 status', [404, 'Not Found'], [r.code, r.status])
+    r.fail_500()
+    check('fail_500 同时设 code 与 status', [500, 'Internal Server Error'],
+          [r.code, r.status])
+
+    r2 = Rsp()
+    check('type_json', 'application/json; charset=utf-8',
+          r2.type_json().header['Content-Type'])
+    check('type_html', 'text/html; charset=utf-8', r2.type_html().header['Content-Type'])
+    check('type_text', 'text/plain; charset=utf-8', r2.type_text().header['Content-Type'])
+    check('type_xml', 'application/xml; charset=utf-8', r2.type_xml().header['Content-Type'])
+    check('DEFAULT_HEADERS 含 Connection: close', 'close',
+          Rsp.DEFAULT_HEADERS['Connection'])
+
+    r3 = Rsp()
+    r3.cookie_set('a', '1').cookie_set('b', '2')
+    sc = r3.header.get('Set-Cookie', '')
+    check('多次 cookie_set 都写进 Set-Cookie', True,
+          'a=1' in sc and 'b=2' in sc)
+    check('多次 cookie_set 用 CRLF 拼进同一个值', True, '\r\nSet-Cookie: ' in sc,
+          '坑: Set-Cookie 应是多个独立 header 行')
+
+    r4 = Rsp()
+    r4.redirect_to('/x')
+    check('redirect_to 默认 302 + Found + Location', [302, 'Found', '/x'],
+          [r4.code, r4.status, r4.header['Location']])
+    r5 = Rsp()
+    r5.redirect_to('/x', code=301)
+    check('redirect_to 301 + Moved Permanently', [301, 'Moved Permanently'],
+          [r5.code, r5.status])
+
+    r6 = Rsp()
+    check('header_remove 链式返回 self', True,
+          r6.header_remove('Content-Type') is r6)
+    check('header_remove 生效', False,
+          'Content-Type' in r6.header_remove('Content-Type').header)
+    r7 = Rsp()
+    r7.header_field('X-A', 'a')
+    check('header_field 写入', 'a', r7.header.get('X-A'))
+
+    check('Rsp 没有 chunk 方法', False, hasattr(Rsp(), 'chunk'))
+    check('Rsp 有 stream 方法', True, hasattr(Rsp(), 'stream'))
+    check('Rsp#finish 幂等标记 sent 初始 False', False, Rsp().sent)
+
+
+G('rsp', g_rsp)
+
+# ── body ───────────────────────────────────────────────────────────────────
+def g_body():
+    page = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'page.html')
+
+    check('wrap(None) → TextBody', 'TextBody', type(Body.wrap(None)).__name__)
+    check('wrap(None) 内容为空串', 0, Body.wrap(None).size())
+    check('wrap(普通字符串) → TextBody', 'TextBody',
+          type(Body.wrap('hello')).__name__)
+    check('TextBody#size 是字节数', 6, Body.wrap('报告').size(),
+          'UTF-8 每字 3 字节')
+
+    check('wrap(存在的文件路径字符串) → FileBody', 'FileBody',
+          type(Body.wrap(page)).__name__)
+    check('wrap(Path) → FileBody', 'FileBody',
+          type(Body.wrap(__import__('pathlib').Path(page))).__name__)
+    check('FileBody#size 等于文件字节数', os.path.getsize(page), Body.wrap(page).size())
+
+    check('wrap(StringIO) → StreamBody', 'StreamBody',
+          type(Body.wrap(io.StringIO('abc'))).__name__)
+    check('wrap(callable) → StreamBody', 'StreamBody',
+          type(Body.wrap(lambda emit, n: emit(b'x'))).__name__)
+    check('wrap(block=) → StreamBody', 'StreamBody',
+          type(Body.wrap(None, lambda emit, n: emit(b'x'))).__name__)
+    check('wrap(bytes) → TextBody', 'TextBody', type(Body.wrap(b'abc')).__name__)
+
+    tb = TextBody('z')
+    check('wrap(Body 实例) 原样返回(不重新包装)', True, Body.wrap(tb) is tb)
+
+    check('StreamBody#size 恒 None(→ chunked)', None,
+          Body.wrap(lambda emit, n: emit(b'x')).size())
+
+    out = []
+    Body.wrap(lambda emit, n: [emit(f'c{i}'.encode()) for i in range(3)]) \
+        .each_chunk(1024).__iter__().__next__()
+    for chunk in Body.wrap(lambda emit, n: [emit(f'c{i}'.encode()) for i in range(3)]).each_chunk(1024):
+        out.append(chunk.decode())
+    check('StreamBody#each_chunk 逐块 yield', ['c0', 'c1', 'c2'], out)
+
+    sizes = [len(c) for c in Body.wrap(page).each_chunk(8)]
+    check('FileBody#each_chunk 按 chunk_size 切首块', 8, sizes[0])
+    check('FileBody 分块后总字节数不变', os.path.getsize(page), sum(sizes))
+
+    tc = [c.decode() for c in Body.wrap('hello world').each_chunk(4)]
+    check('TextBody#each_chunk 忽略 chunk_size 整块 yield', ['hello world'], tc)
+
+
+G('body', g_body)
+
+# ── render ─────────────────────────────────────────────────────────────────
+def g_render():
+    def rendered(tpl, **kw):
+        r = Rsp()
+        r.set_body(tpl)
+        r.render(**kw)
+        return r.body.to_text()
+
+    check('@<{print}> 输出 + 换行', 'hi\n', rendered('@<{print("hi")}>'))
+    check('@<{1+1}> 无 print 时用返回值', '2', rendered('@<{1 + 1}>'))
+    check('print 与返回值并存时 print 胜出', 'a\n',
+          rendered('@<{ (print("a"), 42)[1] }>'),
+          'Python eval 模式不收语句, 所以用元组取第二个值; '
+          'Ruby 版可直接写 print("a"); 42')
+    check('异常渲染为 [ERROR: ...] 而不抛出', '[ERROR: ValueError: boom]',
+          rendered('@<{ raise ValueError("boom") }>'),
+          'raise 是语句, Python 走 exec 回退分支')
+    check('未捕获异常不外抛(页面照常返回)', True,
+          rendered('@<{ raise ValueError("boom") }>').startswith('[ERROR:'))
+    check('未定义名渲染成错误标记', True,
+          rendered('@<{ NoSuchName_zz }>').startswith('[ERROR:'))
+
+    r = Rsp()
+    r.set('v', 'from-set')
+    r.set_body('@<{v}>')
+    r.render(v='from-hash')
+    check('render 关键字覆盖 set 注入', 'from-hash', r.body.to_text())
+
+    r = Rsp()
+    r.set('v', 'from-set')
+    r.set_body('@<{v}>')
+    r.render()
+    check('set(k, v) 注入的变量可被 @<{}> 读到', 'from-set', r.body.to_text())
+
+    r = Rsp()
+    r.set(v='kwarg-form')
+    r.set_body('@<{v}>')
+    r.render()
+    check('set(k=v) 关键字形式', 'kwarg-form', r.body.to_text())
+
+    r = Rsp()
+    r.set({'k': 'v1'})
+    r.set_body('@<{k}>')
+    r.render()
+    check('set 接受 dict 形式', 'v1', r.body.to_text())
+
+    # 终止符是字面 }> —— 洞里可以用 {} 块
+    check('洞内可以用 {} 块', '[1, 2, 3]',
+          rendered('@<{ sorted([3,1,2], key=lambda x: x) }>'))
+    check('洞内 dict 字面量正常', "{'a': 1}",
+          rendered('@<{ {"a": 1} }>'))
+    check('多洞各独立求值', '1-2-3',
+          rendered('@<{ 1 }>-@<{ 1 + 1 }>-@<{ 1 + 2 }>'))
+    check('洞内多行列表推导 + print',
+          '<li>1</li>\n<li>2</li>\n',
+          rendered('@<{\n[print(f"<li>{x}</li>") for x in [1, 2]]\n}>'))
+
+    check('洞内出现 }> 会截断 → 错误标记', True,
+          rendered('@<{ " }> " }>').startswith('[ERROR:'),
+          '限制: 终止符是字面 }>, 洞里不能出现这个序列')
+    check('render 无洞时原样保留', 'plain', rendered('plain'))
+    check('空洞渲染为空串', '', rendered('@<{}>'))
+    check('render 传 None → 空串', '', rendered('@<{v}>', v=None))
+
+    captured, ret = capture_stdout(lambda: (print('to-stdout'), 99)[1])
+    check('capture_stdout 返回 (输出, 返回值)', ['to-stdout\n', 99], [captured, ret])
+
+
+G('render', g_render)
+
+# ── req ────────────────────────────────────────────────────────────────────
+def g_req():
+    req = Req()
+    check('param 无默认 → None', None, req.param('nope'))
+    check('param 有默认 → 默认值', 'fallback', req.param('nope', 'fallback'))
+    check('header 有默认 → 默认值', 'x', req.header('x-not-there', 'x'))
+    check('cookie 有默认 → 默认值', 'x', req.cookie('nope', 'x'))
+    check('named 有默认 → 默认值', 'x', req.named('nope', 'x'))
+    check('argv 越界 → 默认值', 'x', req.argv(999, 'x'))
+    check('argv 负下标 → 默认值', 'x', req.argv(-1, 'x'))
+    check('argv 非 int → 默认值', 'x', req.argv('0', 'x'))
+
+    check('糖: req.argv_0', True, isinstance(req.argv_0, (str, type(None))))
+    check('糖: req.param_q', True, hasattr(req, 'param_q'))
+    check('糖: req.header_host', True, hasattr(req, 'header_host'))
+    check('糖: req.named_id', True, hasattr(req, 'named_id'))
+    check('糖: req.cookie_seen', True, hasattr(req, 'cookie_seen'))
+    check('未知属性抛 AttributeError', True, _raises_attr(req))
+
+    check('params 是 dict', True, isinstance(req.params, dict))
+    check('cookies 是 dict', True, isinstance(req.cookies, dict))
+    check('body_length 是 int', True, isinstance(req.body_length, int))
+
+    if req.body_length == 0:
+        check('无 body 时 body 返回 None', None, req.body())
+        check('无 body 时 body_json 返回 None', None, req.body_json())
+        check('无 body 时 body_text 返回 None', None, req.body_text())
+        check('非 multipart 时 body_form_data 返回 None', None, req.body_form_data())
+    else:
+        raw = req.body()
+        check('有 body 时 body 返回 bytes', True, isinstance(raw, bytes))
+        check('body 字节数与 content-length 一致', req.body_length, len(raw))
+        check('第二次 body 返回 None(STDIN 已读干)', None, req.body(),
+              '坑: body 只能读一次')
+        check('body 读过后 body_json 返回 None', None, req.body_json())
+        check('body 读过后 body_text 返回 None', None, req.body_text())
+
+
+def _raises_attr(req):
+    try:
+        req.bogus_zz
+        return False
+    except AttributeError:
+        return True
+
+
+G('req', g_req)
+
+# ── 输出 ───────────────────────────────────────────────────────────────────
+failed = [r for r in R if not r['ok']]
+payload = json.dumps({
+    'ok': not failed,
+    'total': len(R),
+    'passed': len(R) - len(failed),
+    'failed': len(failed),
+    'map_path': Q.MAP_PATH,
+    'script': Q.script_name(),
+    'results': R,
+}, ensure_ascii=False).encode()
+
+sys.stdout.buffer.write(
+    b'HTTP/1.0 200 OK\r\nConnection: close\r\n'
+    b'Content-Type: application/json; charset=utf-8\r\n'
+    + f'Content-Length: {len(payload)}\r\n\r\n'.encode())
+sys.stdout.buffer.write(payload)
+sys.stdout.buffer.flush()

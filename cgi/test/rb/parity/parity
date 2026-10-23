@@ -1,0 +1,245 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# cgi/test/parity/rb — 对拍基准 (Ruby 侧)
+#
+# 与 cgi/test/parity/py 输出同构的 JSON。diff 两个文件即可看出
+# Python 实现与 Ruby 实现在行为上的差异。
+#
+#   curl -s http://172.19.0.1:8080/test/parity/rb | jq .
+#   curl -s http://172.19.0.1:8080/test/parity/py | jq .
+#   diff <(ruby侧) <(python侧)
+#
+# 只断言「框架对外可观测的行为」—— 匹配结果、响应字节、模板输出。
+# 内部实现差异(类名/变量名)不纳入对拍。
+
+require_relative '../../../_env_/ruby/_base_'
+
+OUT = {}
+
+def probe(name)
+  OUT[name] = yield
+rescue StandardError, ScriptError => e
+  OUT[name] = "RAISED #{e.class}: #{e.message}"
+end
+
+# ── ENV / 常量 ─────────────────────────────────────────────────────────────
+probe('argv')            { Q::ARGV }
+probe('argv_count')      { Q::ARGV_COUNT }
+probe('argv_params')     { Q::ARGV_PARAMS }
+probe('map_path')        { Q::MAP_PATH }
+probe('req_method')      { Q::REQ_METHOD }
+probe('req_path')        { Q::REQ_PATH }
+probe('req_params')      { Q::REQ_PARAMS }
+probe('body_method')     { Q::BODY_METHOD }
+probe('peer_ip_set')     { Q::PEER_IP.to_s.empty? ? false : true }
+probe('peer_port_type')  { Q::PEER_PORT.class.name }
+probe('buffer_size')     { Q::BUFFER_SIZE }
+probe('script_name')     { Q.script_name }
+probe('script_basename') { Q.script_basename }
+probe('script_dir_tail') { Q.script_dir.to_s.split('/').last(2).join('/') }
+probe('cgi_root_tail')   { Q::CGI_ROOT.split('/').last(2).join('/') }
+probe('remote_addr')     { ENV['REMOTE_ADDR'].inspect }
+probe('x_forwarded')     { ENV['Req_Header_X-Forwarded-For'].inspect }
+probe('fetch_default')   { QEnv.fetch('Req_Nope', 'fb') }
+probe('fetch_i_default') { QEnv.fetch_i('Req_Nope', 7) }
+probe('decode_plus')     { QEnv.decode('a+b') }
+probe('decode_pct')      { QEnv.decode('%E6%8A%A5') }
+
+# ── pattern 匹配 ───────────────────────────────────────────────────────────
+# 每个 pattern 跑一遍, 记录 (是否命中, 捕获)
+PATTERNS = {
+  'slash'      => '/',
+  'wildcard'   => '/*',
+  'nil'        => nil,
+  'named'      => '/users/<id>',
+  'two_named'  => '/<a>/<b>',
+  'meta_dot'   => '/a.b',
+  'literal'    => '/definitely-not-the-url-path',
+  'req_path'   => Q::REQ_PATH,
+  'regex_rel'  => %r{/u/(?<id>\d+)},
+  'regex_anch' => %r{^/u/(?<id>\d+)$},
+  'slash_info' => '/info',
+  'star_mid'   => '/*/x',
+  'named_nodig'=> '/users/<id>/x'
+}
+
+probe('patterns') do
+  # 注意: 不能用 .map{ [bool, MATCH] }.to_h —— Ruby 的 to_h 会把整个数组
+  # 当 key, 结果塌成 {"true"=>{}, "false"=>{}}。这里手工建 Hash。
+  out = {}
+  PATTERNS.each do |label, pat|
+    matched = Q.match_pattern?(pat)
+    out[label] = [matched, Q::MATCH.dup]
+  end
+  out
+end
+
+probe('bad_pattern_raises') do
+  begin
+    Q.match_pattern?('foo')
+    'no exception'
+  rescue StandardError => e
+    e.class.name
+  end
+end
+
+# ── Rsp ────────────────────────────────────────────────────────────────────
+def rsp_snapshot
+  r = Q::Rsp.new
+  out = {}
+  out['default_code'] = r.code
+  out['default_status'] = r.status
+  r.code(201); r.status('Created')
+  out['code_set_get'] = [r.code, r.status]
+  out['fail_404'] = [Q::Rsp.new.fail_404.code, Q::Rsp.new.fail_404.status]
+  out['fail_500'] = [Q::Rsp.new.fail_500.code, Q::Rsp.new.fail_500.status]
+  out['fail_403'] = [Q::Rsp.new.fail_403.code, Q::Rsp.new.fail_403.status]
+  out['fail_400'] = [Q::Rsp.new.fail_400.code, Q::Rsp.new.fail_400.status]
+  out['fail_405'] = [Q::Rsp.new.fail_405.code, Q::Rsp.new.fail_405.status]
+  out['fail_501'] = [Q::Rsp.new.fail_501.code, Q::Rsp.new.fail_501.status]
+  out['type_json'] = Q::Rsp.new.type_json.header['Content-Type']
+  out['type_html'] = Q::Rsp.new.type_html.header['Content-Type']
+  out['type_text'] = Q::Rsp.new.type_text.header['Content-Type']
+  out['type_xml']  = Q::Rsp.new.type_xml.header['Content-Type']
+  out['default_headers'] = Q::Rsp::DEFAULT_HEADERS.dup
+  c = Q::Rsp.new; c.cookie_set('a', '1'); c.cookie_set('b', '2')
+  out['cookie_set'] = c.header['Set-Cookie']
+  rd = Q::Rsp.new; rd.redirect_to('/x')
+  out['redirect_302'] = [rd.code, rd.status, rd.header['Location']]
+  rd2 = Q::Rsp.new; rd2.redirect_to('/x', code: 301)
+  out['redirect_301'] = [rd2.code, rd2.status]
+  hr = Q::Rsp.new; hr.header_field('X-A', 'a'); hr.header_remove('Content-Type')
+  out['header_ops'] = hr.header
+  out['respond_chunk'] = Q::Rsp.new.respond_to?(:chunk)
+  out['respond_stream'] = Q::Rsp.new.respond_to?(:stream)
+  out['sent_init'] = Q::Rsp.new.sent
+  out
+end
+probe('rsp') { rsp_snapshot }
+
+# ── Body ───────────────────────────────────────────────────────────────────
+probe('body') do
+  page = File.join(__dir__, 'page.html')
+  out = {}
+  out['wrap_nil']       = [Q::Body.wrap(nil).class.name, Q::Body.wrap(nil).size]
+  out['wrap_str']       = Q::Body.wrap('hello').class.name
+  out['text_size_cjk']  = Q::Body.wrap('报告').size
+  out['wrap_file']      = Q::Body.wrap(page).class.name
+  out['wrap_pathname']  = Q::Body.wrap(Pathname(page)).class.name
+  out['file_size']      = Q::Body.wrap(page).size
+  require 'stringio'
+  out['wrap_stringio']  = Q::Body.wrap(StringIO.new('abc')).class.name
+  out['wrap_proc']      = Q::Body.wrap(proc { |e| e.call('x') }).class.name
+  out['wrap_block']     = Q::Body.wrap { |e| e.call('x') }.class.name
+  out['stream_size']    = Q::Body.wrap(proc { |e| e.call('x') }).size.inspect
+  out['text_chunk_ignores_size'] =
+    begin
+      acc = []; Q::Body.wrap('hello world').each_chunk(4) { |c| acc << c }; acc
+    end
+  out['file_chunk_sizes'] =
+    begin
+      acc = []; Q::Body.wrap(page).each_chunk(8) { |c| acc << c.bytesize }; acc
+    end
+  out['stream_chunks'] =
+    begin
+      acc = []
+      Q::Body.wrap(proc { |e| 3.times { |i| e.call("c#{i}") } }).each_chunk(1024) { |c| acc << c }
+      acc
+    end
+  tb = Q::Body.wrap('z')
+  out['wrap_identity'] = Q::Body.wrap(tb).equal?(tb)
+  out
+end
+
+# ── 模板 ───────────────────────────────────────────────────────────────────
+def render(tpl, **kw)
+  r = Q::Rsp.new
+  r.body(tpl)
+  r.render(**kw)
+  r.body.to_s
+end
+
+probe('render') do
+  out = {}
+  out['puts']       = render('@<{puts "hi"}>')
+  out['expr']       = render('@<{1 + 1}>')
+  out['puts_wins']  = render('@<{ puts "a"; 42 }>')
+  out['raise']      = render('@<{ raise "boom" }>')
+  out['undefined']  = render('@<{ NoSuchName_zz }>')
+  out['brace_block']= render('@<{ [3,1,2].sort { |a, b| a <=> b } }>')
+  out['hash_lit']   = render('@<{ {"a" => 1} }>')
+  out['multi_hole'] = render('@<{ 1 }>-@<{ 1 + 1 }>-@<{ 1 + 2 }>')
+  out['do_end']     = render("@<{\n  [1,2,3].each do |n|\n    puts '<li>' + n.to_s + '</li>'\n  end\n}>")
+  out['trunc_brace']= render('@<{ " }> " }>')
+  out['no_hole']    = render('plain')
+  out['empty_hole'] = render('@<{}>')
+  out['none_var']   = render('@<{v}>', v: nil)
+  out['string_lit'] = render('@<{ "}" }>')
+  out['pct_literal']= render('@<{ "a" }>')
+  r = Q::Rsp.new; r.set(v: 'from-set'); r.body('@<{v}>'); r.render(v: 'from-hash')
+  out['render_kw_over_set'] = r.body.to_s
+  r = Q::Rsp.new; r.set(v: 'from-set'); r.body('@<{v}>'); r.render
+  out['set_inject'] = r.body.to_s
+  r = Q::Rsp.new; r.set('k' => 'v1'); r.body('@<{k}>'); r.render
+  out['set_hash'] = r.body.to_s
+  cap, ret = Q.capture_stdout { puts 'to-stdout'; 99 }
+  out['capture'] = [cap, ret]
+  out
+end
+
+# ── Req ────────────────────────────────────────────────────────────────────
+probe('req') do
+  req = Q::Req.new
+  out = {}
+  out['param_none']    = req.param('nope').inspect
+  out['param_default'] = req.param('nope', 'fallback')
+  out['header_def']    = req.header('x-nope', 'x')
+  out['cookie_def']    = req.cookie('nope', 'x')
+  out['named_def']     = req.named(:nope, 'x')
+  out['argv_oob']      = req.argv(999, 'x')
+  out['argv_neg']      = req.argv(-1, 'x')
+  out['params_class']  = req.params.class.name
+  out['cookies_class'] = req.cookies.class.name
+  out['body_len_class']= req.body_length.class.name
+  out['argv_count']    = req.argv_count
+  out['method']        = req.method
+  out['path']          = req.path
+  out['query']         = req.query
+  out['body_len_zero'] = req.body_length.zero?
+  if req.body_length.zero?
+    out['body_nil']       = req.body.inspect
+    out['body_json_nil']  = req.body_json.inspect
+    out['body_text_nil']  = req.body_text.inspect
+    out['form_nil']       = req.body_form_data.inspect
+  else
+    raw = req.body
+    out['body_class']   = raw.class.name
+    out['body_bytes']   = raw.bytesize
+    out['body_again']   = req.body.inspect
+    out['body_json_after'] = req.body_json.inspect
+    out['body_text_after'] = req.body_text.inspect
+  end
+  out
+end
+
+# ── Form ───────────────────────────────────────────────────────────────────
+require_relative '../../../_env_/ruby/_ext_form_'
+probe('form') do
+  cd = %(form-data; name="f"; filename="fallback.txt"; filename*=UTF-8''%E6%8A%A5%E5%91%8A.txt)
+  out = {}
+  out['rfc5987']  = Q::FormItem.new({ 'Content-Disposition' => cd }, 'x').filename
+  out['name']     = Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').name
+  out['file_q']   = Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"; filename="a.txt"' }, 'x').file?
+  out['nofile_q'] = Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').file?
+  out['to_h_size']= Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'abc').to_h[:size]
+  out['to_h_keys']= Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'abc').to_h.keys.map(&:to_s).sort
+  out['def_ctype']= Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').content_type
+  out['parse_nil']= Q::Form.parse(nil).inspect
+  out
+end
+
+# 用 '/*' 而不是 '/': MAP_PATH 非空时也要能跑同一份断言
+Q.route '/*', method: :GET do |_req, rsp|
+  rsp.ok_json({ parity: 'rb', map_path: Q::MAP_PATH, results: OUT }).finish
+end

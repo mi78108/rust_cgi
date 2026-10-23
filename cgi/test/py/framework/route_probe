@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""路由注册机制探针 —— 定位 Q.route / Q.get 装饰器为何不匹配."""
+
+import sys, os, re, json
+pydir = os.path.join(os.environ.get('Cgi_Root', os.getcwd()), '_env_', 'python')
+sys.path.insert(0, pydir)
+from _base_ import Q, match_pattern, Rsp  # noqa: E402
+
+D = {}
+
+# Q.route 是不是返回装饰器?
+D['route_callable'] = callable(Q.route)
+D['get_callable'] = callable(Q.get)
+D['ws_callable'] = callable(Q.ws)
+D['routes_before'] = len(Q.ROUTES)
+
+# 用装饰器注册
+@Q.route('/', method=['GET'])
+def h1(req, rsp):
+    rsp.ok_text('h1').finish()
+
+D['routes_after_decorator'] = len(Q.ROUTES)
+D['route0_methods'] = list(Q.ROUTES[0].methods) if Q.ROUTES else None
+D['route0_pattern'] = Q.ROUTES[0].pattern if Q.ROUTES else None
+
+# 直接 match_pattern
+D['match_slash'] = match_pattern('/')
+D['map_path'] = Q.MAP_PATH
+
+# 再注册一个 Q.get
+@Q.get('/x')
+def h2(req, rsp):
+    rsp.ok_text('h2').finish()
+
+D['routes_after_get'] = len(Q.ROUTES)
+D['route1_methods'] = list(Q.ROUTES[1].methods) if len(Q.ROUTES) > 1 else None
+
+body = json.dumps(D, ensure_ascii=False).encode()
+sys.stdout.buffer.write(b'HTTP/1.0 200 OK\r\nConnection: close\r\n'
+                        b'Content-Type: application/json; charset=utf-8\r\n'
+                        + f'Content-Length: {len(body)}\r\n\r\n'.encode())
+sys.stdout.buffer.write(body)
+sys.stdout.buffer.flush()

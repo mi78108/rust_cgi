@@ -1,0 +1,62 @@
+<html>
+    <head>
+        <title>测试页面</title>
+    </head>
+    <body>
+        <div>
+            <p>渲染功能测试</p>
+            <p>render 1 通过块设置具名对象: #{v}</p>
+            <p>render 2 局部变量 传递块时开启捕获: @{aaa}</p>
+            <p>render 3 实例变量 默认开启捕获: #{@bbb}</p>
+            <p>render 4 可执行语句 默认开启: #{Time.now}</p>
+            <p>render 5 默认实例变量 默认开启: #{ @header }</p>
+        </div>
+        <div>
+            <form action="/test/test" method="post" enctype="multipart/form-data">
+                <input type="text" name="text_a">
+                <input type="file" name="file_a">
+                <textarea name="textarea_a"></textarea>
+                <button type="submit">提交</button>
+            </form>
+        </div>
+        <br/>
+        <div>
+            <p>WEBSOCKET测试</p>
+            <p id="ws">
+                <textarea id="type" style="width: 100%; height: 30%; border: 2px red solid;"> </textarea>
+            </p>
+        </div>
+        <br />
+        <div>
+            <p>环境变量测试</p>
+            <code>#{ENV.to_a.to_json}</code>
+        </div>
+    </body>
+    <script>
+        let ws = new WebSocket("/test");
+        let wsd = document.getElementById("ws");
+        let type = document.getElementById("type");
+        type.oninput = (ev) =>{
+          console.log(ev)
+          if(ev.isTrusted){
+            ws.send(type.value)
+          }
+        }
+        ws.onopen = (ev) => {
+          type.style.borderColor = 'green'
+        };
+        ws.onmessage = (ev) => {
+            type.value = ev.data;
+        };
+        ws.onclose = (ev) => {
+          type.style.borderColor = 'red'
+            wsd.innerHTML = "CLOSE";
+        };
+        ws.onerror = (ev) => {
+            wsd.innerHTML = "ERRO";
+        };
+        //setInterval((ev)=>{
+        //  ws.send("ping")
+        //},1000);
+    </script>
+</html>

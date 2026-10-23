@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""03-templates — @<{}> 模板: 用法、限制、以及什么时候该用.
+
+演示:
+  * set() 注入变量 + render() 求值
+  * print 是输出方式(print 会带换行); 表达式返回值只在没打印时才用
+  * 终止符是字面 `}>` —— 洞里可以用 {} 块 / dict / 列表推导
+  * 唯一的禁忌: 洞里出现 `}>` 会被误认成洞结束
+  * 大模板放独立文件(见同目录 page.tpl), 这里用 render_file()
+
+    curl -s http://172.19.0.1:8080/test/pyex/03-templates
+    curl -s 'http://172.19.0.1:8080/test/pyex/03/templates/n/7'
+    curl -s http://172.19.0.1:8080/test/pyex/03/templates/file
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.environ['Cgi_Root'], '_env_', 'python'))
+
+from _base_ import Q  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+USERS = [
+    {'name': 'hawk', 'lang': 'Rust', 'commits': 128},
+    {'name': 'neo', 'lang': 'Ruby', 'commits': 64},
+    {'name': 'trinity', 'lang': 'Python', 'commits': 256},
+]
+
+CSS = """
+  body{font-family:ui-monospace,Menlo,monospace;background:#111;color:#eee;padding:24px}
+  td,th{padding:4px 12px;border-bottom:1px solid #333}
+  .n{color:#0f0;text-align:right}
+  h1{font-size:16px}
+"""
+
+
+@Q.get('/')
+def index(req, rsp):
+    # 变量注入有两种写法:
+    #   rsp.set('name', 'hawk')      —— 逐个设
+    #   rsp.render(name='hawk', ...) —— 直接传, 优先级更高
+    # 注意: 模板**不能**写成 f-string —— Python 会在解析期就把 @<{...}>
+    # 里的 { } 当成自己的插值, 直接 SyntaxError: f-string: expecting a
+    # valid expression after '{'。要用普通字符串, 需要拼接的部分用 % 塞。
+    html = (
+        '<!DOCTYPE html><html><head>\n'
+        '<meta charset="UTF-8"><title>模板示例</title>'
+        '<style>' + CSS + '</style></head><body>\n'
+        '<h1>@<{print("Hello, " + name)}></h1>\n'
+        '\n'
+        '<table>\n'
+        '<tr><th>name</th><th>lang</th><th class="n">commits</th></tr>\n'
+        '@<{\n'
+        '    for u in users:\n'
+        '        print("<tr><td>" + u["name"] + "</td>")\n'
+        '        print("<td>" + u["lang"] + "</td>")\n'
+        '        print("<td class=\'n\'>" + str(u["commits"]) + "</td></tr>")\n'
+        '}>\n'
+        '</table>\n'
+        '\n'
+        '<p>洞里可以用 dict 字面量: @<{str({"a": 1})}></p>\n'
+        '<p>洞里可以用列表推导: @<{[x * 2 for x in range(4)]}></p>\n'
+        '<p>没打印时用返回值: @<{2 ** 10}></p>\n'
+        '<p>出错渲染成标记而不是 500: @<{1 / 0}></p>\n'
+        '</body></html>'
+    )
+
+    rsp.type_html().set_body(html).render(
+        name='hawk',
+        users=USERS,
+    ).finish()
+
+
+# ── 大模板走文件 ─────────────────────────────────────────────────────────
+# 模板超过几十行就该放独立文件 —— 免得 Python 里的字符串转义把内容搞乱。
+@Q.get('/file')
+def from_file(req, rsp):
+    path = os.path.join(HERE, 'page.tpl')
+    if not os.path.isfile(path):
+        return rsp.fail_404().ok_text(f'模板不存在: {path}').finish()
+    with open(path, encoding='utf-8') as f:
+        tpl = f.read()
+    rsp.type_html().set_body(tpl).render(
+        title='来自文件的模板',
+        items=USERS,
+    ).finish()
+
+
+# ── set() 的三种写法 ─────────────────────────────────────────────────────
+@Q.get('/n/<n>')
+def numbered(req, rsp):
+    n = int(req.named('n'))
+    out = rsp.ok_json({
+        'n': n,
+        'factorial': __import__('math').factorial(min(n, 20)),
+    })
+    # 三种注入形式都支持
+    out.set('k1', 'a')                       # 键值
+    out.set({'k2': 'b'})                     # dict
+    out.set(k3='c')                          # 关键字
+    out.finish()
+
+
+Q.run()

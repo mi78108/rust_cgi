@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""cgi/test/parity/py — 对拍基准 (Python 侧).
+
+与 cgi/test/parity/rb 输出同构的 JSON。diff 两个文件即可看出
+Python 实现与 Ruby 实现在行为上的差异。
+
+    curl -s http://172.19.0.1:8080/test/parity/rb | jq .
+    curl -s http://172.19.0.1:8080/test/parity/py | jq .
+
+只断言「框架对外可观测的行为」—— 匹配结果、响应字节、模板输出。
+内部实现差异(类名/变量名)已换算成同构形式再输出。
+"""
+
+import sys, os, io, re, json, pathlib
+
+_pydir = os.path.join(os.environ.get('Cgi_Root', os.getcwd()), '_env_', 'python')
+sys.path.insert(0, _pydir)
+
+from _base_ import (  # noqa: E402
+    Q, QEnv, Req, Rsp, Body, TextBody, FileBody, StreamBody,
+    capture_stdout, match_pattern,
+)
+import _ext_form_  # noqa: E402
+from _ext_form_ import Form, FormItem  # noqa: E402
+
+OUT = {}
+
+
+def probe(name, fn):
+    try:
+        OUT[name] = fn()
+    except BaseException as e:
+        OUT[name] = f'RAISED {type(e).__name__}: {e}'
+
+
+def jsafe(v):
+    """把 Python 值转成与 Ruby 侧同构的可 JSON 形式."""
+    if isinstance(v, bytes):
+        return f'<bytes {len(v)}>'
+    if isinstance(v, tuple):
+        return [jsafe(x) for x in v]
+    if isinstance(v, list):
+        return [jsafe(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): jsafe(x) for k, x in v.items()}
+    return v
+
+
+# ── ENV / 常量 ─────────────────────────────────────────────────────────────
+probe('argv', lambda: list(Q.ARGV))
+probe('argv_count', lambda: Q.ARGV_COUNT)
+probe('argv_params', lambda: Q.ARGV_PARAMS)
+probe('map_path', lambda: Q.MAP_PATH)
+probe('req_method', lambda: Q.REQ_METHOD)
+probe('req_path', lambda: Q.REQ_PATH)
+probe('req_params', lambda: Q.REQ_PARAMS)
+probe('body_method', lambda: Q.BODY_METHOD)
+probe('peer_ip_set', lambda: bool(Q.PEER_IP))
+probe('peer_port_type', lambda: type(Q.PEER_PORT).__name__)
+probe('buffer_size', lambda: Q.BUFFER_SIZE)
+probe('script_name', lambda: Q.script_name())
+probe('script_basename', lambda: Q.script_basename())
+probe('script_dir_tail', lambda: '/'.join((Q.script_dir() or '').split('/')[-2:]))
+probe('cgi_root_tail', lambda: '/'.join(Q.CGI_ROOT.split('/')[-2:]))
+probe('remote_addr', lambda: repr(os.environ.get('REMOTE_ADDR')))
+probe('x_forwarded', lambda: repr(os.environ.get('Req_Header_X-Forwarded-For')))
+probe('fetch_default', lambda: QEnv.fetch('Req_Nope', 'fb'))
+probe('fetch_i_default', lambda: QEnv.fetch_i('Req_Nope', 7))
+probe('decode_plus', lambda: QEnv.decode('a+b'))
+probe('decode_pct', lambda: QEnv.decode('%E6%8A%A5'))
+
+# ── pattern 匹配 ───────────────────────────────────────────────────────────
+PATTERNS = {
+    'slash': '/',
+    'wildcard': '/*',
+    'nil': None,
+    'named': '/users/<id>',
+    'two_named': '/<a>/<b>',
+    'meta_dot': '/a.b',
+    'literal': '/definitely-not-the-url-path',
+    'req_path': Q.REQ_PATH,
+    'regex_rel': re.compile(r'/u/(?P<id>\d+)'),
+    'regex_anch': re.compile(r'^/u/(?P<id>\d+)$'),
+    'slash_info': '/info',
+    'star_mid': '/*/x',
+    'named_nodig': '/users/<id>/x',
+}
+
+
+def g_patterns():
+    out = {}
+    for label, pat in PATTERNS.items():
+        matched = match_pattern(pat)
+        out[label] = [matched, dict(Q.MATCH)]
+    return out
+
+
+probe('patterns', g_patterns)
+
+
+def g_bad_pattern():
+    try:
+        match_pattern('foo')
+        return 'no exception'
+    except BaseException as e:
+        return type(e).__name__
+
+
+probe('bad_pattern_raises', g_bad_pattern)
+
+# ── Rsp ────────────────────────────────────────────────────────────────────
+def g_rsp():
+    out = {}
+    r = Rsp()
+    out['default_code'] = r.code
+    out['default_status'] = r.status
+    r.code = 201
+    r.status = 'Created'
+    out['code_set_get'] = [r.code, r.status]
+
+    def f(fn):
+        x = Rsp()
+        getattr(x, fn)()
+        return [x.code, x.status]
+
+    out['fail_404'] = f('fail_404')
+    out['fail_500'] = f('fail_500')
+    out['fail_403'] = f('fail_403')
+    out['fail_400'] = f('fail_400')
+    out['fail_405'] = f('fail_405')
+    out['fail_501'] = f('fail_501')
+
+    out['type_json'] = Rsp().type_json().header['Content-Type']
+    out['type_html'] = Rsp().type_html().header['Content-Type']
+    out['type_text'] = Rsp().type_text().header['Content-Type']
+    out['type_xml'] = Rsp().type_xml().header['Content-Type']
+    out['default_headers'] = dict(Rsp.DEFAULT_HEADERS)
+
+    c = Rsp()
+    c.cookie_set('a', '1')
+    c.cookie_set('b', '2')
+    out['cookie_set'] = c.header.get('Set-Cookie')
+
+    rd = Rsp().redirect_to('/x')
+    out['redirect_302'] = [rd.code, rd.status, rd.header.get('Location')]
+    rd2 = Rsp().redirect_to('/x', code=301)
+    out['redirect_301'] = [rd2.code, rd2.status]
+
+    hr = Rsp()
+    hr.header_field('X-A', 'a')
+    hr.header_remove('Content-Type')
+    out['header_ops'] = dict(hr.header)
+    out['respond_chunk'] = hasattr(Rsp(), 'chunk')
+    out['respond_stream'] = hasattr(Rsp(), 'stream')
+    out['sent_init'] = Rsp().sent
+    return out
+
+
+probe('rsp', g_rsp)
+
+# ── Body ───────────────────────────────────────────────────────────────────
+def g_body():
+    page = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'page.html')
+    out = {}
+    out['wrap_nil'] = [type(Body.wrap(None)).__name__, Body.wrap(None).size()]
+    out['wrap_str'] = type(Body.wrap('hello')).__name__
+    out['text_size_cjk'] = Body.wrap('报告').size()
+    out['wrap_file'] = type(Body.wrap(page)).__name__
+    out['wrap_pathname'] = type(Body.wrap(pathlib.Path(page))).__name__
+    out['file_size'] = Body.wrap(page).size()
+    out['wrap_stringio'] = type(Body.wrap(io.StringIO('abc'))).__name__
+    out['wrap_proc'] = type(Body.wrap(lambda emit, n: emit(b'x'))).__name__
+    out['wrap_block'] = type(Body.wrap(None, lambda emit, n: emit(b'x'))).__name__
+    out['stream_size'] = repr(Body.wrap(lambda emit, n: emit(b'x')).size())
+
+    acc = []
+    for c in Body.wrap('hello world').each_chunk(4):
+        acc.append(c.decode())
+    out['text_chunk_ignores_size'] = acc
+
+    acc = []
+    for c in Body.wrap(page).each_chunk(8):
+        acc.append(len(c))
+    out['file_chunk_sizes'] = acc
+
+    acc = []
+
+    def _pump(emit, n, _s=Body):
+        for i in range(3):
+            emit(f'c{i}'.encode())
+    for c in Body.wrap(_pump).each_chunk(1024):
+        acc.append(c.decode())
+    out['stream_chunks'] = acc
+
+    tb = Body.wrap('z')
+    out['wrap_identity'] = Body.wrap(tb) is tb
+    return out
+
+
+probe('body', g_body)
+
+# ── 模板 ───────────────────────────────────────────────────────────────────
+def render(tpl, **kw):
+    r = Rsp()
+    r.set_body(tpl)
+    r.render(**kw)
+    return r.body.to_text()
+
+
+def g_render():
+    out = {}
+    out['puts'] = render('@<{print("hi")}>')
+    out['expr'] = render('@<{1 + 1}>')
+    # Ruby: puts "a"; 42  → Python eval 不收语句, 用元组取第二值
+    out['puts_wins'] = render('@<{(print("a"), 42)[1]}>')
+    out['raise'] = render('@<{ raise ValueError("boom") }>')
+    out['undefined'] = render('@<{ NoSuchName_zz }>')
+    out['brace_block'] = render('@<{ sorted([3,1,2], key=lambda x: x) }>')
+    out['hash_lit'] = render('@<{ {"a": 1} }>')
+    out['multi_hole'] = render('@<{ 1 }>-@<{ 1 + 1 }>-@<{ 1 + 2 }>')
+    out['do_end'] = render(
+        '@<{\n'
+        '  [print("<li>" + str(n) + "</li>") for n in [1, 2, 3]]\n'
+        '}>')
+    out['trunc_brace'] = render('@<{ " }> " }>')
+    out['no_hole'] = render('plain')
+    out['empty_hole'] = render('@<{}>')
+    out['none_var'] = render('@<{v}>', v=None)
+    out['string_lit'] = render('@<{ "}" }>')
+    out['pct_literal'] = render("@<{ 'a' }>")
+    r = Rsp()
+    r.set('v', 'from-set')
+    r.set_body('@<{v}>')
+    r.render(v='from-hash')
+    out['render_kw_over_set'] = r.body.to_text()
+    r = Rsp()
+    r.set('v', 'from-set')
+    r.set_body('@<{v}>')
+    r.render()
+    out['set_inject'] = r.body.to_text()
+    r = Rsp()
+    r.set({'k': 'v1'})
+    r.set_body('@<{k}>')
+    r.render()
+    out['set_hash'] = r.body.to_text()
+
+    def _cap():
+        print('to-stdout')
+        return 99
+    cap, ret = capture_stdout(_cap)
+    out['capture'] = [cap, ret]
+    return out
+
+
+probe('render', g_render)
+
+# ── Req ────────────────────────────────────────────────────────────────────
+def g_req():
+    req = Req()
+    out = {}
+    out['param_none'] = repr(req.param('nope'))
+    out['param_default'] = req.param('nope', 'fallback')
+    out['header_def'] = req.header('x-nope', 'x')
+    out['cookie_def'] = req.cookie('nope', 'x')
+    out['named_def'] = req.named('nope', 'x')
+    out['argv_oob'] = req.argv(999, 'x')
+    out['argv_neg'] = req.argv(-1, 'x')
+    out['params_class'] = 'Hash' if isinstance(req.params, dict) else type(req.params).__name__
+    out['cookies_class'] = 'Hash' if isinstance(req.cookies, dict) else type(req.cookies).__name__
+    out['body_len_class'] = type(req.body_length).__name__
+    out['argv_count'] = req.argv_count
+    out['method'] = req.method
+    out['path'] = req.path
+    out['query'] = req.query
+    out['body_len_zero'] = req.body_length == 0
+    if req.body_length == 0:
+        out['body_nil'] = repr(req.body())
+        out['body_json_nil'] = repr(req.body_json())
+        out['body_text_nil'] = repr(req.body_text())
+        out['form_nil'] = repr(req.body_form_data())
+    else:
+        raw = req.body()
+        out['body_class'] = 'String' if isinstance(raw, bytes) else type(raw).__name__
+        out['body_bytes'] = len(raw) if raw is not None else None
+        out['body_again'] = repr(req.body())
+        out['body_json_after'] = repr(req.body_json())
+        out['body_text_after'] = repr(req.body_text())
+    return out
+
+
+probe('req', g_req)
+
+# ── Form ───────────────────────────────────────────────────────────────────
+def g_form():
+    cd = ('form-data; name="f"; filename="fallback.txt"; '
+          "filename*=UTF-8''%E6%8A%A5%E5%91%8A.txt")
+    out = {}
+    out['rfc5987'] = FormItem({'Content-Disposition': cd}, b'x').filename
+    out['name'] = FormItem({'Content-Disposition': 'form-data; name="f"'}, b'x').name
+    out['file_q'] = FormItem(
+        {'Content-Disposition': 'form-data; name="f"; filename="a.txt"'}, b'x').is_file()
+    out['nofile_q'] = FormItem(
+        {'Content-Disposition': 'form-data; name="f"'}, b'x').is_file()
+    out['to_h_size'] = FormItem(
+        {'Content-Disposition': 'form-data; name="f"'}, b'abc').to_h()['size']
+    out['to_h_keys'] = sorted(FormItem(
+        {'Content-Disposition': 'form-data; name="f"'}, b'abc').to_h().keys())
+    out['def_ctype'] = FormItem(
+        {'Content-Disposition': 'form-data; name="f"'}, b'x').content_type
+    out['parse_nil'] = repr(Form.parse(None))
+    return out
+
+
+probe('form', g_form)
+
+# 走框架自己的 Rsp / 路由, 而不是手写 HTTP 头 ——
+# 这样对拍的是「框架产出的响应字节」, 而不只是「两边都打印了 JSON」。
+# 用 '/*' 而不是 '/': MAP_PATH 非空时也要能跑同一份断言
+# 注意: '/*' 是「**非空** restful 通配」, 只在 MAP_PATH 非空时命中。
+# MAP_PATH='/'(脚本自身 URL) 要另外注册 '/' 才跑得到 —— 漏了这条的话
+# 直接访问本脚本会 404, 只有带 /users/42 之类路径才通。
+
+def _parity(req, rsp):
+    rsp.ok_json({'parity': 'py', 'map_path': Q.MAP_PATH,
+                 'results': jsafe(OUT)}).finish()
+
+
+# MAP_PATH='/' 与非空 restful 两种形态都要能跑
+Q.route('/', method=['GET'])(_parity)
+Q.route('/*', method=['GET'])(_parity)
+
+Q.run()

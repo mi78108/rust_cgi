@@ -1,0 +1,3 @@
+这是 04-advanced/download 用来验证 send_file 的样本文件。
+包含中文，检查 Content-Length 是按字节算而不是按字符。
+第二行。

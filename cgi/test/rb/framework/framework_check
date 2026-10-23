@@ -1,0 +1,569 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# cgi/test/framework/index — _base_.rb / _ext_form_.rb / _ext_notify_.rb 框架自检
+#
+# 定位: 只断言「框架自身行为」, 不碰业务。cgi/test/ 下原有的 demo 端点是
+# 手写试验台(本身有 bug, 比如 rsp.chunk 已从框架删除但 demo 仍在调),
+# 不能拿来当框架依据 —— 这套用例独立、可重复。
+#
+# 跑法 (宿主机 8080, 容器内用 172.19.0.1):
+#   curl -s 'http://172.19.0.1:8080/test/framework'                       | jq .
+#   curl -s 'http://172.19.0.1:8080/test/framework?expect_map=/users/42' | jq .
+#   curl -s 'http://172.19.0.1:8080/test/framework/users/42'             | jq .
+#   curl -s 'http://172.19.0.1:8080/test/framework/demo/u/7'             | jq .
+#   curl -s 'http://172.19.0.1:8080/test/framework/probe'               | jq .
+#
+# expect_map: 断言 MAP_PATH 等于该值。MAP_PATH = "/" + Req_Argv_Params, 即
+# spider 剥掉脚本位置后剩下的路径段 —— 用不同 URL 驱动同一脚本即可验证它:
+#   /test/framework            → MAP_PATH = /
+#   /test/framework/users/42   → MAP_PATH = /users/42
+#   /test/framework/demo/u/7   → MAP_PATH = /demo/u/7
+#
+# 注意: 宿主机的 spider 看到的路径前缀是 /home/hawk/Projects/RustProjects/rust_cgi,
+# 容器里是 /opt/user/Projects/RustProjects/rust_cgi —— 同一份文件, 两个挂载点。
+# 用例里凡是要断言路径的, 一律用 __dir__ / Cgi_Root 推导, 不写死任一侧。
+#
+# 输出: { ok, total, passed, failed, map_path, script, results: [...] }
+
+require_relative '../../../_env_/ruby/_base_'
+
+RESULTS = []
+
+# 每个 group 独立 rescue —— 一条断言写错不会带塌整份报告
+def group(name)
+  yield
+rescue StandardError, ScriptError => e
+  RESULTS << { name: "#{name} [group aborted]", ok: false,
+               want: '(no crash)', got: "#{e.class}: #{e.message}",
+               note: '用例自身抛异常, 该组后续断言未执行' }
+end
+
+def check(name, want, got, note = nil)
+  entry = { name: name, ok: (want == got), want: want, got: got }
+  entry[:note] = note if note
+  RESULTS << entry
+end
+
+def expect_raise(name, klass, note = nil)
+  yield
+  check(name, klass.to_s, '(no exception)', note)
+rescue StandardError, ScriptError => e
+  check(name, klass.to_s, e.class.to_s, note)
+end
+
+def skip(name, why)
+  RESULTS << { name: name, ok: true, want: '(skipped)', got: '(skipped)', note: why }
+end
+
+MAP = Q::MAP_PATH
+EXPECT_MAP = ENV['Req_Param_expect_map'].to_s
+
+# ─────────────────────────────────────────────────────────────
+group 'env' do
+  check('MAP_PATH = "/" + Req_Argv_Params', "/#{Q::ARGV_PARAMS}", MAP)
+  check('Req#path 与 MAP_PATH 一致', MAP, Q::Req.new.path)
+  check('ARGV_COUNT 与 ARGV.size 一致', Q::ARGV.size, Q::ARGV_COUNT)
+
+  check('spider 注入了 Cgi_Root', true, QEnv::SNAPSHOT.key?('Cgi_Root'))
+  check('spider 注入了 Req_Method', true, QEnv::SNAPSHOT.key?('Req_Method'))
+  check('spider 注入了 Req_Script_Dir', true, QEnv::SNAPSHOT.key?('Req_Script_Dir'))
+  check('Cgi_Root 是绝对路径', true, Q::CGI_ROOT.start_with?('/'))
+  check('CGI_ROOT 是 SCRIPT_DIR 的祖先(cgi 根)', true, Q::SCRIPT_DIR.start_with?(Q::CGI_ROOT))
+  # 关键差异: require/顶层执行时 CWD 是 cgi 根(spider 用 .current_dir(cgi_root) 起进程);
+  # 只有进了 Q.route 的 block 才被 Dir.chdir 到脚本目录(见 _base_.rb exec_route_block)。
+  check('顶层执行时 CWD == Cgi_Root(不是脚本目录)', Q::CGI_ROOT, Dir.pwd)
+  # 注意别硬编码本目录名 —— 用例目录从 test/framework 搬到 test/rb/framework
+  # 之后这两条就失效了(实测 142/144)。改成「相对自身位置」的断言, 搬家也不用改。
+  check('SCRIPT_DIR 指向脚本所在目录(不是 CWD)', true,
+        Q::SCRIPT_DIR == File.expand_path(__dir__),
+        "SCRIPT_DIR=#{Q::SCRIPT_DIR} __dir__=#{File.expand_path(__dir__)}")
+  check('顶层执行时脚本文件可按 __dir__ 定位', true,
+        File.file?(File.join(__dir__, File.basename(__FILE__))))
+  check('BUFFER_SIZE 默认 128KB', 131_072, Q::BUFFER_SIZE)
+  check('QEnv.fetch 空串当 missing', 'fallback', QEnv.fetch('Req_Not_There', 'fallback'))
+  check('QEnv.fetch_i 非数字回落 default', 0, QEnv.fetch_i('Req_Not_There', 0))
+
+  # 证实 _ws_lib.rb#ws_client_ip 恒返回 unknown
+  check('REMOTE_ADDR 未被 spider 设置', nil, ENV['REMOTE_ADDR'])
+  check('Req_Header_X-Forwarded-For 未被 spider 设置', nil,
+        ENV['Req_Header_X-Forwarded-For'],
+        '所以 _ws_lib.rb#ws_client_ip 恒返回 unknown; 正确写法是 Q::PEER_IP')
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'routing' do
+  expect_raise('非 / 开头的 String pattern 抛 ArgumentError', 'ArgumentError') do
+    Q.match_pattern?('foo')
+  end
+  check("'/*' 总是匹配", true, Q.match_pattern?('/*'))
+  check('nil pattern 总是匹配', true, Q.match_pattern?(nil))
+
+  Q.match_pattern?(%r{(?<s>.*)})
+  check('regex 捕获写入 Q::MATCH', true, Q::MATCH.key?(:s))
+  Q.match_pattern?(nil)
+  check('Q::MATCH 在下一次匹配前被清空', {}, Q::MATCH)
+
+  # 真实行为: 不含元字符的纯字符串 pattern 走 else 分支, 拿 REQ_PATH(完整 URL) 比,
+  # 不是拿 MAP_PATH 比。写 Q.get '/a/b' 时想匹配的是完整 URL 路径, 不是 restful 部分。
+  check('纯字符串 pattern 与 REQ_PATH 比(不是 MAP_PATH)', true,
+        Q.match_pattern?(Q::REQ_PATH))
+  check('纯字符串 pattern 与 MAP_PATH 不同时不匹配', false,
+        Q.match_pattern?('/definitely-not-the-url-path'),
+        '这条测的是"别指望纯字符串 pattern 能按 restful 部分匹配"')
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'routing@map' do
+  if EXPECT_MAP.empty?
+    skip('MAP_PATH 路径匹配', '需带 ?expect_map=/users/42 或用 /users/42 URL 驱动')
+  else
+    check("MAP_PATH == expect_map(#{EXPECT_MAP})", EXPECT_MAP, MAP)
+    check('实际 MAP_PATH', MAP, EXPECT_MAP)
+
+    case MAP
+    when '/'
+      check("pattern '/' 命中", true, Q.match_pattern?('/'))
+      check("pattern '/info' 不命中", false, Q.match_pattern?('/info'))
+      check("pattern '/<name>' 不匹配 '/'([^/]+ 要求至少一字符)", false,
+            Q.match_pattern?('/<name>'))
+      check('regex %r{(?<a>.+)} 捕获', 'x',
+            (Q.match_pattern?(%r{(?<a>.+)}) && Q::MATCH[:a]),
+            '配合 /test/framework/x 驱动')
+    when '/users/42'
+      check("pattern '/users/<id>' 命中并捕获 42", '42',
+            (Q.match_pattern?('/users/<id>') && Q::MATCH[:id]))
+      check("pattern '/users/<id>' 不吃 '/users/a/b'", false, Q.match_pattern?('/users/a/b'))
+      check("pattern '/<a>/<b>' 双捕获", %w[users 42],
+            (Q.match_pattern?('/<a>/<b>') && [Q::MATCH[:a], Q::MATCH[:b]]))
+      check('regex 无锚点 %r{/users/(?<id>\d+)} 命中', '42',
+            (Q.match_pattern?(%r{/users/(?<id>\d+)}) && Q::MATCH[:id]))
+      check('字符串含元字符 . 被当正则: /a.b 匹配 /axb', true,
+            Q.match_pattern?('/a.b'),
+            '坑: 期望字面量路径, 却因 . 变成通配')
+    when '/demo/u/7'
+      check('regex %r{/u/(?<id>\d+)} 捕获 7', '7',
+            (Q.match_pattern?(%r{/u/(?<id>\d+)}) && Q::MATCH[:id]))
+      check('regex 带 ^...$ 锚点同样命中', '7',
+            (Q.match_pattern?(%r{^/u/(?<id>\d+)$}) && Q::MATCH[:id]))
+      check("字符串 pattern '/u/<id>' 捕获 7", '7',
+            (Q.match_pattern?('/u/<id>') && Q::MATCH[:id]))
+      check("精确 pattern '/demo/u/7' 不命中", false, Q.match_pattern?('/demo/u/7'),
+            'MAP_PATH 不含脚本自身位置')
+    end
+  end
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'rsp' do
+  r = Q::Rsp.new
+  check('默认 code 200', 200, r.code)
+  check('默认 status OK', 'OK', r.status)
+  check('code() 链式返回 self', true, r.code(201).equal?(r))
+  check('code 设后读回 201', 201, r.code)
+  r.status('Created')
+  check('status 设后读回', 'Created', r.status)
+  check('status() 链式返回 self', true, r.status('Moved').equal?(r))
+
+  r.fail_404
+  check('fail_404 同时设 code 与 status', [404, 'Not Found'], [r.code, r.status])
+  r.fail_500
+  check('fail_500 同时设 code 与 status', [500, 'Internal Server Error'],
+        [r.code, r.status])
+
+  r2 = Q::Rsp.new
+  check('type_json', 'application/json; charset=utf-8', r2.type_json.header['Content-Type'])
+  check('type_html', 'text/html; charset=utf-8', r2.type_html.header['Content-Type'])
+  check('type_text', 'text/plain; charset=utf-8', r2.type_text.header['Content-Type'])
+  check('type_xml', 'application/xml; charset=utf-8', r2.type_xml.header['Content-Type'])
+  check('DEFAULT_HEADERS 含 Connection: close', 'close',
+        Q::Rsp::DEFAULT_HEADERS['Connection'])
+
+  r3 = Q::Rsp.new
+  r3.cookie_set('a', '1').cookie_set('b', '2')
+  check('多次 cookie_set 都写进 Set-Cookie', true,
+        r3.header['Set-Cookie'].include?('a=1') &&
+        r3.header['Set-Cookie'].include?('b=2'))
+  check('多次 cookie_set 用 CRLF 拼进同一个值', true,
+        r3.header['Set-Cookie'].include?("\r\nSet-Cookie: "),
+        '坑: Set-Cookie 应是多个独立 header 行; 拼成一个值浏览器不解析第二条')
+
+  r4 = Q::Rsp.new
+  r4.redirect_to('/x')
+  check('redirect_to 默认 302 + Found + Location', [302, 'Found', '/x'],
+        [r4.code, r4.status, r4.header['Location']])
+  r5 = Q::Rsp.new
+  r5.redirect_to('/x', code: 301)
+  check('redirect_to 301 + Moved Permanently', [301, 'Moved Permanently'],
+        [r5.code, r5.status])
+
+  r6 = Q::Rsp.new
+  check('header_remove 生效', false,
+        r6.header_remove('Content-Type').header.key?('Content-Type'))
+
+  r7 = Q::Rsp.new
+  r7.header_field('X-A', 'a')
+  check('header_field 写入', 'a', r7.header['X-A'])
+
+  check('Rsp 没有 chunk 方法(已从框架删除, 老 demo 仍在调)', false,
+        Q::Rsp.new.respond_to?(:chunk))
+  check('Rsp 有 stream 方法', true, Q::Rsp.new.respond_to?(:stream))
+  check('Rsp#finish 幂等标记 @sent 初始 false', false, Q::Rsp.new.sent)
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'body' do
+  page = File.join(__dir__, 'page.html')
+
+  check('wrap(nil) → TextBody("")', 'Q::Body::TextBody', Q::Body.wrap(nil).class.name)
+  check('wrap(nil) 内容为空串', 0, Q::Body.wrap(nil).size)
+  check('wrap(普通字符串) → TextBody', 'Q::Body::TextBody', Q::Body.wrap('hello').class.name)
+  check('TextBody#size 是字节数', 6, Q::Body.wrap('报告').size, 'UTF-8 每字 3 字节')
+
+  check('wrap(存在的文件路径字符串) → FileBody', 'Q::Body::FileBody',
+        Q::Body.wrap(page).class.name)
+  check('wrap(Pathname) → FileBody', 'Q::Body::FileBody',
+        Q::Body.wrap(Pathname(page)).class.name)
+  check('FileBody#size 等于文件字节数', File.size(page), Q::Body.wrap(page).size)
+
+  require 'stringio'
+  check('wrap(StringIO) → StreamBody', 'Q::Body::StreamBody',
+        Q::Body.wrap(StringIO.new('abc')).class.name)
+  check('wrap(File.open) → StreamBody', 'Q::Body::StreamBody',
+        Q::Body.wrap(File.open(page, 'rb')).class.name)
+  check('wrap(proc) → StreamBody', 'Q::Body::StreamBody',
+        Q::Body.wrap(proc { |emit| emit.call('x') }).class.name)
+  check('wrap(&block) → StreamBody', 'Q::Body::StreamBody',
+        Q::Body.wrap { |emit| emit.call('x') }.class.name)
+
+  tb = Q::Body::TextBody.new('z')
+  check('wrap(Body 实例) 原样返回(不重新包装)', true, Q::Body.wrap(tb).equal?(tb))
+
+  check('StreamBody#size 恒 nil(→ finish 走 chunked)', nil,
+        Q::Body.wrap(proc { |emit| emit.call('x') }).size)
+
+  chunks = []
+  Q::Body.wrap(proc { |emit| 3.times { |i| emit.call("c#{i}") } })
+          .each_chunk(1024) { |c| chunks << c }
+  check('StreamBody#each_chunk 逐块 yield', %w[c0 c1 c2], chunks)
+
+  fc = []
+  Q::Body.wrap(page).each_chunk(8) { |c| fc << c.bytesize }
+  check('FileBody#each_chunk 按 chunk_size 切首块', 8, fc.first)
+  check('FileBody 分块后总字节数不变', File.size(page), fc.sum)
+
+  tc = []
+  Q::Body.wrap('hello world').each_chunk(4) { |c| tc << c }
+  check('TextBody#each_chunk 忽略 chunk_size 整块 yield', ['hello world'], tc)
+
+  begin
+    Q::Body::TextBody.new('x').size2
+  rescue NoMethodError
+    nil
+  end
+  check('Body 子类不用 String/File/Stream 命名(避免 ::String 歧义)', true,
+        Q::Body.constants.sort.include?(:TextBody))
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'render' do
+  # puts 才是输出方式; 表达式返回值只在无输出时使用。puts 会带 \n。
+  r = Q::Rsp.new
+  r.body('@<{puts "hi"}>').render
+  check('@<{puts "hi"}> 输出 hi + 换行', "hi\n", r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{1 + 1}>').render
+  check('@<{1+1}> 无 puts 时用返回值', '2', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ puts "a"; 42 }>').render
+  check('puts 与返回值并存时 puts 胜出(丢弃返回值)', "a\n", r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ raise "boom" }>').render
+  check('异常渲染为 [ERROR: ...] 而不抛出', '[ERROR: RuntimeError: boom]', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.set(v: 'from-set')
+  r.body('@<{v}>').render(v: 'from-hash')
+  check('render hash 覆盖 rsp.set 同名变量', 'from-hash', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.set(v: 'from-set')
+  r.body('@<{v}>').render
+  check('rsp.set 注入的实例变量可被 @<{}> 读到', 'from-set', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.set('k' => 'v1')
+  r.body('@<{k}>').render
+  check('rsp.set 接受 Hash 形式', 'v1', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ User.new }>').render rescue nil
+  r = Q::Rsp.new
+  r.body('@<{ NoSuchConst_zz }>').render
+  check('未定义常量渲染成错误标记而非抛出', true, r.body.to_s.start_with?('[ERROR:'))
+
+  # 终止符是字面序列 }>(非贪婪 .*? 必须后跟 >), 所以洞里可以用 {} 块。
+  # 真正会坏的只有洞里出现 }> 这个序列(如下)。
+  r = Q::Rsp.new
+  r.body('@<{ [3,1,2].sort { |a, b| a <=> b } }>').render
+  check('洞内可以用 {} 块(终止符是字面 }> 而非第一个 })', '[1, 2, 3]', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ [3,1,2].sort do |a, b| a <=> b end }>').render
+  check('洞内 do/end 正常求值(结果被 to_s)', '[1, 2, 3]', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ {"a" => 1} }>').render
+  check('洞内 hash 字面量正常', '{"a"=>1}', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{ 1 }>-@<{ [3,1,2].sort { |a,b| a<=>b } }>-@<{ 3 }>').render
+  check('多个洞 + 中间含 {} 块, 各洞独立求值', '1-[1, 2, 3]-3', r.body.to_s)
+
+  # 唯一的真限制: 洞内出现 }> 会被误认成洞结束 → code 残缺 → SyntaxError
+  r = Q::Rsp.new
+  r.body('@<{ " }> " }>').render
+  check('洞内出现 }> 会截断 → 渲染成错误标记', true,
+        r.body.to_s.start_with?('[ERROR:'),
+        '限制: 终止符是字面 }>, 所以洞里不能出现这个序列')
+  check('洞内 }> 截断的错误类型是 SyntaxError', true,
+        r.body.to_s.include?('SyntaxError'),
+        "实际输出: " + r.body.to_s[0, 90])
+
+  tpl = '@<{' + "\n" +
+        '  [1,2,3].each do |n|' + "\n" +
+        '    puts "<li>" + n.to_s + "</li>"' + "\n" +
+        '  end' + "\n" +
+        '}>'
+  r = Q::Rsp.new
+  r.body(tpl).render
+  check('多行 do/end 模板正常渲染', "<li>1</li>\n<li>2</li>\n<li>3</li>\n", r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('plain').render
+  check('render 无洞时原样保留', 'plain', r.body.to_s)
+
+  r = Q::Rsp.new
+  r.body('@<{}>').render
+  check('空洞渲染为空串', '', r.body.to_s)
+
+  captured, ret = Q.capture_stdout { puts 'to-stdout'; 99 }
+  check('capture_stdout 返回 [输出, 返回值]', ["to-stdout\n", 99], [captured, ret])
+
+  r = Q::Rsp.new
+  r.body('@<{v}>').render(v: nil)
+  check('render 传 nil → 渲染空串', '', r.body.to_s)
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'req' do
+  req = Q::Req.new
+  check('param 无默认 → nil', nil, req.param('nope'))
+  check('param 有默认 → 默认值', 'fallback', req.param('nope', 'fallback'))
+  check('header 有默认 → 默认值', 'x', req.header('x-not-there', 'x'))
+  check('cookie 有默认 → 默认值', 'x', req.cookie('nope', 'x'))
+  check('named 有默认 → 默认值', 'x', req.named(:nope, 'x'))
+  check('named 支持 symbol 与 string', true,
+        begin
+          req.named(:zzz_a); req.named('zzz_b')
+          true
+        rescue StandardError
+          false
+        end)
+  check('argv 越界 → 默认值', 'x', req.argv(999, 'x'))
+  check('argv 负下标 → 默认值', 'x', req.argv(-1, 'x'))
+  check('argv 非 Integer → 默认值', 'x', req.argv('0', 'x'))
+
+  check('respond_to? argv_ 糖', true, req.respond_to?(:argv_0))
+  check('respond_to? param_ 糖', true, req.respond_to?(:param_q))
+  check('respond_to? header_ 糖', true, req.respond_to?(:header_host))
+  check('respond_to? named_ 糖', true, req.respond_to?(:named_id))
+  check('respond_to? cookie_ 糖', true, req.respond_to?(:cookie_seen))
+  check('respond_to? 对未知方法返回 false', false, req.respond_to?(:bogus_zz))
+  check('未知糖方法抛 NoMethodError', true,
+        begin
+          req.bogus_zz
+          false
+        rescue NoMethodError
+          true
+        end)
+
+  check('params 是 Hash', true, req.params.is_a?(Hash))
+  check('cookies 是 Hash', true, req.cookies.is_a?(Hash))
+  check('body_length 是 Integer', true, req.body_length.is_a?(Integer))
+
+  if req.body_length.zero?
+    check('无 body 时 body 返回 nil', nil, req.body)
+    check('无 body 时 body_json 返回 nil', nil, req.body_json)
+    check('无 body 时 body_text 返回 nil', nil, req.body_text)
+    check('非 multipart 时 body_form_data 返回 nil', nil, req.body_form_data)
+  else
+    # body 是"单次可读"的: Q.read(length) 走 STDIN.read(length), STDIN 是被读干的
+    # 管道, 第二次起一律返回 nil。所以 body_json / body_text 只有在 body 之前
+    # (或替代 body) 调用才拿得到数据 —— 见 cgi/test/framework/body_probe。
+    raw = req.body
+    check('有 body 时 body 返回 String', true, raw.is_a?(String))
+    check('body 字节数与 content-length 一致', req.body_length, raw.bytesize,
+          'spider 把 body 原样管道给子进程')
+    check('body 可按 UTF-8 解码', true, raw.dup.force_encoding('UTF-8').valid_encoding?)
+
+    check('第二次 body 返回 nil(STDIN 已读干)', nil, req.body,
+          '坑: body 只能读一次; 需要多次就自己缓存')
+    check('body 读过后 body_json 返回 nil', nil, req.body_json)
+    check('body 读过后 body_text 返回 nil', nil, req.body_text)
+    check('body 读过后 STDIN 直读也是 nil', nil, STDIN.read(1024))
+  end
+end
+
+# ─────────────────────────────────────────────────────────────
+group 'form' do
+  require_relative '../../../_env_/ruby/_ext_form_'
+  check('require 后 Q::Form 可用', true, !defined?(Q::Form).nil?)
+  check('require 后 Q::FormItem 可用', true, !defined?(Q::FormItem).nil?)
+
+  cd = "form-data; name=\"f\"; filename=\"fallback.txt\"; filename*=UTF-8''%E6%8A%A5%E5%91%8A.txt"
+  check('RFC5987 filename* 优先于 filename', '报告.txt',
+        Q::FormItem.new({ 'Content-Disposition' => cd }, 'x').filename)
+  check('去掉引号取 name', 'f',
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').name)
+  check('有 filename → file? true', true,
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"; filename="a.txt"' },
+                        'x').file?)
+  check('无 filename → file? false', false,
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').file?)
+  check('#to_h 带 size', 3,
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' },
+                        'abc').to_h[:size])
+  check('#to_h 不含 content', false,
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' },
+                        'abc').to_h.key?(:content))
+  check('无 Content-Type 默认 text/plain', 'text/plain',
+        Q::FormItem.new({ 'Content-Disposition' => 'form-data; name="f"' }, 'x').content_type)
+  check('Form.parse 无 boundary 返回 nil', nil, Q::Form.parse(nil))
+end
+
+# ─────────────────────────────────────────────────────────────
+# Notify: 用假子类测协议, 不开真 socket(避免占 5000 端口 / 留后台线程)
+group 'notify' do
+  require_relative 'notify_helper'
+
+  cn = CaptureNotify.new('tester')
+  cn.notify(:chat, 'hello')
+  pkt = cn.sent.last
+  check('notify 发出一个包', 1, cn.sent.size)
+
+  hdr, body = cn.send(:split_packet, pkt)
+  check('HEADER 与 PAYLOAD 用 \\n 分隔', true, pkt.include?("\n"))
+  check('HEADER 以 k=msg 开头', true, hdr.start_with?('k=msg '))
+  check('header 记录 kind=msg', 'msg', cn.send(:header_kv, hdr, :kind))
+  check('header 记录 channel=chat', 'chat', cn.send(:header_kv, hdr, :channel))
+  check('header 记录 name=tester', 'tester', cn.send(:header_kv, hdr, :name))
+  check('header 记录 seq 递增', true, cn.send(:header_kv, hdr, :seq).to_i.positive?)
+  check('header 记录 body_len=5', 5, cn.send(:header_kv, hdr, :body_len).to_i)
+  check('payload 原样还原', 'hello', body)
+  check('payload 是 ASCII-8BIT', Encoding::ASCII_8BIT, body.encoding)
+  check('HEADER 是 ASCII-8BIT', Encoding::ASCII_8BIT, hdr.encoding)
+
+  cn.notify(:chat, '报告')
+  _, body_cn = cn.send(:split_packet, cn.sent.last)
+  check('UTF-8 payload 字节数保持 6', 6, body_cn.bytesize)
+  check('UTF-8 payload 可还原为原文', '报告', body_cn.force_encoding('UTF-8'))
+  check('非法 UTF-8 字节不被替换成 U+FFFD(返回 hex 以免 JSON 序列化炸)', 'fffe',
+        cn.send(:payload_bytes, "\xff\xfe").b.unpack1('H*'),
+        '坑: encode! 会把非法字节变成 U+FFFD, 数据就毁了。' \
+        '注: 直接把原始字节塞进 ok_json 会抛 JSON::GeneratorError, 断言输出须先 hex 化')
+  check('payload nil → 空串', 0, cn.send(:payload_bytes, nil).bytesize)
+
+  cn.notify(:chat, 'x', tag: 't1')
+  hdr2, = cn.send(:split_packet, cn.sent.last)
+  check('自定义 meta 进 HEADER, key 不缩写', 't1', cn.send(:header_kv, hdr2, 'tag'))
+
+  over = "k=msg c=chat l=2\nABCDEF".dup.force_encoding(Encoding::ASCII_8BIT)
+  _, trimmed = cn.send(:split_packet, over)
+  check('split_packet 按 body_len 截断', 2, trimmed.bytesize)
+
+  no_nl = 'k=msg c=chat'.dup.force_encoding(Encoding::ASCII_8BIT)
+  h2, b2 = cn.send(:split_packet, no_nl)
+  check('无 \\n 时整个包当 HEADER, payload 空', ['k=msg c=chat', 0], [h2, b2.bytesize])
+
+  before = cn.sent.size
+  cn.emit(:chat, 'e')
+  check('emit 与无 block 的 notify 等价(各发一包)', before + 1, cn.sent.size)
+
+  # dispatch 只投递给同 channel 的订阅者 —— 注意发包和订阅要用同一个 channel
+  got = []
+  cn.notify(:chat) { |m| got << m }
+  cn.send(:dispatch_msg, cn.send(:parse_packet, pkt, '1.2.3.4:5'))
+  check('notify(ch){} 收到自己发的', 1, got.size,
+        'CRDT join 依赖这个 —— tool/editdoc/ws 显式回声就是为了它')
+
+  got2 = []
+  cn2 = CaptureNotify.new('tester2')
+  cn2.notify(:chat, false) { |m| got2 << m }
+  cn2.send(:dispatch_msg, cn2.send(:parse_packet, pkt, '1.2.3.4:5'))
+  check('notify(ch, false){} 跳过自己发的', 0, got2.size)
+
+  got3 = []
+  cn3 = CaptureNotify.new('t3')
+  cn3.notify(:chat, false) { |m| got3 << m }
+  foreign = pkt.sub("p=#{Process.pid}", 'p=999999')
+  cn3.send(:dispatch_msg, cn3.send(:parse_packet, foreign, '1.2.3.4:5'))
+  check('notify(ch, false){} 收到别人的', 1, got3.size)
+
+  gotx = []
+  cnx = CaptureNotify.new('tx')
+  cnx.notify(:other) { |m| gotx << m }
+  cnx.send(:dispatch_msg, cnx.send(:parse_packet, pkt, '1.2.3.4:5'))
+  check('只投递给同 channel 的订阅者', 0, gotx.size, 'pkt 的 channel 是 :chat')
+
+  cn4 = CaptureNotify.new('t4')
+  cn4.notify(nil, 'd')
+  hdr4, = cn4.send(:split_packet, cn4.sent.last)
+  check('nil channel 记为 default', 'default', cn4.send(:header_kv, hdr4, :channel))
+
+  cn5 = CaptureNotify.new('t5')
+  cn5.notify(:a) { nil }
+  cn5.notify(:b) { nil }
+  check('多 channel 独立订阅', %i[a b], cn5.instance_variable_get(:@subs).keys.sort)
+
+  got6 = []
+  cn6 = CaptureNotify.new('t6')
+  cn6.notify(:chat) { raise 'subscriber boom' }
+  cn6.notify(:chat) { |m| got6 << m }
+  begin
+    cn6.send(:dispatch_msg, cn6.send(:parse_packet, pkt, '1.2.3.4:5'))
+  rescue StandardError
+    nil
+  end
+  check('订阅者抛异常被吞掉且不中断后续订阅', 1, got6.size)
+
+  check('stop 幂等(未 running 时直接返回 self)', true, cn6.stop.equal?(cn6))
+  check('Notify 基类 do_send_packet 未实现', 'NotImplementedError',
+        begin
+          Class.new(Notify) { def initialize; super('x'); end }
+                .new.tap { |n| n.send(:do_send_packet, 'x') }
+          '(no exception)'
+        rescue NotImplementedError
+          'NotImplementedError'
+        end)
+end
+
+# ─────────────────────────────────────────────────────────────
+# 用 '/*' 而不是 '/': MAP_PATH 非空(restful 段存在)时也要能跑同一份断言,
+# 这样同一脚本能被 /test/framework、/users/42、/demo/u/7 等 URL 分别驱动。
+# method 同时挂 GET/POST —— POST 才能验到 req.body / body_json / body_form_data 分支。
+Q.route '/*', method: %i[GET POST PUT] do |_req, rsp|
+  failed = RESULTS.count { |r| !r[:ok] }
+  rsp.ok_json(
+    ok: failed.zero?,
+    total: RESULTS.size,
+    passed: RESULTS.size - failed,
+    failed: failed,
+    map_path: MAP,
+    script: Q.script_name,
+    results: RESULTS
+  ).finish
+end
