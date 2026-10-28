@@ -28,12 +28,12 @@ require_relative '../../_env_/ruby/_ext_notify_'
 # heartbeat/state-vector 重试恢复, 但延迟会变高。
 FRAME_MAX = 60 * 1024
 
-Q.ws do |req|
+Q.ws do |req, rsp|
   mcast = SocketNotify.new("cgi-editdoc-#{Process.pid}")
 
   mcast.notify(:editdoc, false) do |msg|
     # false = 不回环，跳过自己发的
-    Q.write(msg.data, true)
+    rsp.ws_write(msg.data)
   end
 
   Q.log('[editdoc/ws] + client')
@@ -50,9 +50,8 @@ Q.ws do |req|
       else
         # 原样透传字节 + echo 回自己 (weavo join 需要)
         mcast.notify(:editdoc, chunk)
-        Q.write(chunk, true)
+        #rsp.ws_write(chunk)
         Q.log "notify #{chunk.bytesize}"
-        sleep 0.001
       end
     rescue => e
       Q.log("[editdoc/ws] relay err: #{e.message}")

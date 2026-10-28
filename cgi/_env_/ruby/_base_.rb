@@ -751,6 +751,10 @@ class Q
       Q.log "stream ..."
       throw :q_resp_sent, :handled
     end
+
+    def ws_write(data)
+        Q.write([data.bytesize].pack("V") + data.b, true)
+    end
   end
 end
 
@@ -894,7 +898,7 @@ class Q
     end
 
     def route(pattern = nil, method: nil, &block)
-      # 兜底：pattern 和 method 都 nil → 总是匹配
+      # 兜底：pattern 和 method 都 nil → 总是匹on_ws_data配
       caught = catch(:q_resp_sent) do
         if pattern.nil? && method.nil?
           exec_route_block(block)
