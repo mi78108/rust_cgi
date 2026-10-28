@@ -52,10 +52,24 @@ const showToast = (msg) => {
 };
 
 // ── clientId ────────────────────────────────────────────────
+// 必须是标准 UUID 格式 (8-4-4-4-12), weavo 的 uuidToBytes 会拿它去
+// 编码 membership 帧 —— 格式不对直接抛 "Invalid client UUID"。
+//
+// crypto.randomUUID() 只在 secure context (https / localhost) 可用,
+// 局域网 IP + http 上没有 —— 所以得自己兜一个格式正确的。
 function newClientId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  const q = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, '0');
-  return `${q()}-${q()}-${q()}-${q()}`;
+  const h = (n) => {
+    const buf = new Uint8Array(n);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(buf);
+    } else {
+      for (let i = 0; i < n; i++) buf[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+  };
+  // 8-4-4-4-12, 跟 crypto.randomUUID() 同形
+  return `${h(4)}-${h(2)}-${h(2)}-${h(2)}-${h(6)}`;
 }
 
 // ── 状态灯 ──────────────────────────────────────────────────
