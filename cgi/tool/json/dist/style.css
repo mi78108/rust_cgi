@@ -215,6 +215,24 @@
     header.toolbar button:active { background: var(--lime); color: var(--lime-ink); border-color: var(--lime); }
     header.toolbar button.primary { border-color: var(--lime); color: var(--lime); }
     header.toolbar button.primary:hover { background: var(--lime); color: var(--lime-ink); }
+    header.toolbar button:disabled {
+      opacity: 0.4;
+      cursor: default;
+      background: transparent;
+    }
+    header.toolbar button:disabled:hover { background: transparent; border-color: var(--rule); }
+    header.toolbar input {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--rule);
+      padding: 4px 8px;
+      font: inherit;
+      min-width: 180px;
+      max-width: 320px;
+      letter-spacing: normal;
+    }
+    header.toolbar input::placeholder { color: var(--muted); }
+    header.toolbar input:focus { outline: none; border-color: var(--ink-2); }
     header.toolbar .spacer { flex: 1; }
     header.toolbar .label { color: var(--muted); padding: 0 4px; }
     #editor {

@@ -11,6 +11,11 @@
   <header class="toolbar">
     <div class="group">
       <button id="btn-open" title="打开本地 .json 文件">open</button>
+      <input id="url-input" type="url" placeholder="https://... 返回 JSON" spellcheck="false" autocomplete="off">
+      <button id="btn-fetch" title="抓取 URL 的 JSON">fetch</button>
+      <button id="btn-refresh" title="重新拉取数据来源并渲染" disabled>refresh</button>
+    </div>
+    <div class="group">
       <button id="btn-download" class="primary" title="下载当前 JSON 为文件">download</button>
       <button id="btn-copy" title="复制到剪贴板">copy</button>
       <button id="btn-clear" title="清空">clear</button>
