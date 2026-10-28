@@ -331,10 +331,13 @@ var buildOpFromLocalInput = (doc, insertedText, insertedLength, deletedLength, p
   const applied = [];
   for (let i = 0; i < deletedLength; i++) {
     const op = buildOp(doc, position, "del");
+    // [pad 本地补丁] buildOp 在删无可删时返回 null (见 buildOp 里的说明)
+    if (!op) break;
     applied.push({ op, index: apply(doc, op) });
   }
   for (let i = 0; i < insertedLength; i++) {
     const op = buildOp(doc, position + i, "ins", insertedText[i]);
+    if (!op) break;
     applied.push({ op, index: apply(doc, op) });
     doc.counter++;
   }
@@ -393,7 +396,11 @@ var buildOp = (doc, position, type, content = null) => {
     return op;
   } else {
     const slNodePred = findByIndex(doc.skipList, position);
-    if (!slNodePred) throw new Error("no node found");
+    // [pad 本地补丁] 上游 bug: 光标在文档开头时按退格, deletePosition 算出 -1,
+    // findByIndex 的 targetIndex < 0 守卫直接返回 null, 这里就抛 "no node found"。
+    // 实际语义应该是「光标前面没有字符可删」→ 什么都不做, 而不是抛异常。
+    // 返回 null 让调用方 (onInput -> buildOpFromLocalInput) 当作无操作。
+    if (!slNodePred) return null;
     const node = doc.store.nodes.get(slNodePred.refCrdtKey);
     if (!node) throw new Error("no node found");
     const op = createDeleteOperation(node.id);
