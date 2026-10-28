@@ -33,6 +33,7 @@ Q.ws do |req, rsp|
 
   mcast.notify(:editdoc, false) do |msg|
     # false = 不回环，跳过自己发的
+    sleep 0.05
     rsp.ws_write(msg.data)
   end
 
@@ -49,9 +50,11 @@ Q.ws do |req, rsp|
         Q.log "[editdoc/ws] frame too big: #{chunk.bytesize}"
       else
         # 原样透传字节 + echo 回自己 (weavo join 需要)
+        sleep 0.05
         mcast.notify(:editdoc, chunk)
         #rsp.ws_write(chunk)
         Q.log "notify #{chunk.bytesize}"
+        nil
       end
     rescue => e
       Q.log("[editdoc/ws] relay err: #{e.message}")

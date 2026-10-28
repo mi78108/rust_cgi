@@ -308,14 +308,14 @@ impl Req for Websocket {
             self.payload_remainder.store(rem, Ordering::Relaxed);
 
             if rem > 0 {
-                return Ok(consumed); // 还是半帧，等下次
+                return Ok(data.len()); // 还是半帧，等下次
             }
             self.deliver_current_frame().await?; // 补齐，投递整帧
         }
 
         // ---- 2. 按整帧切分剩余 data ----
         while data.len() - consumed >= 4 {
-            let len = u32::from_ne_bytes(
+            let len = u32::from_be_bytes(
                 data[consumed..consumed + 4].try_into().unwrap(),
             ) as usize;
             let payload_start = consumed + 4;
@@ -349,7 +349,7 @@ impl Req for Websocket {
         }
 
         // 剩余 < 4 字节（半个头）：不消费，交由调用方下次重传
-        Ok(consumed)
+        Ok(data.len())
     }
 
 

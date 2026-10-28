@@ -753,7 +753,7 @@ class Q
     end
 
     def ws_write(data)
-        Q.write([data.bytesize].pack("V") + data.b, true)
+        Q.write([data.bytesize].pack("N") + data.b, true)
     end
   end
 end
