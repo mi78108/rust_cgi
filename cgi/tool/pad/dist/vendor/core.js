@@ -380,9 +380,20 @@ var onInput = (e, doc, before) => {
 };
 var buildOp = (doc, position, type, content = null) => {
   if (type === "ins") {
+    // [pad 本地补丁] 上游 bug: position 超出文档长度时 findByIndex 返回 null,
+    // 直接抛 "no node found"。
+    //
+    // 真实场景: textarea 的 value 比 CRDT 文档长 (远端 peer 的文字刚同步进
+    // el.value, 但本地 CRDT 还没合并 / 或者 before 快照是旧的), 此时
+    // before.start 指向文档末尾之外 → predIndex >= skipList.length → 抛异常。
+    //
+    // 正确语义: 把插入位置夹到文档末尾 (末尾之后的位置等价于末尾),
+    // 而不是抛异常让整个输入中断。
+    const maxPos = doc.skipList.length;
+    if (position > maxPos) position = maxPos;
     const predIndex = position - 1;
     const slNodePred = predIndex < 0 ? doc.skipList.head : findByIndex(doc.skipList, predIndex);
-    if (!slNodePred) throw new Error("no node found");
+    if (!slNodePred) return null;
     const nodeLeft = doc.store.nodes.get(slNodePred.refCrdtKey);
     if (!nodeLeft) throw new Error("no node found");
     const nodeRight = slNodePred.next[0] ? doc.store.nodes.get(slNodePred.next[0].refCrdtKey) : null;
