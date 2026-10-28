@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pad · 协作编辑器</title>
+<link rel="stylesheet" href="/tool/pad/style.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>pad</h1>
+    <span class="meta">collaborative text editor · CRDT over WebSocket</span>
+    <span class="spacer"></span>
+    <div class="room-bar">
+      <span class="meta">ws</span>
+      <span class="meta mono">/tool/pad/ws</span>
+    </div>
+    <button id="btn-reconnect">reconnect</button>
+    <span id="status" class="pill pending">disconnected</span>
+  </header>
+
+  <div class="editor-box">
+    <div class="editor-bar">
+      <span>textarea</span>
+      <span class="meta">·</span>
+      <span class="meta">peers online: <span id="peers" class="who">0</span></span>
+      <span class="meta">·</span>
+      <span class="meta">ops: <span id="ops">0</span></span>
+      <span class="spacer"></span>
+      <span class="meta">you: <span id="me" class="who">—</span></span>
+    </div>
+
+    <div class="editor-frame">
+      <textarea id="ta" spellcheck="false" placeholder="开始写…"></textarea>
+      <!-- 远端光标层: 用 mirror 文本量出对方光标的像素位置 -->
+      <div class="cursor-layer">
+        <div class="cursor-mirror" id="mirror"></div>
+        <span class="cursor-anchor" id="anchor"></span>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>CRDT: <code>@weavo/client</code></span>
+    <span>·</span>
+    <span>backend: <code>/tool/pad/ws</code> (transparent relay)</span>
+    <span>·</span>
+    <span class="meta">open 2+ tabs on this page to test sync</span>
+  </footer>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- 普通 js/html, 无构建步骤 -->
+<!-- vendor/ 里是从 CDN 下载到本地的 @weavo/* ESM 包, import 已改写成相对路径 -->
+<script type="module" src="/tool/pad/app.js"></script>
+
+</body>
+</html>
