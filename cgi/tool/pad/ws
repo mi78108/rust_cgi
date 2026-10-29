@@ -9,7 +9,7 @@
 #
 # 服务器做三件事：
 #   1. 持有文档 op log（文件），新客户端连上时发全量
-#   2. 收到 op → 追加到 log → 组播给其他客户端
+#   2. 收到 op → 追加到 log → 广播给其他客户端
 #   3. 维护成员表（每客户端一个文件，谁在线 = 目录里有哪些文件）
 #
 # 协议（JSON over WS text frame）：
@@ -32,8 +32,18 @@
 #   $SPIDER_DATA/pad/<docId>/ops.log        每行一个 op (JSON)，只追加
 #   $SPIDER_DATA/pad/<docId>/members/<cid>.json  每个客户端一份
 #
-# 组播用 SocketNotify（UDP 239.255.0.1:5000），跨进程 —— 因为 spider 是
+# 广播用 TcpNotify（TCP 长连接，BDR 协议），连的是 spider 自己的监听端口
+# （靠 magic 探测分流到 tcp_broadcast）。跨进程 —— 因为 spider 是
 # fork-per-request，每个 ws 连接一个 ruby 进程，进程间不共享内存。
+#
+# 为什么不用 SocketNotify（UDP 组播）：
+#   BDR 由**服务端**做扇出，语义更可控（有序、可靠、不丢包）。
+#   UDP 组播是"人人发人人收"，客户端多的时候会有 N² 的流量，而且
+#   组播不回环 —— 发送方要单独补发一份自己（代码里到处 rsp.ws_write），
+#   逻辑容易漏。
+#
+#   ★ BDR 的回环语义：spider 广播给频道里**所有**订阅者，**包括发送者自己**。
+#     所以这里 want_echo=false（跳过自己发的），自己那份仍然走 rsp.ws_write。
 
 require_relative '../../_env_/ruby/_base_'
 require_relative '../../_env_/ruby/_ext_notify_'
@@ -47,6 +57,9 @@ DOC_ID   = 'default'
 DOC_DIR  = File.join(PAD_ROOT, DOC_ID)
 OPS_LOG  = File.join(DOC_DIR, 'ops.log')
 MEM_DIR  = File.join(DOC_DIR, 'members')
+
+# BDR 频道名 —— 所有 pad 客户端共用一个
+PAD_CHANNEL = 'pad'
 
 # 成员心跳间隔：超过这个时间没更新就认为掉线了
 MEMBER_TTL = 30
@@ -171,19 +184,25 @@ end
 def broadcast_members(mcast)
   members = read_members
   payload = JSON.generate({ t: 'members', members: members })
-  mcast.notify(:pad, payload)
+  mcast.notify(PAD_CHANNEL, payload)
   members
 end
 
 # ── WS 端点 ────────────────────────────────────────────────
 Q.ws do |req, rsp|
-  mcast = SocketNotify.new("cgi-pad-#{Process.pid}")
+  # BDR 连接 —— 连 spider 自己的端口
+  #
+  # host/port 不传 → 127.0.0.1 + $Cgi_Port（spider 注入的监听端口）
+  mcast = TcpNotify.new("cgi-pad-#{Process.pid}", channel: PAD_CHANNEL)
   cid   = nil
   name  = 'anon'
   color = '#c4f542'
 
-  # 订阅组播：别的客户端的 op 和成员表
-  mcast.notify(:pad, false) do |msg|
+  # 订阅广播：别的客户端的 op 和成员表
+  #
+  # want_echo=false —— 跳过自己发的（BDR 会把消息发给发送者自己）。
+  # 自己那份走 rsp.ws_write（见下面各分支）。
+  mcast.notify(PAD_CHANNEL, false) do |msg|
     data = msg.data
     next if data.nil? || data.empty?
     rsp.ws_write(data)
@@ -225,7 +244,7 @@ Q.ws do |req, rsp|
         rsp.ws_write(JSON.generate({ t: 'ops', ops: ops })) unless ops.empty?
 
         # 发成员表 ——
-        # 组播不会回环到发送方（订阅时 want_echo=false），
+        # 广播用的是 want_echo=false（跳过自己发的），
         # 所以请求者自己那份要直接 ws_write 一次。
         members = broadcast_members(mcast)
         rsp.ws_write(JSON.generate({ t: 'members', members: members }))
@@ -245,7 +264,7 @@ Q.ws do |req, rsp|
         ensure
           log_lock.flock(File::LOCK_UN)
         end
-        mcast.notify(:pad, JSON.generate({ t: 'clear' }))
+        mcast.notify(PAD_CHANNEL, JSON.generate({ t: 'clear' }))
         rsp.ws_write(JSON.generate({ t: 'clear' }))
         Q.log '[pad/ws] document cleared'
 
@@ -254,8 +273,8 @@ Q.ws do |req, rsp|
         next nil unless op.is_a?(Hash)
         ok = append_op(op)
         if ok
-          # 组播给其他客户端（自己那份本地已经应用了）
-          mcast.notify(:pad, JSON.generate({ t: 'ops', ops: [op] }))
+          # 广播给其他客户端（自己那份本地已经应用了）
+          mcast.notify(PAD_CHANNEL, JSON.generate({ t: 'ops', ops: [op] }))
         end
 
       when 'presence'
@@ -264,10 +283,10 @@ Q.ws do |req, rsp|
                    'cursor' => msg['cursor'].to_i, 'ts' => Time.now.to_i }
           write_member(cid, info)
           # 光标变化要立刻推给其他人；
-          # 组播不回环给发送方，所以自己也直接发一份
+          # 广播是 want_echo=false（跳过自己发的），所以自己也直接发一份
           members = read_members
           payload = JSON.generate({ t: 'members', members: members })
-          mcast.notify(:pad, payload)
+          mcast.notify(PAD_CHANNEL, payload)
           rsp.ws_write(payload)
         end
 

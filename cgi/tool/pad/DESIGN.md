@@ -12,17 +12,20 @@ UDP 组播。服务器本来就是唯一的可信协调点，没必要在客户�
 
 所以：**服务器持有权威状态**，客户端只做 RGA 合并。
 
+（进程间转发后来从 UDP 组播换成了 BDR —— TCP 长连接，spider 做扇出。
+有序、可靠、不丢包，见下面「进程间广播」。）
+
 ## 架构
 
 ```
 浏览器 A ─┐                      ┌─ 服务器 (ruby, 每连接一进程)
 浏览器 B ─┼─ ws /tool/pad/ws ────►│  · 持有文档 op log（文件）
-          │                      │  · 持有成员表（文件 + 组播通知）
+          │                      │  · 持有成员表（文件 + 广播通知）
           └──────────────────────┘
 ```
 
 服务器做三件事：
-1. **转交 op** —— 收到客户端的 op → 追加到 op log → 组播给其他客户端
+1. **转交 op** —— 收到客户端的 op → 追加到 op log → 广播给其他客户端
 2. **提供快照** —— 新客户端连上 → 发当前 op log 全量
 3. **维护成员表** —— 谁在线、谁在哪个位置（presence）
 
@@ -173,13 +176,47 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
 ```
 收到 op →
   追加到 ops.log
-  mcast.notify(:pad, {t:'ops',ops:[op]})   # 组播给其他客户端
+  mcast.notify(PAD_CHANNEL, {t:'ops',ops:[op]})   # BDR 广播给频道里其他客户端
   （自己那份由客户端本地直接应用，不绕一圈）
 ```
 
 新客户端连上 → 发 `{"t":"ops","ops":[...]}` 全量（从 ops.log 读）。
 服务器回客户端用 `rsp.ws_write`（带 4 字节长度前缀），
 客户端发来的帧由 spider 解包成 `[len][rem]` 头交给 ruby。
+
+### 进程间广播：BDR（TCP 长连接）
+
+服务器进程之间用 `TcpNotify`（BDR 协议）转发，不是 UDP 组播：
+
+```
+每个 ws 连接 fork 一个 ruby 进程 →
+  每个进程用 TcpNotify 连 spider 自己的监听端口（magic 探测分流到 tcp_broadcast）
+  → spider 做扇出，广播给频道里所有订阅者
+```
+
+连线格式（跟 `src/tcp_class/tcp_broadcast_func.rs` 一致）：
+
+```
+握手:  [0x89 'B' 'R' 'D' 0x0d 0x0a 0x1a 0x00] + "<channel>\n"
+服务端: [len u32 BE][id 8 字节]              ← 本连接的 id
+客户端: [len u32 BE][payload]
+广播:   [len u32 BE][id 8 字节][payload]      ← len = 8 + payload.len()
+```
+
+频道在握手时定死（一条连接一个频道），pad 用 `pad`。
+服务端地址默认 `127.0.0.1` + `$Cgi_Port`（spider 注入的自己的监听端口）。
+主机名写死 127.0.0.1 —— BDR 是本机进程之间的连接，而 spider 的 bind 地址
+可能是 `0.0.0.0`（监听所有网卡），那不是可连接的目标。
+
+要连别处就显式传：
+
+```ruby
+TcpNotify.new('alice', host: '10.0.0.9', port: 9999, channel: 'room1')
+```
+
+比 UDP 组播好在：**有序、可靠、不丢包**，而且扇出在服务端做，
+不用 N² 的组播流量。回环语义一致 —— BDR 会把消息发给发送者自己，
+所以订阅用 `want_echo=false`，自己那份走 `rsp.ws_write`。
 
 ## 与 weavo 版本的对比
 
@@ -188,6 +225,7 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
 | 代码量 | 3159 行 vendor | 894 行（crdt+sync+app） |
 | 成员管理 | 客户端 CASPaxos 共识（824行） | 服务器文件 + 目录扫描 |
 | 文档状态 | 客户端各自持有 | 服务器持有 op log |
+| 进程间转发 | UDP 组播 | BDR（TCP 长连接，spider 扇出） |
 | 离线支持 | 靠 snapshot/delta | 重连时拉全量 |
 | 依赖 | 5 个 npm 包 | 无 |
 | 协议 | 自定义二进制 | JSON text |
@@ -198,6 +236,7 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
 2. **全量同步** —— 新客户端拉全量 log，文档大了就慢。可以加"最近 N 个 op + 快照"。
 3. **无权限控制** —— 谁能连上就能改。demo 可以。
 4. **单文档** —— 一个 docId 一个文档。多文档要加路由。
+5. **BDR 频道固定在握手时** —— 一条连接只能收发一个频道。要跨频道得另开连接。
 
 ## 实现状态
 
@@ -205,5 +244,5 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
 1. crdt.js 收敛性测试：40 轮 × 3 副本 × 18 op（含删除 + 随机投递顺序），全部收敛
 2. sync.js：WS 收发 + 重连 + pending buffer
 3. app.js：输入绑定（beforeinput 快照 + IME composition 处理）+ 远端光标 mirror 测量
-4. 后端：ops.log + 组播转发 + 成员表 + clear
+4. 后端：ops.log + BDR 广播转发 + 成员表 + clear
 5. 端到端：两个独立 WS 客户端并发编辑，文本收敛一致
