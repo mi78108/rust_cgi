@@ -4,10 +4,12 @@ use crate::{debug, error};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
-use std::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize, Ordering};
+use std::io::{Error, ErrorKind, Write};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::RwLock;
 
 const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 pub struct Websocket {
@@ -16,6 +18,8 @@ pub struct Websocket {
     processed: AtomicUsize,
     remainder: AtomicUsize,
     payload_mask: AtomicU32,
+    payload_buffer: RwLock<Vec<u8>>,
+    payload_remainder: AtomicUsize,
 }
 
 impl Websocket {
@@ -105,7 +109,7 @@ impl Websocket {
         }
         debug!("websocket read package mask {:?}", plymask);
         // frame read done
-       self.last_op.store(bytes[0], Ordering::Release);
+        self.last_op.store(bytes[0], Ordering::Release);
         match bytes[0] {
             // h  if h == 0b10000000 => {
             //     continues frame
@@ -219,6 +223,26 @@ impl Websocket {
             data[i] = data[i] ^ mask[read + i % 4];
         }
     }
+
+    async fn deliver_current_frame(&self) -> Result<usize, Error> {
+        let len = self.payload_buffer.read().await.len();
+        let payload: Vec<u8> = {
+            let buf = self.payload_buffer.read().await;
+            buf.clone()
+        };
+        self.write_with_opcode(self.last_op.load(Ordering::Relaxed), &payload)
+            .await?;
+        self.base_on
+            .base_on
+            .req_writer
+            .lock()
+            .await
+            .flush()
+            .await?;
+        self.payload_buffer.write().await.clear();
+        self.payload_remainder.store(0, Ordering::Relaxed);
+        Ok(len)
+    }
 }
 
 impl Req for Websocket {
@@ -265,22 +289,110 @@ impl Req for Websocket {
     }
 
     fn remainder(&self) -> Option<usize> {
-       Some(self.remainder.load(Ordering::Relaxed))
+        Some(self.remainder.load(Ordering::Relaxed))
     }
 
-    async fn write(&self, data: &[u8]) -> Result<usize, Error> {
-        // 默认 文本末包hdu
-        // let rst = if data[0] == 0b10000010 {
-        //    self.write_with_opcode(0b10000010, &data[1..]).await
-        // }else{
-        //     self.write_with_opcode(0b10000001, data).await
-        // };
-        let rst = self.write_with_opcode(self.last_op.load(Ordering::Relaxed), data).await;
-        if rst.is_ok() {
-            if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {}
-        };
-        rst
+     async fn write(&self, data: &[u8]) ->Result<usize, Error> {
+        let mut consumed = 0usize;
+
+        // ---- 1. 补上次未收完的半帧 payload ----
+        let mut rem = self.payload_remainder.load(Ordering::Relaxed);
+        if rem > 0 {
+            let take = rem.min(data.len() - consumed);
+            {
+                let mut buf = self.payload_buffer.write().await;
+                buf.extend_from_slice(&data[consumed..consumed + take]);
+            }
+            consumed += take;
+            rem -= take;
+            self.payload_remainder.store(rem, Ordering::Relaxed);
+
+            if rem > 0 {
+                return Ok(data.len()); // 还是半帧，等下次
+            }
+            self.deliver_current_frame().await?; // 补齐，投递整帧
+        }
+
+        // ---- 2. 按整帧切分剩余 data ----
+        while data.len() - consumed >= 4 {
+            let len = u32::from_be_bytes(
+                data[consumed..consumed + 4].try_into().unwrap(),
+            ) as usize;
+            let payload_start = consumed + 4;
+            let available = data.len() - payload_start;
+
+            if available < len {
+                // 半帧：存已有 payload，记还差多少
+                {
+                    let mut buf = self.payload_buffer.write().await;
+                    buf.clear();
+                    buf.extend_from_slice(&data[payload_start..]);
+                }
+                self.payload_remainder
+                    .store(len - available, Ordering::Relaxed);
+                return Ok(data.len()); // 全部接纳
+            }
+
+            // 整帧：直接投递
+            let frame = &data[payload_start..payload_start + len];
+            self.write_with_opcode(self.last_op.load(Ordering::Relaxed), frame)
+                .await?;
+            self.base_on
+                .base_on
+                .req_writer
+                .lock()
+                .await
+                .flush()
+                .await?;
+
+            consumed = payload_start + len;
+        }
+
+        // 剩余 < 4 字节（半个头）：不消费，交由调用方下次重传
+        Ok(data.len())
     }
+
+
+
+
+
+    // async fn write(&self, data: &[u8]) -> Result<usize, Error> {
+    //     if data.len() > 4 {
+    //         if self.payload_remainder.load(Ordering::Relaxed) == 0 {
+    //             let value = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    //             //
+    //             if data.len() - 4 >= value as usize {
+    //
+    //             }
+    //             self.payload_remainder.store(value as usize, Ordering::Relaxed);
+    //             self.payload_buffer.write().await.extend(&data[3..]);
+    //             return Ok(data.len() - 3);
+    //         }
+    //     }else {
+    //
+    //     }
+    //
+    //     // 默认 文本末包hdu
+    //     // let rst = if data[0] == 0b10000010 {
+    //     //    self.write_with_opcode(0b10000010, &data[1..]).await
+    //     // }else{
+    //     //     self.write_with_opcode(0b10000001, data).await
+    //     // };
+    //     let rst = self
+    //         .write_with_opcode(
+    //             self.last_op.load(Ordering::Relaxed),
+    //             self.payload_buffer.read().await.as_slice(),
+    //         )
+    //         .await;
+    //     if rst.is_ok() {
+    //         if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {
+    //         } else {
+    //             self.payload_buffer.write().await.clear();
+    //             self.payload_remainder.store(0, Ordering::Relaxed);
+    //         }
+    //     };
+    //     rst
+    // }
 
     async fn close(&self) -> Result<(), Error> {
         if self.write_with_opcode(0b10001000, &[]).await.is_ok() {
@@ -331,6 +443,8 @@ impl Handle<Http> for Websocket {
             processed: AtomicUsize::new(0),
             remainder: AtomicUsize::new(0),
             payload_mask: AtomicU32::new(0),
+            payload_buffer: RwLock::new(Vec::new()),
+            payload_remainder: AtomicUsize::new(0),
         })
     }
 }
