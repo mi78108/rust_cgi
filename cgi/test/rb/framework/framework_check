@@ -498,7 +498,7 @@ group 'notify' do
   cn.notify(:chat) { |m| got << m }
   cn.send(:dispatch_msg, cn.send(:parse_packet, pkt, '1.2.3.4:5'))
   check('notify(ch){} 收到自己发的', 1, got.size,
-        'CRDT join 依赖这个 —— tool/editdoc/ws 显式回声就是为了它')
+        'want_echo=true —— 自己发的也会回调')
 
   got2 = []
   cn2 = CaptureNotify.new('tester2')
