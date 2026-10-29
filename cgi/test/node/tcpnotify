@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+// test/node/tcpnotify — node 版 TcpNotify 端到端测试
+//
+// 连真实的 spider（TCP 广播端口），验证：
+//   1. 握手拿到连接 id
+//   2. 单连接发 + 收（回环）
+//   3. 两个连接互发，发送者 id 正确
+//   4. wantEcho=false 跳过自己发的
+//   5. 中文（二进制 payload）原样送达
+//   6. 大 payload（100KB）
+//   7. 频道隔离
+//   8. 断开一个不影响另一个
+
+import { TcpNotify } from '../../_env_/node/_ext_notify_.mjs';
+
+const HOST = process.env.TEST_HOST ?? '127.0.0.1';
+const PORT = Number(process.env.TEST_PORT ?? 3000);
+const CH = 'node-tcpnotify-test';
+
+let passed = 0;
+let failed = 0;
+
+// 比较用的字符串化 —— BigInt 不能直接 JSON.stringify
+const show = (v) => (typeof v === 'bigint' ? `${v}n` : JSON.stringify(v));
+
+const check = (label, got, want) => {
+  const ok = show(got) === show(want);
+  console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label}: got=${show(got)} want=${show(want)}`);
+  ok ? passed++ : failed++;
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 等到收集到 want 条消息
+const waitFor = async (arr, want, timeout = 5000) => {
+  const t0 = Date.now();
+  while (arr.length < want && Date.now() - t0 < timeout) {
+    await sleep(20);
+  }
+  return arr;
+};
+
+const main = async () => {
+  console.log('=== 1. 握手 ===');
+  const a = new TcpNotify('alice', { host: HOST, port: PORT, channel: CH });
+  const b = new TcpNotify('bob', { host: HOST, port: PORT, channel: CH });
+  await sleep(400);
+  console.log(`  alice id=${a.id}  bob id=${b.id}`);
+  check('id 是 BigInt', typeof a.id, 'bigint');
+  check('两个 id 不同', a.id !== b.id, true);
+
+  console.log('\n=== 2. 单连接发 + 收（回环） ===');
+  const recvA = [];
+  a.subscribe(CH, (m) => recvA.push(m));
+  a.send('hello');
+  await waitFor(recvA, 1);
+  check('收到自己发的（回环）', recvA[0]?.data.toString('utf8'), 'hello');
+
+  console.log('\n=== 3. 两个连接互发 ===');
+  const recvB = [];
+  b.subscribe(CH, (m) => recvB.push(m));
+  a.send('from-alice');
+  await waitFor(recvB, 1);
+  check('bob 收到 alice 的消息', recvB[0]?.data.toString('utf8'), 'from-alice');
+  check('header 里有 id', recvB[0]?.header, `id=${a.id}`);
+  check('msg.id 是发送者的连接 id', recvB[0]?.id, a.id);
+
+  const recvA2 = [];
+  a.subscribe(CH, (m) => recvA2.push(m));
+  b.send('from-bob');
+  await waitFor(recvA2, 1);
+  check('alice 收到 bob 的消息', recvA2[0]?.data.toString('utf8'), 'from-bob');
+
+  console.log('\n=== 4. wantEcho=false 跳过自己发的 ===');
+  const recvC = [];
+  const recvD = [];
+  const c = new TcpNotify('carol', { host: HOST, port: PORT, channel: CH });
+  const d = new TcpNotify('dave', { host: HOST, port: PORT, channel: CH });
+  await sleep(300);
+  c.subscribe(CH, (m) => recvC.push(m), { wantEcho: false });
+  d.subscribe(CH, (m) => recvD.push(m), { wantEcho: false });
+  c.send('carol-says');
+  await sleep(600);
+  check('carol 没收到自己的', recvC.length, 0);
+  check('dave 收到了 carol 的', recvD[0]?.data.toString('utf8'), 'carol-says');
+
+  console.log('\n=== 5. 中文（二进制 payload） ===');
+  const recvE = [];
+  const e = new TcpNotify('erin', { host: HOST, port: PORT, channel: CH });
+  await sleep(300);
+  e.subscribe(CH, (m) => recvE.push(m));
+  e.send('中文测试');
+  await waitFor(recvE, 1);
+  check('中文原样收到', recvE[0]?.data.toString('utf8'), '中文测试');
+  check('字节数正确', recvE[0]?.data.length, Buffer.byteLength('中文测试', 'utf8'));
+
+  console.log('\n=== 6. 大 payload（100KB） ===');
+  const recvF = [];
+  const f = new TcpNotify('frank', { host: HOST, port: PORT, channel: CH });
+  await sleep(300);
+  f.subscribe(CH, (m) => recvF.push(m));
+  const big = 'x'.repeat(100_000);
+  f.send(big);
+  await waitFor(recvF, 1, 8000);
+  check('100KB 原样收到', recvF[0]?.data.length, 100_000);
+  check('内容一致', recvF[0]?.data.toString('utf8') === big, true);
+
+  console.log('\n=== 7. 频道隔离 ===');
+  const recvG = [];
+  const g = new TcpNotify('gina', { host: HOST, port: PORT, channel: 'node-other-room' });
+  await sleep(300);
+  g.subscribe('node-other-room', (m) => recvG.push(m), { wantEcho: false });
+  g.send('should-not-reach');
+  await sleep(600);
+  check('别的频道收不到', recvG.length, 0);
+
+  console.log('\n=== 8. 断开一个不影响另一个 ===');
+  const recvH = [];
+  const h = new TcpNotify('hank', { host: HOST, port: PORT, channel: CH });
+  await sleep(300);
+  h.subscribe(CH, (m) => recvH.push(m));
+  a.stop();
+  await sleep(400);
+  h.send('after-stop');
+  await waitFor(recvH, 1);
+  check('另一个连接仍可用', recvH[0]?.data.toString('utf8'), 'after-stop');
+
+  for (const t of [b, c, d, e, f, g, h]) t.stop();
+  await sleep(200);
+
+  console.log(`\n=== ${passed} 通过, ${failed} 失败 ===`);
+  process.exit(failed === 0 ? 0 : 1);
+};
+
+main();
