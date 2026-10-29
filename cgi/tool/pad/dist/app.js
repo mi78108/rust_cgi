@@ -43,7 +43,26 @@ const meEl     = $('me');
 const toastEl  = $('toast');
 
 // ── 常量 ────────────────────────────────────────────────────
-const WS_PATH = '/tool/pad/ws';
+
+/**
+ * 从页面 URL 推导空间名。
+ *
+ *   /tool/pad/           → 'default'
+ *   /tool/pad/my-space/  → 'my-space'
+ *   /tool/pad/my-space   → 'my-space'
+ *
+ * 空间名对应后端的 BDR 频道 "pad-<space>" 和独立的 op log。
+ * 后端只认 /tool/pad/ws/<space>，所以这里必须把空间拼进 WS 路径。
+ */
+function spaceFromPath() {
+  const m = location.pathname.match(/^\/tool\/pad\/([^/]+)\/?$/);
+  return m ? m[1] : 'default';
+}
+
+const SPACE = spaceFromPath();
+
+// WS 路径带上空间 —— 后端 /tool/pad/ws/<space> 按空间分频道
+const WS_PATH = `/tool/pad/ws/${SPACE}`;
 const WS_URL  = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${WS_PATH}`;
 
 const PEER_COLORS = ['#ff7eb6', '#7eb6ff', '#ffd07e', '#7effc4', '#d07eff'];
@@ -418,6 +437,12 @@ function connect() {
   if (sync) sync.disconnect();
   clearPeerEls();
   members = new Map();
+
+  // 显示当前空间 —— 多人协作时能一眼看出自己在哪个空间
+  const spaceEl = $('space');
+  const wsPathEl = $('ws-path');
+  if (spaceEl) spaceEl.textContent = SPACE;
+  if (wsPathEl) wsPathEl.textContent = WS_PATH;
 
   myClientId = newClientId();
   seq = 0;

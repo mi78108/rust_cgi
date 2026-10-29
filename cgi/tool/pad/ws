@@ -52,14 +52,15 @@ require 'fileutils'
 
 # ── 配置 ────────────────────────────────────────────────────
 PAD_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/pad' : ENV['SPIDER_DATA']
-DOC_ID   = 'default'
 
-DOC_DIR  = File.join(PAD_ROOT, DOC_ID)
-OPS_LOG  = File.join(DOC_DIR, 'ops.log')
-MEM_DIR  = File.join(DOC_DIR, 'members')
+# 默认空间名 —— URL 里没给空间时用它
+DEFAULT_SPACE = 'default'
 
-# BDR 频道名 —— 所有 pad 客户端共用一个
-PAD_CHANNEL = 'pad'
+# 空间名合法性 —— 段内字符 [A-Za-z0-9._-]，长度 1..64
+#
+# 空间名会拼进文件路径（$SPIDER_DATA/pad/<space>/ops.log）和 BDR 频道名，
+# 所以必须严格校验 —— 不能有 .. / \ 之类能逃出目录的东西。
+SPACE_RE = /\A[A-Za-z0-9._-]{1,64}\z/
 
 # 成员心跳间隔：超过这个时间没更新就认为掉线了
 MEMBER_TTL = 30
@@ -67,15 +68,34 @@ MEMBER_TTL = 30
 # 单条 op 最大字节（防呆）
 MAX_OP_BYTES = 64 * 1024
 
-FileUtils.mkdir_p(MEM_DIR)
+# 空间名 -> 该空间的路径和频道
+#
+#   DOC_DIR  $SPIDER_DATA/pad/<space>/
+#   OPS_LOG  <DOC_DIR>/ops.log
+#   MEM_DIR  <DOC_DIR>/members/
+#   频道      "pad-<space>"
+#
+# 每个空间一份独立的 op log 和成员表，BDR 频道也分开 —— 空间之间完全隔离。
+def pad_paths(space)
+  dir  = File.join(PAD_ROOT, space)
+  {
+    doc_dir: dir,
+    ops_log: File.join(dir, 'ops.log'),
+    mem_dir: File.join(dir, 'members'),
+    channel: "pad-#{space}",
+  }
+end
 
 # ── op log ──────────────────────────────────────────────────
 # 只追加，一行一个 JSON op。并发 append 在 POSIX 下对 < PIPE_BUF 的写入
 # 是原子的，但为了稳妥还是加锁（每个进程一把自己的锁 + flock 文件锁）。
+#
+# ★ 这些函数用 @paths / @ops_log / @mem_dir —— 每个 CGI 进程只服务一个
+#   连接，也就只服务一个空间，所以进程级变量就够了（不用传参到处传）。
 
 def log_lock
   @log_lock ||= begin
-    File.open(OPS_LOG, File::WRONLY | File::CREAT | File::APPEND)
+    File.open(@ops_log, File::WRONLY | File::CREAT | File::APPEND)
   end
 end
 
@@ -88,7 +108,7 @@ end
 def op_seen_set
   @op_seen ||= begin
     s = {}
-    File.foreach(OPS_LOG) do |line|
+    File.foreach(@ops_log) do |line|
       line = line.strip
       next if line.empty?
       begin
@@ -129,9 +149,9 @@ rescue => e
 end
 
 def read_ops
-  return [] unless File.exist?(OPS_LOG)
+  return [] unless File.exist?(@ops_log)
   out = []
-  File.foreach(OPS_LOG) do |line|
+  File.foreach(@ops_log) do |line|
     line = line.strip
     next if line.empty?
     begin
@@ -148,11 +168,11 @@ end
 # 谁在线 = members/ 目录里有哪些文件。
 
 def member_file(cid)
-  File.join(MEM_DIR, "#{cid}.json")
+  File.join(@mem_dir, "#{cid}.json")
 end
 
 def write_member(cid, info)
-  FileUtils.mkdir_p(MEM_DIR)
+  FileUtils.mkdir_p(@mem_dir)
   tmp = member_file(cid) + '.tmp'
   File.write(tmp, JSON.generate(info))
   File.rename(tmp, member_file(cid))   # 原子替换
@@ -168,7 +188,7 @@ end
 
 def read_members
   out = []
-  Dir.glob(File.join(MEM_DIR, '*.json')).each do |f|
+  Dir.glob(File.join(@mem_dir, '*.json')).each do |f|
     begin
       info = JSON.parse(File.read(f))
       # 心跳超时的不算在线
@@ -184,16 +204,49 @@ end
 def broadcast_members(mcast)
   members = read_members
   payload = JSON.generate({ t: 'members', members: members })
-  mcast.notify(PAD_CHANNEL, payload)
+  mcast.notify(@channel, payload)
   members
 end
 
 # ── WS 端点 ────────────────────────────────────────────────
+#
+# URL 形态:
+#   /tool/pad/ws/<space>   空间 = <space>
+#   /tool/pad/ws           空间 = default
+#
+# ★ 为什么空间在 ws **后面**:
+#   spider 派发时从右往左剥路径。cgi/tool/pad/ 是**目录**，
+#   所以 /tool/pad/<space>/ws 会先命中目录 → 派发到 tool/pad/index
+#   （静态文件服务器），永远到不了 tool/pad/ws。
+#
+#   /tool/pad/ws/<space> 则不同: cgi/tool/pad/ws 是**文件**，
+#   先命中它 → restful 余段 = ["<space>"] —— 空间名就在 MAP_PATH 里。
+#
+#   推演方法（别猜，直接算）: 从右往左逐段试 cgi/<前缀> 是否是文件；
+#   是就停（该文件执行）；若是目录，补 index 继续剥。
 Q.ws do |req, rsp|
+  # ---- 解析空间名 ----
+  #
+  # MAP_PATH 形如 "/<space>" 或 "/"（没给空间）。
+  # 取第一段当空间名 —— 只支持一层，不支持 /tool/pad/ws/a/b。
+  space = Q::MAP_PATH.to_s.split('/').reject(&:empty?).first || DEFAULT_SPACE
+
+  unless SPACE_RE.match?(space)
+    Q.log "[pad/ws] bad space name: #{space.inspect}"
+    rsp.fail_400.type_text.body("invalid space name: #{space}\n").finish
+  end
+
+  # ---- 这个空间的路径和频道 ----
+  @paths   = pad_paths(space)
+  @ops_log = @paths[:ops_log]
+  @mem_dir = @paths[:mem_dir]
+  @channel = @paths[:channel]
+  FileUtils.mkdir_p(@mem_dir)
+
   # BDR 连接 —— 连 spider 自己的端口
   #
   # host/port 不传 → 127.0.0.1 + $Cgi_Port（spider 注入的监听端口）
-  mcast = TcpNotify.new("cgi-pad-#{Process.pid}", channel: PAD_CHANNEL)
+  mcast = TcpNotify.new("cgi-pad-#{Process.pid}", channel: @channel)
   cid   = nil
   name  = 'anon'
   color = '#c4f542'
@@ -202,13 +255,13 @@ Q.ws do |req, rsp|
   #
   # want_echo=false —— 跳过自己发的（BDR 会把消息发给发送者自己）。
   # 自己那份走 rsp.ws_write（见下面各分支）。
-  mcast.notify(PAD_CHANNEL, false) do |msg|
+  mcast.notify(@channel, false) do |msg|
     data = msg.data
     next if data.nil? || data.empty?
     rsp.ws_write(data)
   end
 
-  Q.log "[pad/ws] + client"
+  Q.log "[pad/ws] + client space=#{space} channel=#{@channel}"
 
   Q.on_close do
     remove_member(cid) if cid
@@ -264,7 +317,7 @@ Q.ws do |req, rsp|
         ensure
           log_lock.flock(File::LOCK_UN)
         end
-        mcast.notify(PAD_CHANNEL, JSON.generate({ t: 'clear' }))
+        mcast.notify(@channel, JSON.generate({ t: 'clear' }))
         rsp.ws_write(JSON.generate({ t: 'clear' }))
         Q.log '[pad/ws] document cleared'
 
@@ -274,7 +327,7 @@ Q.ws do |req, rsp|
         ok = append_op(op)
         if ok
           # 广播给其他客户端（自己那份本地已经应用了）
-          mcast.notify(PAD_CHANNEL, JSON.generate({ t: 'ops', ops: [op] }))
+          mcast.notify(@channel, JSON.generate({ t: 'ops', ops: [op] }))
         end
 
       when 'presence'
@@ -286,7 +339,7 @@ Q.ws do |req, rsp|
           # 广播是 want_echo=false（跳过自己发的），所以自己也直接发一份
           members = read_members
           payload = JSON.generate({ t: 'members', members: members })
-          mcast.notify(PAD_CHANNEL, payload)
+          mcast.notify(@channel, payload)
           rsp.ws_write(payload)
         end
 

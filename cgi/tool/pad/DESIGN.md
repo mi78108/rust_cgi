@@ -162,9 +162,11 @@ RGA 的 op 数 = 每次按键一个，长文档会涨，但 demo 阶段够用。
 ### 状态文件
 
 ```
-$SPIDER_DATA/pad/<docId>/ops.log      # 每行一个 op (JSON)
-$SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一份
+$SPIDER_DATA/pad/<space>/ops.log      # 每行一个 op (JSON)
+$SPIDER_DATA/pad/<space>/members/<clientId>.json  # 成员表，每客户端一份
 ```
+
+（`<space>` 是空间名，默认 `default` —— 见下面「空间」一节）
 
 - ops.log 只追加，不重写 → 简单、无锁（单进程 append 原子）
 - 成员表每个 ws 进程写自己那一份？不行，会互相覆盖。
@@ -203,7 +205,7 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
 广播:   [len u32 BE][id 8 字节][payload]      ← len = 8 + payload.len()
 ```
 
-频道在握手时定死（一条连接一个频道），pad 用 `pad`。
+频道在握手时定死（一条连接一个频道），pad 用 `pad-<space>`（每空间一个频道）。
 服务端地址默认 `127.0.0.1` + `$Cgi_Port`（spider 注入的自己的监听端口）。
 主机名写死 127.0.0.1 —— BDR 是本机进程之间的连接，而 spider 的 bind 地址
 可能是 `0.0.0.0`（监听所有网卡），那不是可连接的目标。
@@ -217,6 +219,56 @@ TcpNotify.new('alice', host: '10.0.0.9', port: 9999, channel: 'room1')
 比 UDP 组播好在：**有序、可靠、不丢包**，而且扇出在服务端做，
 不用 N² 的组播流量。回环语义一致 —— BDR 会把消息发给发送者自己，
 所以订阅用 `want_echo=false`，自己那份走 `rsp.ws_write`。
+
+## 空间（多文档）
+
+pad 支持「空间」—— 不同空间是**完全隔离**的：各自的 op log、各自的成员表、
+各自的 BDR 频道。
+
+```
+/tool/pad/<space>          302 → /tool/pad/<space>/
+/tool/pad/<space>/         页面
+/tool/pad/<space>/app.js   静态资源（不分空间，还是平铺的 /tool/pad/app.js）
+/tool/pad/ws/<space>       WS 端点
+/tool/pad/                 默认空间 (default)
+/tool/pad/ws               默认空间 (default)
+```
+
+数据目录：`$SPIDER_DATA/pad/<space>/{ops.log, members/}`
+
+空间名规则：`[A-Za-z0-9._-]{1,64}` —— 会拼进文件路径和频道名，必须严格校验。
+
+### ★ 为什么 WS 路径是 `/tool/pad/ws/<space>` 而不是 `/tool/pad/<space>/ws`
+
+spider 派发时从右往左剥路径，**遇到目录就补 index**：
+
+```
+/tool/pad/<space>/ws
+  cgi/tool/pad/<space>/ws   不存在
+  cgi/tool/pad/<space>      不存在
+  cgi/tool/pad              是目录 → 补 index → cgi/tool/pad/index  ← 命中!
+```
+
+`cgi/tool/pad/` 是**目录**，所以任何 `/tool/pad/<x>` 都会先命中目录，
+派发到 `tool/pad/index`（静态文件服务器），**永远到不了 `tool/pad/ws`**。
+
+而 `/tool/pad/ws/<space>` 不同：`cgi/tool/pad/ws` 是**文件**，先命中它，
+restful 余段 = `["<space>"]` —— 空间名就在 `MAP_PATH` 里。
+
+推演方法（别猜，直接算）：从右往左逐段试 `cgi/<前缀>` 是否是**文件**；
+是就停（该文件执行）；若是**目录**，补 index 继续剥。
+
+### index 为什么不是 pub 软连接
+
+`pub` 是所有 `tool/*` 共用的静态文件服务器，不认识「空间」概念。
+`/tool/pad/<space>` 会被派发到 `tool/pad/index`（原来是 pub 软连接），
+restful 余段 = `["<space>"]` —— 所以 `tool/pad/index` 换成真脚本，
+自己处理空间路由，静态文件部分照抄 pub 的逻辑。
+
+路由顺序有坑：空间路由必须排在静态文件路由**前面**，
+否则 `/my-space` 会被当成静态文件名（`file="my-space"`）→ 404。
+但空间路由也不能把静态文件吞掉（`/app.js` 正则一样），所以要先看
+`dist/` 里有没有同名文件 —— 有就当静态资源，没有才当空间名。
 
 ## 与 weavo 版本的对比
 

@@ -1,1 +1,143 @@
-../../pub
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# tool/pad/index —— pad 的入口，处理「空间」路由
+#
+# URL 形态:
+#   /tool/pad/                默认空间 (default)
+#   /tool/pad/<space>         302 → /tool/pad/<space>/
+#   /tool/pad/<space>/        页面（dist/index.html）
+#   /tool/pad/<space>/app.js  静态文件（dist/app.js）
+#   /tool/pad/ws/<space>      WS 端点（另一个脚本 tool/pad/ws）
+#
+# 为什么 index 不是 pub 软连接:
+#   pub 是所有 tool/* 共用的静态文件服务器，不认识「空间」概念。
+#   /tool/pad/<space> 会被 spider 派发到这里（cgi/tool/pad 是目录，
+#   派发时一路剥到 tool/pad/index），restful 余段 = ["<space>"]。
+#   所以这里要先判断第一段是空间名还是静态文件，再决定 302 还是发文件。
+#
+# ★ 空间名会出现在页面 URL 里，前端据此拼 WS 地址:
+#     /tool/pad/<space>/  →  WS 连 /tool/pad/ws/<space>
+#
+# 静态资源不分空间 —— 还是 /tool/pad/app.js 这种平铺路径。
+# 页面里的 <script src="/tool/pad/app.js"> 不带空间，所以空间名要靠
+# 页面 URL 推。前端见 app.js 的 spaceFromPath()。
+
+require_relative '../../_env_/ruby/_base_'
+
+# ── 静态文件服务（跟 cgi/pub 同一套逻辑）────────────────────
+MIME = {
+  '.html' => 'text/html; charset=utf-8',
+  '.htm'  => 'text/html; charset=utf-8',
+  '.js'   => 'text/javascript; charset=utf-8',
+  '.mjs'  => 'text/javascript; charset=utf-8',
+  '.css'  => 'text/css; charset=utf-8',
+  '.json' => 'application/json; charset=utf-8',
+  '.map'  => 'application/json; charset=utf-8',
+  '.svg'  => 'image/svg+xml',
+  '.png'  => 'image/png',
+  '.jpg'  => 'image/jpeg',
+  '.jpeg' => 'image/jpeg',
+  '.gif'  => 'image/gif',
+  '.webp' => 'image/webp',
+  '.ico'  => 'image/x-icon',
+  '.ttf'  => 'font/ttf',
+  '.woff' => 'font/woff',
+  '.woff2'=> 'font/woff2',
+  '.txt'  => 'text/plain; charset=utf-8',
+}.freeze
+
+PUB_ROOT = 'dist'
+
+# 空间名合法性 —— 段内字符 [A-Za-z0-9._-]，长度 1..64
+#
+# 空间名会拼进文件路径（$SPIDER_DATA/pad/<space>/）和 BDR 频道名，
+# 必须严格校验 —— 不能有 .. / \ 之类能逃出目录的东西。
+SPACE_RE = /\A[A-Za-z0-9._-]{1,64}\z/
+
+def serve_file(rsp, real_path, mime)
+  rsp.type(mime).body(real_path).finish
+end
+
+def reject(rsp, msg)
+  rsp.fail_404.type_text.body(msg).finish
+end
+
+# ── 路由 ────────────────────────────────────────────────────
+#
+# MAP_PATH 是 restful 余段 —— 脚本位置之后的段。
+#   /tool/pad/          → MAP_PATH = "/"
+#   /tool/pad/default   → MAP_PATH = "/default"
+#   /tool/pad/default/  → MAP_PATH = "/default/"  (尾斜杠)
+#
+# 注意: spider 派发 /tool/pad/default 时 restful = ["default"],
+# 但 /tool/pad/default/ 时 restful = ["", "default"] —— 尾斜杠会多一段空串。
+
+# 1) 空间根: /<space> → 302 到 /<space>/，/<space>/ → 发页面
+#
+# ★ 必须排在静态文件路由**前面** —— 否则 /my-space 会被当成静态文件名
+#   （captured={space: nil, file: "my-space"}）→ 404。
+#
+# ★ 但也不能把静态文件吞掉: /app.js 也要走这条路由（正则一样），
+#   所以要先看 dist/ 里有没有同名文件 —— 有就当静态文件发出去，
+#   没有才当空间名。
+Q.get %r{^/(?<space>[A-Za-z0-9._-]{1,64})/?$} do |req, rsp|
+  space = req.named(:space)
+  unless SPACE_RE.match?(space)
+    return reject(rsp, "invalid space name: #{space}\n")
+  end
+
+  # dist/ 里有同名文件 → 那是静态资源, 不是空间名
+  static = File.join(PUB_ROOT, space)
+  if File.file?(static)
+    ext = File.extname(static).downcase
+    mime = MIME[ext] or return reject(rsp, "unsupported extension: #{ext}\n")
+    return serve_file(rsp, static, mime)
+  end
+
+  # 带尾斜杠 / 带空格的都重定向到规范形式 /<space>/
+  # 少了这一步, 相对路径 (app.js) 会解析到 /tool/pad/ 而不是 /tool/pad/<space>/
+  unless Q::REQ_PATH.to_s.end_with?('/')
+    return rsp.redirect_to("/tool/pad/#{space}/", code: 302).finish
+  end
+
+  path = File.join(PUB_ROOT, 'index.html')
+  unless File.file?(path)
+    return reject(rsp, "index.html not found\n")
+  end
+
+  # 空间名靠 URL 告诉前端（前端从 location.pathname 推导）——
+  # 所以这里只要保证 URL 里有空间名就行, 不需要往 HTML 里注入。
+  serve_file(rsp, path, MIME['.html'])
+end
+
+# 2) 静态文件: /<space>/<file> 或 /<file>
+#
+#   带空间的静态文件路径其实不用（前端引用的是平铺的 /tool/pad/app.js），
+#   但留着 —— 万一以后要每空间一份资源。
+Q.get %r{^/(?:(?<space>[A-Za-z0-9._-]{1,64})/)?(?<file>(?!.*\.\.)[A-Za-z0-9._-]{1,128})$} do |req, rsp|
+  space = req.named(:space)
+  file  = req.named(:file)
+
+  if space && !SPACE_RE.match?(space)
+    return reject(rsp, "invalid space name: #{space}\n")
+  end
+
+  full = File.join(PUB_ROOT, file)
+  unless File.file?(full)
+    return reject(rsp, "#{full} not a file\n")
+  end
+  ext = File.extname(full).downcase
+  mime = MIME[ext] or return reject(rsp, "unsupported extension: #{ext}\n")
+  serve_file(rsp, full, mime)
+end
+
+# 3) 默认空间: / → 发页面
+Q.get '/' do |_req, rsp|
+  path = File.join(PUB_ROOT, 'index.html')
+  if File.file?(path)
+    serve_file(rsp, path, MIME['.html'])
+  else
+    reject(rsp, "index.html not found\n")
+  end
+end
