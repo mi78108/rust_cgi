@@ -31,7 +31,7 @@ UDP 组播。服务器本来就是唯一的可信协调点，没必要在客户�
 ### 数据结构
 
 ```
-节点: { id: [clientId, seq], value: "字", tombstone: bool, left: id|null, right: id|null }
+节点: { id: [clientId, seq], v: "字", tomb: bool, left: id|null }
 ```
 
 文档 = 一棵有序树，ROOT 是虚拟根。
@@ -39,47 +39,52 @@ UDP 组播。服务器本来就是唯一的可信协调点，没必要在客户�
 ### 插入 op
 
 ```json
-{ "t": "i", "id": ["c1", 3], "v": "A", "l": ["c1", 2], "r": null }
+{ "t": "i", "id": ["c1", 3], "v": "A", "l": ["c1", 2] }
 ```
 - `l` = 左边锚点节点 id（插入位置的左侧邻居）
-- `r` = 右边锚点节点 id（可选，用于精确定位）
 - `id` = `[clientId, seq]`，clientId 唯一 + seq 单调递增
 
-### 插入位置决策（RGA 核心）
+### 插入位置决策
 
-给定 op（left=L, right=R, id=I）：
+实现用的是**层序渲染**，不是链式扫描：
+
 ```
-prev = L
-scan = L.next
-while scan != null and scan.id != R:
-    if scan.left != L and not isDescendantOf(scan.left, L):  break   # 出了 L 的子树
-    if scan.left == L and compareId(I, scan.id) < 0:            break   # 同锚点按 id 排序
-    prev = scan; scan = scan.next
-insert I between prev and scan
+节点只记 left（"我插在谁后面"），不记 next 指针。
+渲染时：visible(node) = node.v + 依次拼接 visible(children(node))，
+        children 按 id 字典序排。
+顶层 = children(ROOT) 按 id 排序依次拼。
 ```
 
-**为什么要 `isDescendantOf`**：RGA 是树形结构，`L` 的所有子孙都在 `L` 之后。
-如果不判断，"L 的兄弟节点"会被误插到 L 后面。
+- **同锚点 tiebreak**：两个客户端同时在 `L` 后面插入 → 两者都是 `L` 的子节点
+  → 按 `compareId`（clientId 字典序 + seq）排序 → 所有副本顺序一致 ✅
+- **嵌套**：A 插入后又在它后面插 A2（A2 的 left = A）→ A2 是 A 的子节点
+  → 渲染时紧跟 A → 与"A2 插在 A 后面"的直觉一致 ✅
 
-**同锚点 tiebreak**：两个客户端同时在 `L` 后面插入，必须有确定的全序，
-否则两边顺序不同。用 `compareId(I, scan.id) < 0`（clientId 字典序 + seq）
-保证所有副本一致。
+> 代价：极端交错场景下，兄弟节点与更深的后代之间的顺序与"直觉"可能不同
+> （链式 RGA 能做得更准）。层序版本更简单，且同样保证收敛。
 
 ### 删除 op
 
 ```json
 { "t": "d", "id": ["c1", 5] }
 ```
-删的是**节点 id**，不是位置。节点标 `tombstone = true`（墓碑），
+删的是**节点 id**，不是位置。节点标 `tomb = true`（墓碑），
 文本输出时跳过。
 
 **必须用墓碑不能真删**：否则并发场景下，已删内容会被别的客户端"复活"。
+客户端 1 删了 X，客户端 2 还没收到这条时又在 X 后面插了 Y —— 真删 X 的话
+Y 会挂到 X 的父节点上，内容错位。
+
+### 乱序到达
+
+op 可能先于它的锚点到达（left 节点还没到）。此时 `applyInsert` 返回 false，
+op 进 `pending` 缓冲；等锚点到了再 `drainPending()` 重放。
 
 ### 收敛性
 
 RGA 的 op 满足交换律 + 幂等：
 - 同一 op 在任何副本上应用，结果相同
-- 重复应用同一个 op，结果不变
+- 重复应用同一个 op，结果不变（幂等键含 op 类型：`i:` / `d:`）
 → 所有副本最终收敛
 
 前提：op 到达所有副本。服务器转发 + 新客户端拿全量 log，保证这点。
@@ -91,14 +96,15 @@ RGA 的 op 满足交换律 + 幂等：
 {"t":"op","op":{...}}              // 一个 CRDT op
 {"t":"hello","name":"user-ab12","color":"#c4f542"}   // 加入
 {"t":"presence","cursor":42}       // 光标位置
-{"t":"sync-request"}               // 请求全量（重连后）
+{"t":"sync"}                      // 请求全量（重连后）
+{"t":"clear"}                     // 清空文档（广播给所有客户端）
 ```
 
 服务器 → 客户端：
 ```json
 {"t":"ops","ops":[...]}             // 全量或增量 op 列表
 {"t":"members","members":[{id,name,color,cursor}]}
-{"t":"ack"}                        // 确认
+{"t":"clear"}                      // 清空通知
 ```
 
 **为什么用 JSON text 而不是二进制**：这个规模（几百字节文档）下 JSON 的
@@ -107,16 +113,18 @@ RGA 的 op 数 = 每次按键一个，长文档会涨，但 demo 阶段够用。
 
 ## 客户端实现
 
-### crdt.js（~250 行）
-- `Doc` 类：nodes Map、applyOp、getText、getIndexOf、transformPosition
+### crdt.js（313 行）
+- `Doc` 类：`nodes` Map、`apply(op)`、`getText()`、`textIndex()`、
+  `anchorAt(pos)`、`nodesInRange(start, len)`、`toOps()`
 - `compareId(a, b)`：clientId 字典序，再比 seq
+- `transformPosition(pos, start, len)`：远端 op 应用后挪本地光标
 
-### sync.js（~150 行）
+### sync.js（175 行）
 - WS 连接、消息收发、重连
 - 本地 pending buffer（发送失败/未连接时缓存）
-- 收到远端 op → apply → 回调 onChange
+- 收到远端 op → apply → 回调 onOps
 
-### app.js（~250 行）
+### app.js（406 行）
 - textarea 绑定：beforeinput/input/composition 事件
 - 本地输入 → 生成 op → 发送
 - 远端 op → apply → 更新 textarea + 变换光标
@@ -152,7 +160,7 @@ RGA 的 op 数 = 每次按键一个，长文档会涨，但 demo 阶段够用。
 
 ```
 $SPIDER_DATA/pad/<docId>/ops.log      # 每行一个 op (JSON)
-$SPIDER_DATA/pad/<docId>/members.json  # 成员表
+$SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一份
 ```
 
 - ops.log 只追加，不重写 → 简单、无锁（单进程 append 原子）
@@ -165,17 +173,19 @@ $SPIDER_DATA/pad/<docId>/members.json  # 成员表
 ```
 收到 op →
   追加到 ops.log
-  mcast.notify(:pad, op_json)     # 组播给其他客户端
-  Q.write(op_json, true)           # 不回环（want_echo=false 已处理）
+  mcast.notify(:pad, {t:'ops',ops:[op]})   # 组播给其他客户端
+  （自己那份由客户端本地直接应用，不绕一圈）
 ```
 
-自己那份由本地直接应用（不必绕一圈）。
+新客户端连上 → 发 `{"t":"ops","ops":[...]}` 全量（从 ops.log 读）。
+服务器回客户端用 `rsp.ws_write`（带 4 字节长度前缀），
+客户端发来的帧由 spider 解包成 `[len][rem]` 头交给 ruby。
 
 ## 与 weavo 版本的对比
 
 | | weavo | 本方案 |
 |---|---|---|
-| 代码量 | 3159 行 vendor | ~650 行 |
+| 代码量 | 3159 行 vendor | 894 行（crdt+sync+app） |
 | 成员管理 | 客户端 CASPaxos 共识（824行） | 服务器文件 + 目录扫描 |
 | 文档状态 | 客户端各自持有 | 服务器持有 op log |
 | 离线支持 | 靠 snapshot/delta | 重连时拉全量 |
@@ -189,10 +199,11 @@ $SPIDER_DATA/pad/<docId>/members.json  # 成员表
 3. **无权限控制** —— 谁能连上就能改。demo 可以。
 4. **单文档** —— 一个 docId 一个文档。多文档要加路由。
 
-## 里程碑
+## 实现状态
 
-1. crdt.js 单测：并发插入/删除顺序一致（浏览器里跑两个 Doc 实例）
-2. sync.js：WS 收发 + 重连
-3. app.js：输入绑定 + 光标
-4. 后端：ops.log + 组播转发 + 成员表
-5. 端到端：两浏览器并发打字，验证不丢字 + 顺序一致
+已完成：
+1. crdt.js 收敛性测试：40 轮 × 3 副本 × 18 op（含删除 + 随机投递顺序），全部收敛
+2. sync.js：WS 收发 + 重连 + pending buffer
+3. app.js：输入绑定（beforeinput 快照 + IME composition 处理）+ 远端光标 mirror 测量
+4. 后端：ops.log + 组播转发 + 成员表 + clear
+5. 端到端：两个独立 WS 客户端并发编辑，文本收敛一致
