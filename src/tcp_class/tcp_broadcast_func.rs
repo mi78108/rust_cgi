@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+use ring::rand::{SecureRandom, SystemRandom};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, Mutex};
 
@@ -44,11 +45,37 @@ fn channels() -> &'static Channels {
 /// 连接 id —— 只为了日志能区分是哪个连接
 static CONN_ID: AtomicU64 = AtomicU64::new(0);
 
+/// 生成 UUID v4（文本格式 36 字符）
+///
+/// 用 `ring` 的 CSPRNG —— 项目已经依赖 ring，不引入新的 uuid crate。
+/// 按 RFC 4122 改两个 bit：version=4、variant=RFC4122。
+fn gen_uuid() -> String {
+    let mut bytes = [0u8; 16];
+    // ring 的 SystemRandom 不会失败（系统熵源），失败就退化成全 0
+    if SystemRandom::new().fill(&mut bytes).is_err() {
+        debug!("gen_uuid: CSPRNG failed, fallback to zero bytes");
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+
+    let hex = b"0123456789abcdef";
+    let mut out = String::with_capacity(36);
+    for (i, b) in bytes.iter().enumerate() {
+        if i == 4 || i == 6 || i == 8 || i == 10 {
+            out.push('-');
+        }
+        out.push(hex[(b >> 4) as usize] as char);
+        out.push(hex[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
 /// TCP 广播通道
 ///
 /// 协议:
 ///   握手: `[0x89 'B' 'R' 'D' 0x0d 0x0a 0x1a 0x00]` (8 字节定长)
 ///         + `<channel_name>\n` (变长, \n 结尾)
+///   服务端下发: `[len u32 BE][uuid 文本]` —— 客户端收到这条 = 通讯建立
 ///   消息: `[len u32 BE][payload]`
 ///
 /// 消息带长度前缀是为了让所有订阅者收到的**字节流完全一致** ——
@@ -139,23 +166,50 @@ impl TcpBroadcast {
             tx.receiver_count()
         );
 
-        // ---- 3. 并发: 读任务广播 + 写任务转发 ----
+        // ---- 3. 下发连接名（uuid）—— 表示通讯建立 ----
+        //
+        // 客户端收到这条消息 = 握手完成、连接可用。
+        // 只发给这个连接自己（不广播给频道里的其他人）。
+        //
+        // 必须在写任务启动**之前**写 —— 否则跟写任务并发写 socket，字节顺序会乱。
+        let uuid = gen_uuid();
+        {
+            let mut frame = Vec::with_capacity(LEN_PREFIX + uuid.len());
+            frame.extend_from_slice(&(uuid.len() as u32).to_be_bytes());
+            frame.extend_from_slice(uuid.as_bytes());
+            if let Err(e) = stream.write(&frame).await {
+                error!("TcpBroadcast#{} send uuid failed {:?}", id, e);
+                return Ok(false);
+            }
+            if let Err(e) = stream.req_writer.lock().await.flush().await {
+                error!("TcpBroadcast#{} flush uuid failed {:?}", id, e);
+                return Ok(false);
+            }
+        }
+        info!("TcpBroadcast#{} established name={}", id, uuid);
+
+        // ---- 4. 并发: 读任务广播 + 写任务转发 ----
         let tcp = Arc::new(stream);
-        let mut reader_task = {
+        let mut reader_task = Some({
             let tcp = Arc::clone(&tcp);
             let tx = tx.clone();
             tokio::spawn(async move { read_loop(tcp, tx, id).await })
-        };
+        });
 
-        let mut writer_task = {
+        let mut writer_task = Some({
             let tcp = Arc::clone(&tcp);
             tokio::spawn(async move { write_loop(tcp, rx, id).await })
-        };
+        });
 
         // 任一方向结束就整体结束
+        //
+        // 用 Option 包着: select! 里借用 (`as_mut().unwrap()`) 而不是 move ——
+        // 结束后还要对没完成的那个调 abort()。
+        // 完成的那个直接置 None —— **已完成的 JoinHandle 不能再 poll**
+        // (tokio 会 panic "JoinHandle polled after completion")。
         tokio::select! {
-            _ = &mut reader_task => {},
-            _ = &mut writer_task => {},
+            _ = reader_task.as_mut().unwrap() => { reader_task = None; },
+            _ = writer_task.as_mut().unwrap() => { writer_task = None; },
         }
 
         // 关键: 必须 abort 掉还在跑的那个 task。
@@ -164,13 +218,16 @@ impl TcpBroadcast {
         // receiver_count 就不减, channel 永远清理不掉（表无限增长）。
         //
         // 实测症状: 连接全断了之后, 新连接 join 时 receivers 仍然是 3 而不是 1。
-        reader_task.abort();
-        writer_task.abort();
-        // 等 task 真正结束, 确保 Receiver 已被 drop
-        let _ = reader_task.await;
-        let _ = writer_task.await;
+        if let Some(t) = reader_task {
+            t.abort();
+            let _ = t.await;
+        }
+        if let Some(t) = writer_task {
+            t.abort();
+            let _ = t.await;
+        }
 
-        // ---- 4. 清理：没人订阅了就删掉 channel ----
+        // ---- 5. 清理：没人订阅了就删掉 channel ----
         {
             let mut map = channels().lock().await;
             if tx.receiver_count() == 0 {
