@@ -2,6 +2,7 @@ use crate::{OPT, SCRIPT_DIR};
 use crate::tcp_class::http_func::Http;
 use crate::tcp_class::http_websocket_func::Websocket;
 use crate::tcp_class::tcp_file_func::FileSync;
+use crate::tcp_class::tcp_broadcast_func::TcpBroadcast;
 use crate::utils::core::{Handle, Req, call_bridge, call_script};
 use std::{collections::HashMap, io::Error, net::SocketAddr, sync::atomic::AtomicBool};
 use tokio::io::{BufReader, BufWriter};
@@ -117,6 +118,9 @@ pub async fn handle(stream: Tcp) -> Result<bool, Error> {
             let file = FileSync::reader(&stream).await?;
             call_bridge(file, stream).await
         }
+        // 广播协议靠数据探测（第一行 \xffBDR...），会阻塞等客户端发数据。
+        // 所以放在 Http::matches() 之后 —— HTTP 请求先走 HTTP 路径，
+        // 不然每个 HTTP 请求都要先卡在广播探测上。
         stream if Http::matches(&stream).await => {
             let http = Http::handle(stream).await?;
             match WWWFile::handle(http).await {
@@ -132,6 +136,11 @@ pub async fn handle(stream: Tcp) -> Result<bool, Error> {
                     }
                 }
             }
+        }
+        // 裸 TCP 广播：不是 HTTP，也不是文件模式，就看是不是 BDR 协议。
+        // matches() 只 peek 不消费，所以匹配失败也不影响后续 handler。
+        stream if TcpBroadcast::matches(&stream).await => {
+            TcpBroadcast::run(stream).await.unwrap_or(false)
         }
         _ => call_script(stream).await,
     })
