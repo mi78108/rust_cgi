@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# WS 探针 —— 把 spider 给子进程的 [len][rem][flags] 帧头 + payload 原样落盘
+#
+# spider -> CGI 的帧格式:
+#   [len u32 BE][rem u32 BE][flags u8][payload]
+#     len   = 本段 payload 字节数
+#     rem   = 本帧 payload 还剩多少 (0 = 这帧读完)
+#     flags = bit0 = 本段是整个 WS 消息的最后一片
+require_relative '../../_env_/ruby/_base_'
+require 'json'
+
+OUT = '/tmp/wsprobe/recv.bin'
+Dir.mkdir(File.dirname(OUT)) unless Dir.exist?(File.dirname(OUT))
+
+Q.ws do |req, rsp|
+  loop do
+    # 必须读满 9 字节 —— Q.read(n) 可能返回少于 n 字节
+    head = ''.b
+    while head.bytesize < 9
+      chunk = Q.read(9 - head.bytesize)
+      break if chunk.nil? || chunk.empty?
+      head << chunk
+    end
+    break if head.bytesize < 9
+
+    len = head[0, 4].unpack1('N')
+    rem = head[4, 8].unpack1('N')
+    flags = head[8].unpack1('C')
+    Q.log "packet remainder #{rem} ready #{len} flags #{flags}"
+
+    body = ''.b
+    while body.bytesize < len
+      chunk = Q.read(len - body.bytesize)
+      break if chunk.nil? || chunk.empty?
+      body << chunk
+    end
+
+    File.open(OUT, 'ab') { |f| f.write(head + body) }
+  end
+  rsp.ws_write(JSON.generate({ 't' => 'ack' }))
+  nil
+end
