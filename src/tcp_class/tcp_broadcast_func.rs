@@ -30,6 +30,11 @@ const MAX_MSG_LEN: u32 = 16 * 1024 * 1024;
 /// 每个订阅者的环形缓冲条数 —— 太小容易触发 Lagged（丢消息）
 const CHANNEL_CAPACITY: usize = 1024;
 
+/// uuid 文本长度 —— UUID v4 文本格式固定 36 字符
+///
+/// 定长的好处: 广播消息里的 id 不用带长度前缀，客户端按固定偏移就能切。
+const UUID_LEN: usize = 36;
+
 /// 全局频道表: channel 名 -> Sender
 ///
 /// Sender 放在这里而不是每个连接各建一个，是因为 broadcast 只有一个 Sender
@@ -40,6 +45,27 @@ static CHANNELS: OnceLock<Channels> = OnceLock::new();
 
 fn channels() -> &'static Channels {
     CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 一个已连接的客户端
+#[derive(Debug, Clone)]
+pub struct ConnInfo {
+    /// 连接名（uuid v4 文本，36 字符）
+    #[allow(dead_code)]
+    pub uuid: String,
+    /// 所在频道
+    pub channel: String,
+}
+
+/// 全局连接表: 连接 id -> 连接信息
+///
+/// 用来查"某频道有哪些成员"，连接断开时移除。
+type Connections = Mutex<HashMap<u64, ConnInfo>>;
+
+static CONNECTIONS: OnceLock<Connections> = OnceLock::new();
+
+fn connections() -> &'static Connections {
+    CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// 连接 id —— 只为了日志能区分是哪个连接
@@ -76,10 +102,15 @@ fn gen_uuid() -> String {
 ///   握手: `[0x89 'B' 'R' 'D' 0x0d 0x0a 0x1a 0x00]` (8 字节定长)
 ///         + `<channel_name>\n` (变长, \n 结尾)
 ///   服务端下发: `[len u32 BE][uuid 文本]` —— 客户端收到这条 = 通讯建立
-///   消息: `[len u32 BE][payload]`
+///   客户端发: `[len u32 BE][payload]`
+///   广播给订阅者: `[len u32 BE][id 36 字节][payload]`
+///                len = 36 + payload.len()，id 是发送者的 uuid
 ///
 /// 消息带长度前缀是为了让所有订阅者收到的**字节流完全一致** ——
 /// TCP 是字节流, 直接广播原始字节的话各客户端的切分点可能不同。
+///
+/// 广播消息里的 id 定长 36 字节（UUID v4 文本），所以客户端按固定偏移就能
+/// 把 id 和 payload 切开，不需要额外的长度前缀。
 #[derive(Debug)]
 pub struct TcpBroadcast;
 
@@ -105,6 +136,23 @@ impl TcpBroadcast {
             Ok(len) => len >= HEAD_LEN && buffer == MAGIC,
             Err(_) => false,
         }
+    }
+
+    /// 查某个频道当前有哪些连接（在线成员）
+    #[allow(dead_code)]
+    pub async fn channel_members(channel: &str) -> Vec<ConnInfo> {
+        let map = connections().lock().await;
+        map.values()
+            .filter(|c| c.channel == channel)
+            .cloned()
+            .collect()
+    }
+
+    /// 查全部连接
+    #[allow(dead_code)]
+    pub async fn all_connections() -> Vec<ConnInfo> {
+        let map = connections().lock().await;
+        map.values().cloned().collect()
     }
 
     /// 主流程：握手 -> 订阅频道 -> 收发循环
@@ -174,8 +222,8 @@ impl TcpBroadcast {
         // 必须在写任务启动**之前**写 —— 否则跟写任务并发写 socket，字节顺序会乱。
         let uuid = gen_uuid();
         {
-            let mut frame = Vec::with_capacity(LEN_PREFIX + uuid.len());
-            frame.extend_from_slice(&(uuid.len() as u32).to_be_bytes());
+            let mut frame = Vec::with_capacity(LEN_PREFIX + UUID_LEN);
+            frame.extend_from_slice(&(UUID_LEN as u32).to_be_bytes());
             frame.extend_from_slice(uuid.as_bytes());
             if let Err(e) = stream.write(&frame).await {
                 error!("TcpBroadcast#{} send uuid failed {:?}", id, e);
@@ -188,12 +236,30 @@ impl TcpBroadcast {
         }
         info!("TcpBroadcast#{} established name={}", id, uuid);
 
-        // ---- 4. 并发: 读任务广播 + 写任务转发 ----
+        // ---- 4. 保存连接信息（查成员列表用），断开时移除 ----
+        {
+            let mut map = connections().lock().await;
+            map.insert(
+                id,
+                ConnInfo {
+                    uuid: uuid.clone(),
+                    channel: channel_name.clone(),
+                },
+            );
+            let members = map.values().filter(|c| c.channel == channel_name).count();
+            debug!(
+                "TcpBroadcast#{} channel={} members={}",
+                id, channel_name, members
+            );
+        }
+
+        // ---- 5. 并发: 读任务广播 + 写任务转发 ----
         let tcp = Arc::new(stream);
         let mut reader_task = Some({
             let tcp = Arc::clone(&tcp);
             let tx = tx.clone();
-            tokio::spawn(async move { read_loop(tcp, tx, id).await })
+            let uuid = uuid.clone();
+            tokio::spawn(async move { read_loop(tcp, tx, id, uuid).await })
         });
 
         let mut writer_task = Some({
@@ -227,7 +293,13 @@ impl TcpBroadcast {
             let _ = t.await;
         }
 
-        // ---- 5. 清理：没人订阅了就删掉 channel ----
+        // ---- 6. 清理 ----
+        // 6a. 移除连接记录
+        {
+            let mut map = connections().lock().await;
+            map.remove(&id);
+        }
+        // 6b. 没人订阅了就删掉 channel
         {
             let mut map = channels().lock().await;
             if tx.receiver_count() == 0 {
@@ -242,9 +314,18 @@ impl TcpBroadcast {
 
 /// 读任务：从 socket 读消息 -> 广播给频道
 ///
-/// 消息格式 `[len u32 BE][payload]`。
+/// 客户端发来的消息格式 `[len u32 BE][payload]`。
+/// 广播出去时前面加上发送者的 id（定长 36 字节）：
+///   `[len u32 BE][id 36 字节][payload]`，len = 36 + payload.len()
+/// 订阅者据此知道每条消息是谁发的。
+///
 /// **按固定大小分块读写**（用 env 里的 Req_Buffer_Size），不一次性按 len 分配大缓冲。
-async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, id: u64) {
+async fn read_loop(
+    tcp: Arc<Tcp>,
+    tx: broadcast::Sender<Arc<Vec<u8>>>,
+    id: u64,
+    uuid: String,
+) {
     let buf_size = buffer_size(&tcp);
     let mut buf = vec![0u8; buf_size];
 
@@ -301,14 +382,24 @@ async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, id: u64) 
         }
 
         // ---- 广播 ----
-        // 带上长度前缀一起发，订阅者拿到的就是能直接写的完整帧
-        let mut frame = Vec::with_capacity(LEN_PREFIX + payload.len());
-        frame.extend_from_slice(&len.to_be_bytes());
+        // 带上发送者的 id（定长 36 字节）+ 长度前缀一起发，
+        // 订阅者拿到的就是能直接写的完整帧:
+        //   [len u32 BE][id 36 字节][payload]
+        // len = UUID_LEN + payload.len()
+        let mut frame = Vec::with_capacity(LEN_PREFIX + UUID_LEN + payload.len());
+        frame.extend_from_slice(&((UUID_LEN + payload.len()) as u32).to_be_bytes());
+        frame.extend_from_slice(uuid.as_bytes());
         frame.extend_from_slice(&payload);
 
         match tx.send(Arc::new(frame)) {
             Ok(n) => {
-                debug!("TcpBroadcast#{} broadcast {} bytes to {} peers", id, len, n);
+                debug!(
+                    "TcpBroadcast#{} broadcast {} bytes (from {}) to {} peers",
+                    id,
+                    payload.len(),
+                    uuid,
+                    n
+                );
             }
             Err(e) => {
                 // 一个订阅者都没有 —— 频道空了，消息丢掉无所谓
