@@ -273,7 +273,10 @@ pub mod core {
             }
             //
             debug!("Req src read end");
-            writer_dst.close().await.unwrap();
+            // 同上：对端先断开时 close() 会返回 BrokenPipe，不该 panic。
+            if let Err(e) = writer_dst.close().await {
+                debug!("Req src close err {:?}", e);
+            }
         });
 
         let dst = tokio::spawn(async move {
@@ -312,7 +315,11 @@ pub mod core {
             }
             //
             debug!("Req dst read end");
-            writer_src.close().await.unwrap();
+            // 对端可能已经断开，close() 返回 BrokenPipe 是正常的，
+            // 直接 unwrap() 会 panic 掉整个 task。
+            if let Err(e) = writer_src.close().await {
+                debug!("Req dst close err {:?}", e);
+            }
         });
 
         let (src_rst, dst_rst) = tokio::join!(src, dst);

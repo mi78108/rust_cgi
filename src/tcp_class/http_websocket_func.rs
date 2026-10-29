@@ -138,7 +138,10 @@ impl Websocket {
                 //0x88 0x80 4byte_masking
                 //ctrl close 0x8 0b10001000
                 debug!("websocket ctrl close event");
-                self.write_with_opcode(0b10001000, &[]).await.unwrap();
+                // 回 close 帧时对端可能已经走了，写失败不该 panic。
+                if let Err(e) = self.write_with_opcode(0b10001000, &[]).await {
+                    error!("websocket ctrl close write fail {:?}", e);
+                }
                 //return Err(Error::from(ErrorKind::UnexpectedEof));
                 Ok((None, plymask))
             }
@@ -146,7 +149,34 @@ impl Websocket {
                 // ctrl ping 0x9 0b10001001
                 // ctrl pong 0xA 0b10001010
                 debug!("websocket ctrl ping event");
-                self.write_with_opcode(0b10001010, &[]).await.unwrap();
+                // 控制帧的 payload 不交给 CGI，但必须在这里读掉，
+                // 否则它会留在 socket 里，被下一轮当成帧头解析（desync）。
+                // RFC 6455: pong 必须回显 ping 的 payload。
+                let mut payload = vec![0u8; length];
+                if length > 0 {
+                    if let Err(e) = self
+                        .base_on
+                        .base_on
+                        .req_reader
+                        .lock()
+                        .await
+                        .read_exact(&mut payload)
+                        .await
+                    {
+                        error!("websocket ctrl ping read payload fail {:?}", e);
+                        return Err(e);
+                    }
+                    // 客户端发来的帧是带 mask 的，回显前要先解 mask
+                    let mask = u32::from_be_bytes(plymask).to_be_bytes();
+                    for (i, b) in payload.iter_mut().enumerate() {
+                        *b ^= mask[i % 4];
+                    }
+                }
+                if let Err(e) = self.write_with_opcode(0b10001010, &payload).await {
+                    error!("websocket ctrl pong write fail {:?}", e);
+                }
+                // 返回 Some(0) 表示"控制帧已处理，没有数据帧 payload"，
+                // read() 会继续读下一帧，而不是把它当成 0 字节的数据帧。
                 Ok((Some(0), plymask))
             }
             _ => Err(Error::new(
@@ -201,23 +231,20 @@ impl Websocket {
                     return Err(Error::from(ErrorKind::FileTooLarge));
                 }
             }
-            self.base_on.base_on.write(data).await
+            self.base_on.base_on.write(data).await?;
+            // 必须在这里 flush：控制帧(pong/close)是直接写的，
+            // 不 flush 的话会一直留在缓冲区，直到别的地方碰巧写数据才发出去。
+            self.base_on
+                .base_on
+                .req_writer
+                .lock()
+                .await
+                .flush()
+                .await?;
+            Ok(len)
         } else {
             Err(Error::from(ErrorKind::WriteZero))
         }
-        //let _mask = [13u8, 9, 78, 108];  mask 服务器发送不需要
-        //data
-        // self.base_on.base_on.write(data).await.and_then(|len| async move {
-        //     self.base_on
-        //         .base_on
-        //         .req_writer
-        //         .lock()
-        //         .await
-        //         .flush()
-        //         .await
-        //         .unwrap();
-        //     Ok(len)
-        // }).await;
     }
 
     fn unmask(&self, data: &mut [u8], len: usize) {
@@ -267,19 +294,28 @@ impl Req for Websocket {
     /// 帧边界知识全部收在这里 —— call_bridge 只是把 read 出来的字节转发出去，
     /// 不需要理解 [len][rem] 的含义，也不需要 remainder() 钩子。
     async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
-        if self.remainder.load(Ordering::Relaxed) == 0 {
-            let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
-                if let Some(len) = len_opt {
-                    self.processed.store(0, Ordering::Relaxed);
-                    self.remainder.store(len, Ordering::Relaxed);
-                    self.payload_mask
-                        .store(u32::from_be_bytes(mask), Ordering::Relaxed);
+        // 控制帧(ping)没有数据 payload，read_head 已经处理掉了。
+        // 这里要继续读下一帧，而不是把 0 长度当成一帧交给 CGI。
+        loop {
+            if self.remainder.load(Ordering::Relaxed) == 0 {
+                let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
+                    if let Some(len) = len_opt {
+                        self.processed.store(0, Ordering::Relaxed);
+                        self.remainder.store(len, Ordering::Relaxed);
+                        self.payload_mask
+                            .store(u32::from_be_bytes(mask), Ordering::Relaxed);
+                    }
+                    Ok(len_opt)
+                });
+                if let Err(_) | Ok(None) = header_rst {
+                    return header_rst;
                 }
-                Ok(len_opt)
-            });
-            if let Err(_) | Ok(None) = header_rst {
-                return header_rst;
+                // len == 0 -> 控制帧已处理，继续读下一帧
+                if self.remainder.load(Ordering::Relaxed) == 0 {
+                    continue;
+                }
             }
+            break;
         }
 
         // payload 缓冲区：留出 8 字节头的位置
