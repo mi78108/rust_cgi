@@ -86,14 +86,36 @@ export class Doc {
     return this.nodes.get(idKey(id)) || null;
   }
 
-  /** 某个 anchor 下的直接子节点（含墓碑），按 id 排序 */
+  /**
+   * 某个 anchor 下的直接子节点（含墓碑），按 id **逆序**排列。
+   *
+   * 为什么是逆序？
+   *
+   * RGA 的标准语义是"next 链"：插到节点 N 之后 = 插在 N 的**原有后继之前**。
+   * 这里用"anchor + 同层排序"来模拟 next 链 —— anchor 是 N，新节点就是 N 的
+   * 子节点，跟 N 原有的子节点平级。
+   *
+   * 要表达"新插的排在前"，同层就必须**逆序**排（后到的 id 大的排前面）。
+   * 正序的话，新节点会排到原有子节点**后面** → 插在中间却跑到了末尾。
+   *
+   *   已有 "AB"，在 A 和 B 之间插 X：
+   *     anchor = A，X 与 B 都是 A 的子节点
+   *     逆序: X(seq2) 在 B(seq1) 前 → "AXB"  ✓
+   *     正序: B 在 X 前             → "ABX"  ✗
+   *
+   * 链式输入不受影响（"abc" 每个字符 anchor 指向前一个，是父子链不是兄弟）：
+   *   a(anchor=ROOT) → b(anchor=a) → c(anchor=b) → 渲染仍是 "abc" ✓
+   *
+   * 并发收敛也不受影响 —— 逆序只是换了一种确定性的 tie-break 约定
+   * （并发同锚插入时正序得 "ab"，逆序得 "ba"，两边一致即可）。
+   */
   childrenOf(id) {
     const out = [];
     const key = idKey(id);
     for (const n of this.nodes.values()) {
       if (n.left && idKey(n.left) === key) out.push(n);
     }
-    out.sort((a, b) => compareId(a.id, b.id));
+    out.sort((a, b) => compareId(b.id, a.id));
     return out;
   }
 
