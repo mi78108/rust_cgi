@@ -96,6 +96,8 @@ impl From<(TcpStream, SocketAddr)> for Tcp {
                 req_header: HashMap::from([
 
                                 ("Cgi_Root".into(), SCRIPT_DIR.get().unwrap().to_string_lossy().to_string()),
+                                ("Cgi_Ip".into(), OPT.get().unwrap().bind.to_string()),
+                                ("Cgi_Port".into(), OPT.get().unwrap().port.to_string()),
                                 ("Req_Script_Name".into(), "/tcp_handle".to_string()),
                                 ("Req_Peer_Ip".into(), addr.ip().to_string()),
                                 ("Req_Peer_Port".into(), addr.port().to_string()),
