@@ -234,9 +234,12 @@ function shiftOf(ops, pos) {
   return [pos, delta];
 }
 
-// ── 本地输入 → op ───────────────────────────────────────────
+// ── 本地输入 → op ────────────────────────────────────────────
 let beforeSnapshot = null;      // { value, start, end }
 let composing = false;
+// IME 快照 —— compositionstart 时抓的, 给 compositionend 之后那个 input 用。
+// 单独一个变量, 避免"IME 快照"和"普通 beforeinput 快照"互相覆盖/误用。
+let imeSnapshot = null;
 
 /** 生成一个插入 op 并本地应用 */
 function localInsert(text, at) {
@@ -246,6 +249,21 @@ function localInsert(text, at) {
   opCount++;
   opsEl.textContent = String(opCount);
   if (sync) sync.sendOp(op);
+}
+
+/**
+ * 插入一段文本 —— 每个字符一个 op（RGA 一个节点一个字符）。
+ *
+ * 位置要**逐字符递增**：连续插入 "abc" 时，第 2 个字符的 anchor 应该是
+ * 第 1 个字符（而不是都锚在同一个位置），否则 RGA 渲染时这几个兄弟节点
+ * 会按 id 排序，插入位置就跑到了末尾。
+ */
+function localInsertText(text, at) {
+  let pos = at;
+  for (const ch of text) {
+    localInsert(ch, pos);
+    pos++;
+  }
 }
 
 /** 生成删除 op 并本地应用 */
@@ -279,6 +297,32 @@ function diffText(oldStr, newStr) {
 }
 
 // ── 输入事件绑定 ────────────────────────────────────────────
+
+/**
+ * 把「旧值 → 新值」的差异变成 op（删除 + 插入）。
+ *
+ * @param {string} oldVal  改之前的文本
+ * @param {number} start   改动的起始位置（快照里的 selectionStart）
+ * @param {string} newVal  改之后的文本
+ */
+function applyDiff(oldVal, start, newVal) {
+  if (oldVal === newVal) return;
+
+  const d = diffText(oldVal, newVal);
+
+  // ★ 用 diffText 算出来的位置，不是快照里的 selectionStart。
+  //   selectionStart 是"改动之后"的光标位置（浏览器已经改了 value），
+  //   而实际插入点是 diff 的公共前缀长度 —— 两者不一定相同。
+  //   例: "AB" 在中间插入 X -> 光标在 2，但插入点是 1。
+  //   用错的话会插到末尾（"ABX" 而不是 "AXB"）。
+  const at = d.start;
+
+  // 先删后插
+  if (d.deleted > 0) localDelete(at, d.deleted);
+  if (d.inserted.length > 0) localInsertText(d.inserted, at);
+  updateStatus();
+}
+
 ta.addEventListener('beforeinput', (e) => {
   if (composing) return;
   beforeSnapshot = {
@@ -291,32 +335,54 @@ ta.addEventListener('beforeinput', (e) => {
 ta.addEventListener('input', (e) => {
   if (composing) return;
   if (e.inputType === 'insertCompositionText') return;
-  if (!beforeSnapshot) {
+
+  // 快照来源优先级:
+  //   1. imeSnapshot  —— IME 提交后的那个 input (compositionend 之后浏览器不再补发 beforeinput)
+  //   2. beforeSnapshot —— 普通输入的 beforeinput 快照
+  //   3. 都没有 → 兜底用当前值 (oldVal === newVal, 这次改动只能放弃)
+  let snap;
+  if (imeSnapshot) {
+    snap = imeSnapshot;
+    imeSnapshot = null;
+  } else if (beforeSnapshot) {
+    snap = beforeSnapshot;
+    beforeSnapshot = null;
+  } else {
     // 没有 beforeinput（比如某些浏览器/程序化赋值）→ 兜底用当前值
-    beforeSnapshot = { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+    // 注意: 这时 oldVal === newVal，applyDiff 什么都不会做 ——
+    // 真正"改之前"的样子拿不到，只能放弃这次改动。
+    snap = { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
   }
 
-  const { value: oldVal, start, end } = beforeSnapshot;
-  const newVal = ta.value;
-  beforeSnapshot = null;
-
-  if (oldVal === newVal) return;
-
-  const d = diffText(oldVal, newVal);
-
-  // 先删后插
-  if (d.deleted > 0) localDelete(start, d.deleted);
-  if (d.inserted.length > 0) {
-    // 每个字符一个 op（RGA 一个节点一个字符）
-    for (const ch of d.inserted) localInsert(ch, start);
-  }
-  updateStatus();
+  applyDiff(snap.value, snap.start, ta.value);
 });
 
-ta.addEventListener('compositionstart', () => { composing = true; });
+ta.addEventListener('compositionstart', () => {
+  composing = true;
+  // IME 开始前快照 —— 关键!
+  //
+  // composition 期间的 beforeinput 会被上面的 `if (composing) return` 拦掉,
+  // 而 compositionend 之后浏览器**不再补发** beforeinput。
+  // 所以「改之前」的样子只能在 compositionstart 时抓,
+  // 否则 IME 提交时拿到的 oldVal === newVal, 整个输入被当成"没变化"丢掉
+  // —— 表现为「输入中文对端收不到, 字母数字正常」。
+  imeSnapshot = {
+    value: ta.value,
+    start: ta.selectionStart,
+    end: ta.selectionEnd,
+  };
+});
+
 ta.addEventListener('compositionend', (e) => {
   composing = false;
-  // 合成结束后浏览器会再发一个 input，这里不需要额外处理
+
+  // IME 提交的文本就是 e.data, 浏览器随后还会再发一个 input 事件
+  // (inputType=insertText), 那个事件会用 imeSnapshot 算 diff。
+  //
+  // 所以这里**不处理** —— 交给后面那个 input 事件统一处理, 避免重复发 op。
+  //
+  // 空提交 (按 Esc 取消候选) → 快照作废, 不发 op。
+  if (!e.data) imeSnapshot = null;
 });
 
 // 光标变化 → 上报 presence
