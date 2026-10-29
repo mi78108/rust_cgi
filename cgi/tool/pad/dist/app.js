@@ -268,7 +268,8 @@ function diffText(oldStr, newStr) {
   }
   let endOld = oldStr.length;
   let endNew = newStr.length;
-  while (endOld > start && endNew > start && oldOld[endOld - 1] === oldStr[endOld - 1]) {
+  // 从尾部往回找公共后缀 —— 比较的是 old 的尾和 new 的尾
+  while (endOld > start && endNew > start && oldStr[endOld - 1] === newStr[endNew - 1]) {
     endOld--;
     endNew--;
   }
