@@ -176,7 +176,7 @@ def broadcast_members(mcast)
 end
 
 # ── WS 端点 ────────────────────────────────────────────────
-Q.ws do |req|
+Q.ws do |req, rsp|
   mcast = SocketNotify.new("cgi-pad-#{Process.pid}")
   cid   = nil
   name  = 'anon'
@@ -186,7 +186,7 @@ Q.ws do |req|
   mcast.notify(:pad, false) do |msg|
     data = msg.data
     next if data.nil? || data.empty?
-    Q.write(data, true)
+    rsp.ws_write(data)
   end
 
   Q.log "[pad/ws] + client"
@@ -222,17 +222,17 @@ Q.ws do |req|
 
         # 发全量 op
         ops = read_ops
-        Q.write(JSON.generate({ t: 'ops', ops: ops }), true) unless ops.empty?
+        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops })) unless ops.empty?
 
         # 发成员表 ——
         # 组播不会回环到发送方（订阅时 want_echo=false），
-        # 所以请求者自己那份要直接 Q.write 一次。
+        # 所以请求者自己那份要直接 ws_write 一次。
         members = broadcast_members(mcast)
-        Q.write(JSON.generate({ t: 'members', members: members }), true)
+        rsp.ws_write(JSON.generate({ t: 'members', members: members }))
 
       when 'sync'
         ops = read_ops
-        Q.write(JSON.generate({ t: 'ops', ops: ops }), true)
+        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops }))
 
       when 'clear'
         # 清空文档 —— 服务器删掉 op log，通知所有客户端重置本地 Doc。
@@ -246,7 +246,7 @@ Q.ws do |req|
           log_lock.flock(File::LOCK_UN)
         end
         mcast.notify(:pad, JSON.generate({ t: 'clear' }))
-        Q.write(JSON.generate({ t: 'clear' }), true)
+        rsp.ws_write(JSON.generate({ t: 'clear' }))
         Q.log '[pad/ws] document cleared'
 
       when 'op'
@@ -268,7 +268,7 @@ Q.ws do |req|
           members = read_members
           payload = JSON.generate({ t: 'members', members: members })
           mcast.notify(:pad, payload)
-          Q.write(payload, true)
+          rsp.ws_write(payload)
         end
 
       else

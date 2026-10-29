@@ -24,7 +24,7 @@ Q.get '/' do |_req, rsp|
 end
 
 # ── WebSocket 入口 ─────────────────────────────────────
-Q.ws do |req|
+Q.ws do |req, rsp|
   PEER = {}
   mcast = SocketNotify.new("cgi-#{Process.pid}-root")
   mcast.notify(:root, false) do |msg|
@@ -37,14 +37,14 @@ Q.ws do |req|
         mcast.notify(:root, { opt: 'refresh', value: {name: @user_name} }.to_json)
       else
         PEER[val['value']['name']] = val['value']
-        Q.write({ type: 'update', data: PEER.values }.to_json)
+        rsp.ws_write({ type: 'update', data: PEER.values }.to_json)
       end
     end
     if val['opt'] == 'up' or val['opt'] == 'down'
       next if val['value'].nil?
       PEER[val['value']['name']] = val['value'] if val['opt'] == 'up'
       PEER.delete(val['value']['name']) if val['opt'] == 'down'
-      Q.write({ type: 'update', data: PEER.values }.to_json)
+      rsp.ws_write({ type: 'update', data: PEER.values }.to_json)
     end
   end
 
@@ -58,7 +58,7 @@ Q.ws do |req|
       msg = JSON.parse(chunk.force_encoding('utf-8'))
       next nil unless msg.is_a?(Hash)
       Q.log "ON WS #{msg}"
-      rsp = case msg['op']
+      resp = case msg['op']
             when 'set-name'
               @user_name = msg['name']
               mcast.notify(:root, { opt: 'up',value: {name: @user_name} }.to_json)
@@ -73,7 +73,7 @@ Q.ws do |req|
               { type: 'error', msg: "unknown msg #{chunk}" }.to_json
             end
       sleep(0.1)
-      Q.write(rsp, true) unless rsp.nil?
+      rsp.ws_write(resp) unless resp.nil?
     rescue => e
       Q.log("[root/ws] recv err: #{e.message}")
     end

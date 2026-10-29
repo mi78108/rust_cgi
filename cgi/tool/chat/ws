@@ -36,7 +36,7 @@ NAME_MAX    = 32
 ROOM_MAX    = 32
 PEER_TTL    = 30   # 秒，refresh 超时
 
-Q.ws do |req|
+Q.ws do |req, rsp|
   myname   = nil
   mycolor  = nil
   room     = nil
@@ -56,18 +56,18 @@ Q.ws do |req|
 
     case val['op']
     when 'msg'
-      Q.write({ type: 'msg', from: val['from'], color: val['color'],
-                text: val['text'], ts: val['ts'] }.to_json, true)
+      rsp.ws_write({ type: 'msg', from: val['from'], color: val['color'],
+                     text: val['text'], ts: val['ts'] }.to_json)
     when 'up'
       p = val['peer']
       if p.is_a?(Hash) && p['name'] != myname
         peers[p['name']] = p
-        Q.write({ type: 'join', peer: p }.to_json, true)
+        rsp.ws_write({ type: 'join', peer: p }.to_json)
       end
     when 'down'
       n = val['name'].to_s
       if peers.delete(n)
-        Q.write({ type: 'leave', name: n }.to_json, true)
+        rsp.ws_write({ type: 'leave', name: n }.to_json)
       end
     when 'who'
       # 有人问房内都有谁（新人加入时问一圈）→ 回一份全量
@@ -79,7 +79,7 @@ Q.ws do |req|
       incoming.each do |p|
         next if known.include?(p['name'])
         peers[p['name']] = p
-        Q.write({ type: 'join', peer: p }.to_json, true)
+        rsp.ws_write({ type: 'join', peer: p }.to_json)
       end
     end
   end
@@ -125,7 +125,7 @@ Q.ws do |req|
         mcast.notify(chan, { op: 'up', peer: peers[myname] }.to_json)
 
         # 回 init（你 + 当前已知 peer，稍后 who's 会补全）
-        Q.write({ type: 'init', you: { name: myname, color: mycolor }, peers: peers.values }.to_json, true)
+        rsp.ws_write({ type: 'init', you: { name: myname, color: mycolor }, peers: peers.values }.to_json)
 
         # 问一圈房内都有谁（只发一次，避免回环风暴）
         mcast.notify(chan, { op: 'who', from: myname }.to_json)
@@ -139,8 +139,8 @@ Q.ws do |req|
         mcast.notify(chan, { op: 'msg', from: myname, color: mycolor,
                              text: text, ts: now }.to_json)
         # 自己也要看到（SocketNotify 不回环）
-        Q.write({ type: 'msg', from: myname, color: mycolor,
-                  text: text, ts: now }.to_json, true)
+        rsp.ws_write({ type: 'msg', from: myname, color: mycolor,
+                       text: text, ts: now }.to_json)
 
       when 'leave'
         if chan && myname
@@ -148,7 +148,7 @@ Q.ws do |req|
         end
 
       when 'ping'
-        Q.write({ type: 'error', msg: 'pong' }.to_json, true)
+        rsp.ws_write({ type: 'error', msg: 'pong' }.to_json)
       end
 
     rescue => e
