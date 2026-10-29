@@ -281,19 +281,24 @@ class Req {
     }
   }
 
-  // WS: rust 侧注入 8 字节头 = [len:4BE][remainder:4BE], 之后 len 字节 payload
-  // remainder 归零才是一次完整消息
+  // WS: rust 侧注入 9 字节头 = [len:4BE][remainder:4BE][flags:1], 之后 len 字节 payload
+  //   len      = 本段 payload 字节数
+  //   remainder= 本帧 payload 还剩多少 (0 = 这帧读完)
+  //   flags    = bit0 = 本段是整个 WS 消息的最后一片
+  // flags bit0 才是"消息结束"的信号 —— remainder===0 只说明这一帧读完,
+  // 分片消息(一个消息拆成多帧)要等最后一片才交付。
   onMessage(cb) {
     let buf = Buffer.alloc(0);
     for (;;) {
-      const head = readExact(8);
-      if (head.length < 8) return;                       // EOF → 干净退出
+      const head = readExact(9);
+      if (head.length < 9) return;                       // EOF → 干净退出
       const len = head.readUInt32BE(0);
       const remainder = head.readUInt32BE(4);
+      const flags = head[8];
       const payload = readExact(len);
       if (payload.length < len) return;                   // 半包
       buf = Buffer.concat([buf, payload]);
-      if (remainder === 0) {
+      if (flags & 0x01) {
         const ret = cb?.(buf);
         buf = Buffer.alloc(0);
         if (ret != null) write(ret);

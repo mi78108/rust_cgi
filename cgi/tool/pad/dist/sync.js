@@ -126,11 +126,11 @@ export class Sync extends EventTarget {
       this.pending.push(obj);
       return false;
     }
-    // 直接发 JSON —— **不要**自己加 8 字节头。
+    // 直接发 JSON —— **不要**自己加帧头。
     //
     // spider 在把 WS 帧负载写给子进程 STDIN 时，会自动加一层
-    // [len(4,BE)][rem(4,BE)] 头（见 src/utils.rs 的 call_bridge remainder 逻辑），
-    // ruby 的 Req#on_ws_data 就是靠这个头还原消息边界。
+    // [len(4,BE)][rem(4,BE)][flags(1)] 头（见 src/tcp_class/http_websocket_func.rs
+    // 的 Websocket::read），ruby 的 Req#on_ws_data 就是靠这个头还原消息边界。
     // 自己再加一层会变成双头 → ruby 解析出垃圾 → 消息被丢弃。
     this.ws.send(JSON.stringify(obj));
     return true;

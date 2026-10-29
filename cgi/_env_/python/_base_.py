@@ -459,21 +459,28 @@ class Req:
     def on_ws_data(self, cbk: Callable[[bytes], Any] | None) -> None:
         """WebSocket 帧循环.
 
-        spider 给每帧加 8 字节头 [len u32 BE][remainder u32 BE];
-        remainder==0 表示一个完整帧结束, 此时回调并清空累积缓冲。
+        spider 给每段 payload 前面加 9 字节头:
+            [len u32 BE][remainder u32 BE][flags u8]
+        - len   = 本段 payload 字节数
+        - remainder = 本帧 payload 还剩多少 (0 = 这帧读完)
+        - flags = bit0 = 本段是整个 WS 消息的最后一片
+
+        flags bit0 才是"消息结束"的信号 —— remainder==0 只说明这一帧读完,
+        分片消息(一个消息拆成多帧)要等最后一片才交付。
         """
         value = b''
         while True:
-            head = read(8)
-            if head is None or len(head) < 8:
+            head = read(9)
+            if head is None or len(head) < 9:
                 break
             length = int.from_bytes(head[0:4], 'big')
             remainder = int.from_bytes(head[4:8], 'big')
+            flags = head[8]
             body = read(length)
             if body is None:
                 break
             value += body
-            if remainder == 0:
+            if flags & 0x01:
                 ret = cbk(value) if cbk else None
                 value = b''
                 if ret is not None:

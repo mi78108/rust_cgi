@@ -7,7 +7,7 @@ use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Write};
-use std::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
@@ -15,26 +15,64 @@ const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 // WS 帧头长度 —— 子进程 STDIN 里每段 payload 前面带的头
 //
-//   [len u32 BE][rem u32 BE][payload]
+//   [len u32 BE][rem u32 BE][flags u8][payload]
 //
-//   len = 本次这段 payload 有多少字节（子进程读这么多）
-//   rem = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+//   len  = 本次这段 payload 有多少字节（子进程读这么多）
+//   rem  = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+//   flags= 标志位，见下方 FLAG_* 定义
 //
 // 子进程 STDIN 是字节流，靠这个头还原帧边界 —— 没有它就会粘包。
-const FRAME_HEADER_LEN: usize = 8;
+//
+// flags bit0 = 这是整个 WS 消息的最后一片（分片消息的末片）。
+// 一个 WS 消息可能被拆成多个 WS 帧（分片），
+// 每片单独带一个头，runtime 靠 FLAG_LAST 判断消息在哪里结束。
+// 低位留给以后扩展（压缩标志等），未定义的位必须为 0。
+const FRAME_HEADER_LEN: usize = 9;
+
+/// flags bit0 —— 本片是整个 WS 消息的最后一片
+const FLAG_LAST: u8 = 0x01;
+
+/// WS opcode
+const OP_CONT: u8 = 0x0;
+const OP_TEXT: u8 = 0x1;
+const OP_BIN: u8 = 0x2;
+const OP_CLOSE: u8 = 0x8;
+const OP_PING: u8 = 0x9;
+const OP_PONG: u8 = 0xa;
 
 pub struct Websocket {
+    /// 最近一次读到的数据帧 opcode（text/bin），写回客户端时用
     last_op: AtomicU8,
     base_on: Http,
+    /// 当前帧已读入的 payload 字节数 —— 同时是 mask 偏移基准
     processed: AtomicUsize,
+    /// 当前帧剩余 payload 字节数
     remainder: AtomicUsize,
     payload_mask: AtomicU32,
     payload_buffer: RwLock<Vec<u8>>,
     payload_remainder: AtomicUsize,
+    /// 分片消息的首片 opcode（续片沿用）
+    frag_opcode: AtomicU8,
+    /// 当前是否处于分片消息中
+    frag_active: AtomicBool,
+    /// 当前帧是不是消息的最后一片（fin=1）。
+    /// 存字段而不是局部变量：一帧 payload 可能跨多次 read() 才读完，
+    /// 每次 read() 都要知道这一帧是不是消息末尾。
+    frame_last: AtomicBool,
+}
+
+/// 一个 WS 帧的头部解析结果
+struct FrameHead {
+    /// 本帧 payload 字节数；None = close / EOF
+    len: Option<usize>,
+    /// 本帧 payload 用的 mask key（续片沿用首片的）
+    mask: [u8; 4],
+    /// 本片是不是整个 WS 消息的最后一片
+    last: bool,
 }
 
 impl Websocket {
-    async fn read_head(&self) -> Result<(Option<usize>, [u8; 4]), Error> {
+    async fn read_head(&self) -> Result<FrameHead, Error> {
         let mut bytes = [0u8; 2];
         if let Err(e) = self
             .base_on
@@ -50,7 +88,11 @@ impl Websocket {
                 e
             );
             if e.kind() == ErrorKind::UnexpectedEof {
-                return Ok((None, [0u8; 4]));
+                return Ok(FrameHead {
+                    len: None,
+                    mask: [0u8; 4],
+                    last: true,
+                });
             }
             return Err(e);
         }
@@ -120,32 +162,87 @@ impl Websocket {
         }
         debug!("websocket read package mask {:?}", plymask);
         // frame read done
-        self.last_op.store(bytes[0], Ordering::Release);
-        match bytes[0] {
-            // h  if h == 0b10000000 => {
-            //     continues frame
-            //     Some(Ok(length))
-            // },
-            h if h == 0b10000010 => {
-                // bin frame
-                Ok((Some(length), plymask))
+        //
+        // 首字节 = fin(0x80) | rsv(0x70) | opcode(0x0f)
+        //   fin  = 这片是不是消息的最后一片
+        //   rsv  = 保留位, 必须为 0 (没协商扩展的话)
+        //   op   = opcode: 0x0 续片 / 0x1 文本 / 0x2 二进制 / 0x8 关闭 / 0x9 ping
+        let fin = bytes[0] & 0x80 != 0;
+        let rsv = bytes[0] & 0x70;
+        let op = bytes[0] & 0x0f;
+        if rsv != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "websocket rsv bits set, 没有协商扩展",
+            ));
+        }
+        debug!("websocket frame fin={} op={:#x}", fin, op);
+        // 这一帧是不是消息最后一片 —— 存字段，因为一帧 payload 可能跨多次 read()
+        self.frame_last.store(fin, Ordering::Release);
+        match op {
+            OP_TEXT | OP_BIN => {
+                // 数据帧。fin=1 是完整消息；fin=0 是分片消息的首片。
+                self.last_op.store(op, Ordering::Release);
+                if fin {
+                    // 完整消息：mask 偏移从头开始
+                    self.processed.store(0, Ordering::Relaxed);
+                    self.payload_mask
+                        .store(u32::from_be_bytes(plymask), Ordering::Relaxed);
+                    Ok(FrameHead {
+                        len: Some(length),
+                        mask: plymask,
+                        last: true,
+                    })
+                } else {
+                    // 分片首片：记下消息类型，进入分片状态。
+                    self.frag_opcode.store(op, Ordering::Release);
+                    self.frag_active.store(true, Ordering::Release);
+                    self.processed.store(0, Ordering::Relaxed);
+                    Ok(FrameHead {
+                        len: Some(length),
+                        mask: plymask,
+                        last: false,
+                    })
+                }
             }
-            h if h == 0b10000001 => {
-                // text frame
-                Ok((Some(length), plymask))
+            OP_CONT => {
+                // 续片：必须处在分片消息中
+                if !self.frag_active.load(Ordering::Acquire) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "websocket continuation frame 但没有分片消息在途",
+                    ));
+                }
+                if fin {
+                    // 末片：消息结束
+                    self.frag_active.store(false, Ordering::Release);
+                }
+                // RFC 6455 5.5: "Clients MUST choose a new masking key for each frame"
+                //   -> 每个分片有自己的 mask key，偏移在本片内从 0 开始，
+                //      不跨片连续，也不沿用首片的 key。
+                self.processed.store(0, Ordering::Relaxed);
+                Ok(FrameHead {
+                    len: Some(length),
+                    mask: plymask,
+                    last: fin,
+                })
             }
-            h if h == 0b10001000 => {
+            OP_CLOSE => {
                 //0x88 0x80 4byte_masking
                 //ctrl close 0x8 0b10001000
                 debug!("websocket ctrl close event");
                 // 回 close 帧时对端可能已经走了，写失败不该 panic。
-                if let Err(e) = self.write_with_opcode(0b10001000, &[]).await {
+                if let Err(e) = self.write_with_opcode(OP_CLOSE, &[]).await {
                     error!("websocket ctrl close write fail {:?}", e);
                 }
                 //return Err(Error::from(ErrorKind::UnexpectedEof));
-                Ok((None, plymask))
+                Ok(FrameHead {
+                    len: None,
+                    mask: plymask,
+                    last: true,
+                })
             }
-            h if h == 0b10001001 => {
+            OP_PING => {
                 // ctrl ping 0x9 0b10001001
                 // ctrl pong 0xA 0b10001010
                 debug!("websocket ctrl ping event");
@@ -172,13 +269,17 @@ impl Websocket {
                         *b ^= mask[i % 4];
                     }
                 }
-                if let Err(e) = self.write_with_opcode(0b10001010, &payload).await {
+                if let Err(e) = self.write_with_opcode(OP_PONG, &payload).await {
                     error!("websocket ctrl pong write fail {:?}", e);
                 }
-                // 返回 Some(0) 表示"控制帧已处理，没有数据帧 payload"。
-                // call_bridge 看到 read_len == 0 会 continue，下一轮 read()
-                // 再去读真正的数据帧。
-                Ok((Some(0), plymask))
+                // 返回 len=Some(0) 表示"控制帧已处理，没有数据帧 payload"。
+                // read() 见到 0 长度就提前返回 Some(0)，
+                // call_bridge 见 read_len==0 走 continue，下一轮 read() 再读数据帧。
+                Ok(FrameHead {
+                    len: Some(0),
+                    mask: plymask,
+                    last: false,
+                })
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
@@ -194,14 +295,18 @@ impl Websocket {
         // 0x00 连续帧，浏览器的WebSocket API一般不会收到该类型的操作码
         // 0x01 文本帧，最常用到的数据帧类别之一，表示该帧的负载是一段文本(UTF-8字符流)
         // 0x02 二进制帧，较常用到的数据帧类别之一，表示该帧的负载是二进制数据
-        // 0x03-0x07 保留帧，留作未来非控制帧扩展使用
+        // 0x03-0x07 保留帧，留给未来控制帧扩展使用
         // 0x08 关闭连接控制帧，表示要断开WebSocket连接，浏览器端调用close方法会发送0x08控制帧
         // 0x09 ping帧，用于检测端点是否可用，暂未发现浏览器可以通过何种方法发送该帧
         // 0x0A pong帧，用于回复ping帧，暂未发现浏览器可以发送此种类型的控制帧
-        // 0x0B-0x0F 保留帧，留作未来控制帧扩展使用
+        // 0x0B-0x0F 保留帧，留给未来控制帧扩展使用
         // B1 = +fin+rsv1+rsv2+rsv3+opcode*4+
         // fin 1末尾包 0还有后续包
-        if let Ok(_) = self.base_on.write(&[opcode]).await {
+        //
+        // 这里收到的 opcode 是纯 opcode（不含 fin/rsv），统一在这里补上 fin=1。
+        // 服务端发出去的帧都是完整帧，不做分片。
+        let b0 = 0x80 | (opcode & 0x0f);
+        if let Ok(_) = self.base_on.write(&[b0]).await {
             //B2=  +mask+len*7
             let len = data.len();
             debug!("websocket ready to write len {}", data.len());
@@ -287,30 +392,36 @@ impl Websocket {
 }
 
 impl Req for Websocket {
-    /// 读一段 payload，产出 [len u32 BE][rem u32 BE][payload]
+    /// 读一段 payload，产出 [len u32 BE][rem u32 BE][flags u8][payload]
     ///
-    ///   len = 本次读到的 payload 字节数（子进程读这么多）
-    ///   rem = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+    ///   len  = 本次读到的 payload 字节数（子进程读这么多）
+    ///   rem  = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+    ///   flags= FLAG_LAST 表示本片是整个 WS 消息的最后一片
     ///
     /// 帧边界知识全部收在这里 —— call_bridge 只是把 read 出来的字节转发出去，
-    /// 不需要理解 [len][rem] 的含义，也不需要 remainder() 钩子。
+    /// 不需要理解 [len][rem][flags] 的含义，也不需要 remainder() 钩子。
     async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
         if self.remainder.load(Ordering::Relaxed) == 0 {
-            let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
-                if let Some(len) = len_opt {
-                    self.processed.store(0, Ordering::Relaxed);
+            let head = self.read_head().await?;
+            match head.len {
+                None => {
+                    // close / EOF
+                    return Ok(None);
+                }
+                Some(0) => {
+                    // 控制帧（ping）已处理，没有数据 payload。
+                    // 交 0 长度给 call_bridge，它会 continue，下一轮再读数据帧。
+                    return Ok(Some(0));
+                }
+                Some(len) => {
                     self.remainder.store(len, Ordering::Relaxed);
                     self.payload_mask
-                        .store(u32::from_be_bytes(mask), Ordering::Relaxed);
+                        .store(u32::from_be_bytes(head.mask), Ordering::Relaxed);
                 }
-                Ok(len_opt)
-            });
-            if let Err(_) | Ok(None) = header_rst {
-                return header_rst;
             }
         }
 
-        // payload 缓冲区：留出 8 字节头的位置
+        // payload 缓冲区：留出帧头的位置
         let body = &mut data[FRAME_HEADER_LEN..];
 
         if self.remainder.load(Ordering::Relaxed) > body.len() {
@@ -341,15 +452,20 @@ impl Req for Websocket {
             })
         }
         .map(|len_opt| {
-            // 组帧：[len][rem][payload]
+            // 组帧：[len][rem][flags][payload]
             // len == 0 是 EOF（连接关闭），不是一帧 —— 不加头。
             if let Some(len) = len_opt {
                 if len == 0 {
                     return Some(0);
                 }
                 let rem = self.remainder.load(Ordering::Relaxed);
+                // 帧读完了才谈得上"消息最后一片"。
+                // rem > 0 说明这帧还没读完，肯定不是消息末尾。
+                let last = self.frame_last.load(Ordering::Relaxed);
+                let flags = if last && rem == 0 { FLAG_LAST } else { 0 };
                 data[0..4].copy_from_slice(&(len as u32).to_be_bytes());
                 data[4..8].copy_from_slice(&(rem as u32).to_be_bytes());
+                data[8] = flags;
                 return Some(len + FRAME_HEADER_LEN);
             }
             len_opt
@@ -459,7 +575,7 @@ impl Req for Websocket {
     // }
 
     async fn close(&self) -> Result<(), Error> {
-        if self.write_with_opcode(0b10001000, &[]).await.is_ok() {
+        if self.write_with_opcode(OP_CLOSE, &[]).await.is_ok() {
             if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {}
         }
         self.base_on.close().await
@@ -502,13 +618,16 @@ impl Handle<Http> for Websocket {
             }
         }
         Ok(Websocket {
-            last_op: AtomicU8::new(0b10000001),
+            last_op: AtomicU8::new(OP_TEXT),
             base_on: stream,
             processed: AtomicUsize::new(0),
             remainder: AtomicUsize::new(0),
             payload_mask: AtomicU32::new(0),
             payload_buffer: RwLock::new(Vec::new()),
             payload_remainder: AtomicUsize::new(0),
+            frag_opcode: AtomicU8::new(OP_TEXT),
+            frag_active: AtomicBool::new(false),
+            frame_last: AtomicBool::new(true),
         })
     }
 }

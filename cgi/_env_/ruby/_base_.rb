@@ -210,16 +210,24 @@ class Q
       value = String.new(encoding: Encoding::ASCII_8BIT)
       loop do
         begin
-          head = Q.read(8)
+          # spider 给每段 payload 前面加的头:
+          #   [len u32 BE][rem u32 BE][flags u8]
+          #   len   = 本段 payload 字节数
+          #   rem   = 本帧 payload 还剩多少 (0 = 这帧读完)
+          #   flags = bit0 = 本段是整个 WS 消息的最后一片
+          head = Q.read(9)
           # STDIN.read(n) 在 EOF 时返回 nil（不是 ""），必须先判空
-          break if head.nil? || head.bytesize < 8
+          break if head.nil? || head.bytesize < 9
           len = head[0, 4].unpack1('N')
           rem = head[4, 4].unpack1('N')
-          Q.log ">>>>>>>>>>>>>> packet remainder #{rem} ready #{len}"
+          flags = head[8].unpack1('C')
+          Q.log ">>>>>>>>>>>>>>>> packet remainder #{rem} ready #{len} flags #{flags}"
           body = Q.read(len)
           break if body.nil?
           value << body
-          if rem == 0
+          # flags bit0: 这是消息最后一片 —— 分片消息在这里才交付。
+          # (rem == 0 只说明"这一帧读完", 不代表整个消息结束)
+          if flags & 0x01 != 0
             ret = cbk.call(value) unless cbk.nil?
             value.clear
             Q.write(ret) unless ret.nil?
