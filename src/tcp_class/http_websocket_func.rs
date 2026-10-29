@@ -322,8 +322,15 @@ impl Websocket {
                         .await
                         .unwrap();
                 }
-                n if n >= (2usize).pow(16) && n < (2usize).pow(64) => {
+                n if n >= (2usize).pow(16) => {
                     // 8byte
+                    //
+                    // 上界就是 usize::MAX —— usize 不可能 >= 2^64,
+                    // 所以原来的 `&& n < (2usize).pow(64)` 是死条件,
+                    // 而且 (2usize).pow(64) 本身就溢出 (2^64 > usize::MAX):
+                    //   debug build  -> panic (attempt to multiply with overflow)
+                    //   release build -> 静默 wrap 成 0, 于是大帧永远落到
+                    //                   下面的 _ => FileTooLarge, 发不出去
                     let mut len_bytes = [0u8; 9];
                     len_bytes[0] = 127;
                     len_bytes[1..9].copy_from_slice(&len.to_be_bytes());
