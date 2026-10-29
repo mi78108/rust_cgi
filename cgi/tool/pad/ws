@@ -239,9 +239,11 @@ Q.ws do |req, rsp|
                             'cursor' => 0, 'ts' => Time.now.to_i })
         Q.log "[pad/ws] hello #{cid} #{name}"
 
-        # 发全量 op
-        ops = read_ops
-        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops })) unless ops.empty?
+        # ★ 这里**不**发全量 op。
+        #   客户端连上时会同时发 hello + sync（见 sync.js），
+        #   如果 hello 也发一份全量，每个新客户端就会收到两份全量 op
+        #   （实测 13 条 log → 客户端收 26 条）。
+        #   全量 op 只由 'sync' 分支发一次，避免重复。
 
         # 发成员表 ——
         # 广播用的是 want_echo=false（跳过自己发的），
@@ -251,7 +253,10 @@ Q.ws do |req, rsp|
 
       when 'sync'
         ops = read_ops
-        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops }))
+        # 'total' 是服务器 op log 的权威总数 ——
+        # 客户端用它显示"全局 ops"，不用自己数收到的 op
+        # （增量广播 + 全量同步会让客户端自己数出来的数对不上）。
+        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops, total: ops.size }))
 
       when 'clear'
         # 清空文档 —— 服务器删掉 op log，通知所有客户端重置本地 Doc。

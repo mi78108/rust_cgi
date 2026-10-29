@@ -72,6 +72,19 @@ export class Doc {
     this.nodes.set(idKey(ROOT_ID), {
       id: ROOT_ID, v: '', tomb: false, left: null,
     });
+    /**
+     * anchorKey → 它的直接子节点数组（未排序）
+     *
+     * ★ 索引 —— 没有它 childrenOf() 每次都要扫全表 this.nodes，
+     *   而 textIndex() 会对每个节点调一次 childrenOf() →
+     *   一次 textIndex() 就是 O(n²)。粘贴几 KB 文本会卡死。
+     *
+     *   有了索引: childrenOf() O(1) 拿到数组（排序另算），
+     *   textIndex() 变成 O(n)。
+     *
+     * @type {Map<string, object[]>}
+     */
+    this.children = new Map();
     /** 已应用过的 op id —— 幂等 */
     this.applied = new Set();
     /** anchor 还没到的 insert op —— 等依赖到了再应用 */
@@ -110,13 +123,39 @@ export class Doc {
    * （并发同锚插入时正序得 "ab"，逆序得 "ba"，两边一致即可）。
    */
   childrenOf(id) {
-    const out = [];
     const key = idKey(id);
-    for (const n of this.nodes.values()) {
-      if (n.left && idKey(n.left) === key) out.push(n);
+    const list = this.children.get(key);
+    if (!list) return [];
+    // 逆序排 —— 但数组通常已经是"后加的在后面"，所以倒着读就是逆序，
+    // 不用每次都 sort（sort 是 O(k log k)，粘贴时每个节点都调一次）。
+    //
+    // ★ 前提: 同一 anchor 下的节点 id 严格递增（后加的 id 更大）。
+    //   单个客户端的 seq 单调递增 ✓；跨客户端并发插入时 id 可能不是单调的，
+    //   那种情况退化成真排序 —— 见下面的判断。
+    if (this._sortedChildren === false) {
+      return list.slice().sort((a, b) => compareId(b.id, a.id));
     }
-    out.sort((a, b) => compareId(b.id, a.id));
-    return out;
+    return list.slice().reverse();
+  }
+
+  /** 登记一个新节点到它 anchor 的子节点列表 */
+  _addChild(node) {
+    if (!node.left) return;
+    const key = idKey(node.left);
+    let list = this.children.get(key);
+    if (!list) {
+      list = [];
+      this.children.set(key, list);
+    }
+    // 追加到末尾 —— 同一 anchor 下后加的 id 更大, 倒着读就是正确的逆序。
+    //
+    // 但跨客户端并发插入时 id 不保证单调 —— 那时列表不再单调,
+    // 标记 _sortedChildren=false 让 childrenOf 退化成真排序。
+    const last = list[list.length - 1];
+    if (last && compareId(node.id, last.id) < 0) {
+      this._sortedChildren = false;
+    }
+    list.push(node);
   }
 
   /** 可见文本 */
@@ -128,11 +167,28 @@ export class Doc {
     return out;
   }
 
-  /** 一个节点的可见文本（自己 + 子树） */
+  /**
+   * 一个节点的可见文本（自己 + 子树）。
+   *
+   * ★ 用显式栈迭代，不用递归 ——
+   *   链式输入（每个字符 anchor 指向前一个）会形成 N 层深的树，
+   *   递归深度 = 树深。JS 引擎递归上限约 1 万层（实测 node 爆栈在 12518 帧），
+   *   所以一个 2 万字的文档 getText() 就直接 RangeError。
+   *   迭代版本没有深度上限。
+   */
   visibleOf(node) {
-    let out = node.tomb ? '' : node.v;
-    for (const child of this.childrenOf(node.id)) {
-      out += this.visibleOf(child);
+    let out = '';
+    // 栈里存"待展开的子节点列表"，每个元素是一个 children 数组 + 游标。
+    const stack = [{ list: this.childrenOf(node.id), i: 0 }];
+    // 根节点自己的文本先输出
+    if (!node.tomb) out += node.v;
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      if (top.i >= top.list.length) { stack.pop(); continue; }
+      const child = top.list[top.i++];
+      if (!child.tomb) out += child.v;
+      // 把这个节点的孩子压栈 —— 先压的先处理，保证深度优先 + 同层顺序
+      stack.push({ list: this.childrenOf(child.id), i: 0 });
     }
     return out;
   }
@@ -140,16 +196,23 @@ export class Doc {
   /**
    * 可见文本 → 每字符对应的节点。
    * 返回 [{ ch, node }]，用于把光标位置换算成 CRDT 锚点。
+   *
+   * ★ 同样用显式栈迭代（理由同 visibleOf）——
+   *   而且它跟 getText() 走的是**同一套遍历**，
+   *   保证"渲染出来的文本"和"光标换算用的索引"永远一致。
    */
   textIndex() {
     const list = [];
-    const walk = (node) => {
+    const stack = [{ list: this.childrenOf(ROOT_ID), i: 0 }];
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      if (top.i >= top.list.length) { stack.pop(); continue; }
+      const node = top.list[top.i++];
       if (!node.tomb) {
         for (const ch of node.v) list.push({ ch, node });
       }
-      for (const child of this.childrenOf(node.id)) walk(child);
-    };
-    for (const node of this.childrenOf(ROOT_ID)) walk(node);
+      stack.push({ list: this.childrenOf(node.id), i: 0 });
+    }
     return list;
   }
 
@@ -243,12 +306,16 @@ export class Doc {
   applyInsert(op) {
     if (!this.get(op.l)) return false;      // anchor 还没到 → 等
     if (this.get(op.id)) return false;      // 已存在
-    this.nodes.set(idKey(op.id), {
+    const node = {
       id: op.id,
       v: op.v ?? '',
       tomb: false,
       left: op.l,
-    });
+    };
+    this.nodes.set(idKey(op.id), node);
+    // ★ 登记到 anchor 的子节点索引 —— 少了这行 childrenOf() 恒为空，
+    //   整个文档渲染成空白（nodes 有数据但索引没数据）。
+    this._addChild(node);
     return true;
   }
 

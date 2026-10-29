@@ -39,6 +39,8 @@ const ta       = $('ta');
 const statusEl = $('status');
 const peersEl  = $('peers');
 const opsEl    = $('ops');
+const localOpsEl = $('ops-local');
+const globalOpsEl = $('ops-global');
 const meEl     = $('me');
 const toastEl  = $('toast');
 
@@ -53,8 +55,24 @@ let doc = new Doc();
 let sync = null;
 let myName = 'anon';
 let myColor = PEER_COLORS[0];
-let opCount = 0;
+/**
+ * op 计数分两个：
+ *   localOpCount  —— 我自己发出的 op 数（clientId === myClientId）
+ *   globalOpCount —— 服务器 op log 的总数（所有客户端的 op 加起来）
+ *
+ * 之前只有一个 opCount，本地/远端混在一起加，而且远端 op 每来一条就加一次
+ * （重复的全量 op 也会加）→ 数字会虚高，且两边客户端数字对不上。
+ */
+let localOpCount = 0;
+let globalOpCount = 0;
 let seq = 0;
+
+/** 刷新状态栏上的两个 op 计数 */
+function renderOpCounts() {
+  if (localOpsEl) localOpsEl.textContent = String(localOpCount);
+  if (globalOpsEl) globalOpsEl.textContent = String(globalOpCount);
+  if (opsEl) opsEl.textContent = `${localOpCount} / ${globalOpCount}`;
+}
 
 /** 本地 seq 计数器 —— id = [clientId, seq]，全序比较要用 */
 let myClientId = '';
@@ -157,38 +175,26 @@ function clearPeerEls() {
 /**
  * 收到一批 op → 应用到本地 Doc → 更新 textarea + 变换光标。
  * @param {Array} ops
+ * @returns {number} 真正新应用的 op 数（重复的 op 不算）
  */
 function applyRemoteOps(ops) {
-  if (!ops || !ops.length) return;
+  if (!ops || !ops.length) return 0;
 
   const before = ta.value;
   const selStart = ta.selectionStart;
   const selEnd = ta.selectionEnd;
 
-  // 记录应用前后的位置变化，用于光标变换
-  let delta = 0;
+  // ★ 这里**不**再逐 op 调 doc.textIndex()。
+  //   原来每个 op 前都算一次 textIndex()（O(n)），一批 k 个 op 就是 O(k*n)，
+  //   而 textIndex() 本身是全文档扫描 → 整体 O(n²)。几百条 op 就卡死。
+  //   而且算出来的 at/delta 根本没被用到 —— 光标位移是下面 shiftOf(ops, ...) 算的。
+  //   所以整段位置预计算是纯粹的无用功，删掉。
   let applied = 0;
-
   for (const op of ops) {
-    // 应用前算出这个 op 会插/删在哪个可见位置
-    const idx = doc.textIndex();
-    let at = -1;
-    if (op.t === 'i') {
-      // 插入位置 = anchor 之后的第一个可见字符位置
-      at = indexAfterAnchor(idx, op.l);
-    } else if (op.t === 'd') {
-      at = indexOfNode(idx, op.id);
-    }
-    if (doc.apply(op)) {
-      applied++;
-      if (at >= 0) {
-        if (op.t === 'i') delta += 1;
-        else if (op.t === 'd') delta -= 1;
-      }
-    }
+    if (doc.apply(op)) applied++;
   }
 
-  if (!applied) return;
+  if (!applied) return 0;
 
   const after = doc.getText();
   if (after !== before) {
@@ -201,25 +207,7 @@ function applyRemoteOps(ops) {
     updateStatus();
   }
   renderPeers();
-}
-
-/** 找出 anchor 之后第一个可见字符的下标 */
-function indexAfterAnchor(idx, anchorId) {
-  if (!anchorId) return 0;
-  const ak = idKey(anchorId);
-  for (let i = 0; i < idx.length; i++) {
-    if (idKey(idx[i].node.id) === ak) return i + 1;
-  }
-  return idx.length;
-}
-
-/** 找出某个节点在可见文本里的下标 */
-function indexOfNode(idx, nodeId) {
-  const nk = idKey(nodeId);
-  for (let i = 0; i < idx.length; i++) {
-    if (idKey(idx[i].node.id) === nk) return i;
-  }
-  return -1;
+  return applied;
 }
 
 /** 粗略算出光标该挪多少 —— 保守：只算最后一个 op 的影响 */
@@ -246,8 +234,9 @@ function localInsert(text, at) {
   const anchorId = doc.anchorAt(at);
   const op = { t: 'i', id: [myClientId, seq++], v: text, l: anchorId };
   doc.apply(op);
-  opCount++;
-  opsEl.textContent = String(opCount);
+  localOpCount++;
+  globalOpCount++;   // 我的 op 也会进服务器 log
+  renderOpCounts();
   if (sync) sync.sendOp(op);
 }
 
@@ -272,8 +261,9 @@ function localDelete(at, len) {
   for (const n of nodes) {
     const op = { t: 'd', id: n.id };
     doc.apply(op);
-    opCount++;
-    opsEl.textContent = String(opCount);
+    localOpCount++;
+    globalOpCount++;   // 我的 op 也会进服务器 log
+    renderOpCounts();
     if (sync) sync.sendOp(op);
   }
 }
@@ -402,7 +392,7 @@ ta.addEventListener('select', reportPresence);
 function updateStatus() {
   const text = doc.getText();
   const chars = text.length;
-  opsEl.textContent = String(opCount);
+  renderOpCounts();
   peersEl.textContent = String(members.size);
   return chars;
 }
@@ -436,7 +426,19 @@ function connect() {
       else if (s === 'error') setStatus('error', 'err');
       else setStatus('disconnected', 'err');
     },
-    onOps: (ops) => applyRemoteOps(ops),
+    onOps: (ops, total) => {
+      const applied = applyRemoteOps(ops);
+      // total 是服务器 op log 的权威总数（只有 sync 全量响应才带）。
+      // 用它更新"全局 ops"——比客户端自己数收到的 op 准
+      // （增量广播和全量同步混在一起时，自己数会重复/漏）。
+      if (typeof total === 'number') {
+        globalOpCount = total;
+      } else {
+        // 增量广播：没带 total → 按真正新应用的条数加
+        globalOpCount += applied;
+      }
+      renderOpCounts();
+    },
     onMembers: (list) => {
       members = new Map();
       for (const m of list) members.set(m.id, m);
@@ -447,8 +449,9 @@ function connect() {
       // 服务器说文档被清空了 → 重置本地 Doc
       resetDoc();
       ta.value = '';
-      opCount = 0;
-      opsEl.textContent = '0';
+      localOpCount = 0;
+      globalOpCount = 0;
+      renderOpCounts();
       showToast('cleared');
     },
   });

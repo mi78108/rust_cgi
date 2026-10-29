@@ -22,7 +22,8 @@ export class Sync extends EventTarget {
    * @param {object} opts
    *   opts.name     显示名
    *   opts.color    颜色
-   *   opts.onOps    (ops[]) => void       收到 op
+   *   opts.onOps    (ops[], total) => void   收到 op
+   *                                 total = 服务器 op log 的权威总数（可能是 undefined）
    *   opts.onMembers(members[]) => void   收到成员表
    *   opts.onStatus (status) => void      连接状态变化
    */
@@ -84,7 +85,7 @@ export class Sync extends EventTarget {
       if (!msg || !msg.t) return;
       switch (msg.t) {
         case 'ops':
-          this.onOps(msg.ops || []);
+          this.onOps(msg.ops || [], msg.total);
           break;
         case 'members':
           this.onMembers(msg.members || []);
