@@ -175,8 +175,9 @@ impl Websocket {
                 if let Err(e) = self.write_with_opcode(0b10001010, &payload).await {
                     error!("websocket ctrl pong write fail {:?}", e);
                 }
-                // 返回 Some(0) 表示"控制帧已处理，没有数据帧 payload"，
-                // read() 会继续读下一帧，而不是把它当成 0 字节的数据帧。
+                // 返回 Some(0) 表示"控制帧已处理，没有数据帧 payload"。
+                // call_bridge 看到 read_len == 0 会 continue，下一轮 read()
+                // 再去读真正的数据帧。
                 Ok((Some(0), plymask))
             }
             _ => Err(Error::new(
@@ -294,28 +295,19 @@ impl Req for Websocket {
     /// 帧边界知识全部收在这里 —— call_bridge 只是把 read 出来的字节转发出去，
     /// 不需要理解 [len][rem] 的含义，也不需要 remainder() 钩子。
     async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
-        // 控制帧(ping)没有数据 payload，read_head 已经处理掉了。
-        // 这里要继续读下一帧，而不是把 0 长度当成一帧交给 CGI。
-        loop {
-            if self.remainder.load(Ordering::Relaxed) == 0 {
-                let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
-                    if let Some(len) = len_opt {
-                        self.processed.store(0, Ordering::Relaxed);
-                        self.remainder.store(len, Ordering::Relaxed);
-                        self.payload_mask
-                            .store(u32::from_be_bytes(mask), Ordering::Relaxed);
-                    }
-                    Ok(len_opt)
-                });
-                if let Err(_) | Ok(None) = header_rst {
-                    return header_rst;
+        if self.remainder.load(Ordering::Relaxed) == 0 {
+            let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
+                if let Some(len) = len_opt {
+                    self.processed.store(0, Ordering::Relaxed);
+                    self.remainder.store(len, Ordering::Relaxed);
+                    self.payload_mask
+                        .store(u32::from_be_bytes(mask), Ordering::Relaxed);
                 }
-                // len == 0 -> 控制帧已处理，继续读下一帧
-                if self.remainder.load(Ordering::Relaxed) == 0 {
-                    continue;
-                }
+                Ok(len_opt)
+            });
+            if let Err(_) | Ok(None) = header_rst {
+                return header_rst;
             }
-            break;
         }
 
         // payload 缓冲区：留出 8 字节头的位置
