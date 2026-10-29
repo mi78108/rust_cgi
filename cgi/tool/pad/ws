@@ -1,63 +1,275 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# tool/pad/ws — 协作编辑 WebSocket 透明转发端点
+# tool/pad/ws — 协作编辑 WebSocket 端点（自实现 RGA CRDT）
 #
 #   WS /tool/pad/ws
 #
-# 前端用 @weavo/client (CRDT) 连接本端点, 后端只做跨进程转发:
-#     收到浏览器帧 → SocketNotify (UDP multicast) 广播给其他 ws 连接
-#     收到 multicast 帧 → Q.write 推给本连接的浏览器
+# 与 tool/editdoc/ws 不同：这里服务器持有**权威状态**，不是纯转发。
 #
-# 后端不解析、不存储文档状态 —— CRDT 收敛全部由 @weavo/client 在浏览器端完成。
+# 服务器做三件事：
+#   1. 持有文档 op log（文件），新客户端连上时发全量
+#   2. 收到 op → 追加到 log → 组播给其他客户端
+#   3. 维护成员表（每客户端一个文件，谁在线 = 目录里有哪些文件）
 #
-# 这跟 cgi/tool/editdoc/ws 是同一套协议, 只是换了路径 —— 后端行为不变。
+# 协议（JSON over WS text frame）：
 #
-# 二进制帧: weavo 用 socket.binaryType='arraybuffer', 帧是任意字节序列。
-# SocketNotify 的 fmt=bin 通道原样透传 bytes (不再需要 base64 中转),
-# Q.write 是裸 STDOUT.write, 不做编码转换。
+#   客户端 → 服务器
+#     {"t":"hello","name":"user-ab12","color":"#c4f542"}
+#     {"t":"op","op":{"t":"i","id":["c1",3],"v":"A","l":["c1",2]}}
+#     {"t":"presence","cursor":42}
+#     {"t":"sync"}
 #
-# echo 回自己: weavo 的 CASPaxos acceptor 需要收到包含自己的 mem 帧才能完成 join,
-# 否则 membership.isJoined() 永远 false. 纯广播会导致 join 永远超时。
+#   服务器 → 客户端
+#     {"t":"ops","ops":[...]}
+#     {"t":"members","members":[{"id":..,"name":..,"color":..,"cursor":..}]}
 #
-# spider 是 fork-per-request, 每个 ws 连接一个 ruby 进程, 各自持有 SocketNotify 实例.
-# 广播靠 UDP 组播 (239.255.0.1:5000) 跨进程, 仅限同机 —— demo 足够.
+# 为什么用 JSON 而不是二进制：
+#   这个规模（几百字节文档）下带宽开销可忽略，换来可调试（curl 能看懂）
+#   + 不用写编解码器。RGA op 数 = 每次按键一个，长文档会涨，demo 阶段够用。
+#
+# 状态目录：
+#   $SPIDER_DATA/pad/<docId>/ops.log        每行一个 op (JSON)，只追加
+#   $SPIDER_DATA/pad/<docId>/members/<cid>.json  每个客户端一份
+#
+# 组播用 SocketNotify（UDP 239.255.0.1:5000），跨进程 —— 因为 spider 是
+# fork-per-request，每个 ws 连接一个 ruby 进程，进程间不共享内存。
 
 require_relative '../../_env_/ruby/_base_'
 require_relative '../../_env_/ruby/_ext_notify_'
+require 'json'
+require 'fileutils'
 
-# 单帧上限: SocketNotify 的 PACKET_LIMIT (60KB, 与 _ext_notify_.rb 保持一致)。
-# 注意 UDP 单包硬上限 ~65507 字节, 且大包会被 IP 分片 —— 丢包时 weavo 会走
-# heartbeat/state-vector 重试恢复, 但延迟会变高。
-FRAME_MAX = 60 * 1024
+# ── 配置 ────────────────────────────────────────────────────
+PAD_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/pad' : ENV['SPIDER_DATA']
+DOC_ID   = 'default'
 
+DOC_DIR  = File.join(PAD_ROOT, DOC_ID)
+OPS_LOG  = File.join(DOC_DIR, 'ops.log')
+MEM_DIR  = File.join(DOC_DIR, 'members')
+
+# 成员心跳间隔：超过这个时间没更新就认为掉线了
+MEMBER_TTL = 30
+
+# 单条 op 最大字节（防呆）
+MAX_OP_BYTES = 64 * 1024
+
+FileUtils.mkdir_p(MEM_DIR)
+
+# ── op log ──────────────────────────────────────────────────
+# 只追加，一行一个 JSON op。并发 append 在 POSIX 下对 < PIPE_BUF 的写入
+# 是原子的，但为了稳妥还是加锁（每个进程一把自己的锁 + flock 文件锁）。
+
+def log_lock
+  @log_lock ||= begin
+    File.open(OPS_LOG, File::WRONLY | File::CREAT | File::APPEND)
+  end
+end
+
+# 已写入 op 的 id 集合 —— 防止重复追加。
+# 客户端重连时会把 pending 队列里的 op 补发，那些 op 服务器可能已经收过，
+# 再追加一遍会撑爆 log（内容重复虽然 CRDT 幂等不出错，但很难看）。
+def op_seen_set
+  @op_seen ||= begin
+    s = {}
+    File.foreach(OPS_LOG) do |line|
+      line = line.strip
+      next if line.empty?
+      begin
+        op = JSON.parse(line)
+        id = op['id']
+        s["#{id[0]}:#{id[1]}"] = true if id.is_a?(Array) && id.size == 2
+      rescue JSON::ParserError
+        next
+      end
+    end
+    s
+  end
+end
+
+def append_op(op)
+  line = JSON.generate(op)
+  return false if line.bytesize > MAX_OP_BYTES
+  id = op['id']
+  return false unless id.is_a?(Array) && id.size == 2
+  key = "#{id[0]}:#{id[1]}"
+
+  log_lock.flock(File::LOCK_EX)
+  begin
+    # 重复的 op 不再追加（CRDT 幂等，重复应用无害，但 log 会膨胀）
+    return false if op_seen_set.key?(key)
+    log_lock.write(line + "\n")
+    log_lock.flush
+    op_seen_set[key] = true
+  ensure
+    log_lock.flock(File::LOCK_UN)
+  end
+  true
+rescue => e
+  Q.log "[pad/ws] append failed: #{e.class}: #{e.message}"
+  false
+end
+
+def read_ops
+  return [] unless File.exist?(OPS_LOG)
+  out = []
+  File.foreach(OPS_LOG) do |line|
+    line = line.strip
+    next if line.empty?
+    begin
+      out << JSON.parse(line)
+    rescue JSON::ParserError
+      # 半行（写了一半）→ 跳过
+    end
+  end
+  out
+end
+
+# ── 成员表 ─────────────────────────────────────────────────
+# 每个客户端一个文件，避免多进程互相覆盖。
+# 谁在线 = members/ 目录里有哪些文件。
+
+def member_file(cid)
+  File.join(MEM_DIR, "#{cid}.json")
+end
+
+def write_member(cid, info)
+  FileUtils.mkdir_p(MEM_DIR)
+  tmp = member_file(cid) + '.tmp'
+  File.write(tmp, JSON.generate(info))
+  File.rename(tmp, member_file(cid))   # 原子替换
+rescue => e
+  Q.log "[pad/ws] member write failed: #{e.class}: #{e.message}"
+end
+
+def remove_member(cid)
+  File.unlink(member_file(cid)) if File.exist?(member_file(cid))
+rescue => e
+  Q.log "[pad/ws] member remove failed: #{e.class}: #{e.message}"
+end
+
+def read_members
+  out = []
+  Dir.glob(File.join(MEM_DIR, '*.json')).each do |f|
+    begin
+      info = JSON.parse(File.read(f))
+      # 心跳超时的不算在线
+      next if info['ts'].to_i < Time.now.to_i - MEMBER_TTL
+      out << info
+    rescue JSON::ParserError, Errno::ENOENT
+      next
+    end
+  end
+  out
+end
+
+def broadcast_members(mcast)
+  members = read_members
+  payload = JSON.generate({ t: 'members', members: members })
+  mcast.notify(:pad, payload)
+  members
+end
+
+# ── WS 端点 ────────────────────────────────────────────────
 Q.ws do |req|
   mcast = SocketNotify.new("cgi-pad-#{Process.pid}")
+  cid   = nil
+  name  = 'anon'
+  color = '#c4f542'
 
+  # 订阅组播：别的客户端的 op 和成员表
   mcast.notify(:pad, false) do |msg|
-    # false = 不回环，跳过自己发的
-    Q.write(msg.data, true)
+    data = msg.data
+    next if data.nil? || data.empty?
+    Q.write(data, true)
   end
 
-  Q.log('[pad/ws] + client')
+  Q.log "[pad/ws] + client"
 
   Q.on_close do
+    remove_member(cid) if cid
     mcast.stop
-    Q.log('[pad/ws] - client')
+    Q.log "[pad/ws] - client #{cid}"
   end
 
   req.on_ws_data do |chunk|
     begin
-      if chunk.bytesize > FRAME_MAX
-        Q.log "[pad/ws] frame too big: #{chunk.bytesize}"
+      line = chunk.to_s
+      next nil if line.empty?
+
+      msg = begin
+        JSON.parse(line)
+      rescue JSON::ParserError
+        Q.log '[pad/ws] bad json'
+        next nil
+      end
+      next nil unless msg.is_a?(Hash)
+
+      case msg['t']
+      when 'hello'
+        # 首次 hello → 分配 clientId
+        cid   = "c#{Time.now.to_i}-#{Process.pid}"
+        name  = msg['name'].to_s[0, 32]
+        color = msg['color'].to_s[0, 16]
+        write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
+                            'cursor' => 0, 'ts' => Time.now.to_i })
+        Q.log "[pad/ws] hello #{cid} #{name}"
+
+        # 发全量 op
+        ops = read_ops
+        Q.write(JSON.generate({ t: 'ops', ops: ops }), true) unless ops.empty?
+
+        # 发成员表 ——
+        # 组播不会回环到发送方（订阅时 want_echo=false），
+        # 所以请求者自己那份要直接 Q.write 一次。
+        members = broadcast_members(mcast)
+        Q.write(JSON.generate({ t: 'members', members: members }), true)
+
+      when 'sync'
+        ops = read_ops
+        Q.write(JSON.generate({ t: 'ops', ops: ops }), true)
+
+      when 'clear'
+        # 清空文档 —— 服务器删掉 op log，通知所有客户端重置本地 Doc。
+        # 这是"权威在服务器"的好处：清空是一次广播，不用逐个客户端协商。
+        log_lock.flock(File::LOCK_EX)
+        begin
+          log_lock.truncate(0)
+          log_lock.flush
+          @op_seen = {}
+        ensure
+          log_lock.flock(File::LOCK_UN)
+        end
+        mcast.notify(:pad, JSON.generate({ t: 'clear' }))
+        Q.write(JSON.generate({ t: 'clear' }), true)
+        Q.log '[pad/ws] document cleared'
+
+      when 'op'
+        op = msg['op']
+        next nil unless op.is_a?(Hash)
+        ok = append_op(op)
+        if ok
+          # 组播给其他客户端（自己那份本地已经应用了）
+          mcast.notify(:pad, JSON.generate({ t: 'ops', ops: [op] }))
+        end
+
+      when 'presence'
+        if cid
+          info = { 'id' => cid, 'name' => name, 'color' => color,
+                   'cursor' => msg['cursor'].to_i, 'ts' => Time.now.to_i }
+          write_member(cid, info)
+          # 光标变化要立刻推给其他人；
+          # 组播不回环给发送方，所以自己也直接发一份
+          members = read_members
+          payload = JSON.generate({ t: 'members', members: members })
+          mcast.notify(:pad, payload)
+          Q.write(payload, true)
+        end
+
       else
-        # 原样透传字节 + echo 回自己 (weavo join 需要)
-        mcast.notify(:pad, chunk)
-        Q.write(chunk, true)
-        Q.log "notify #{chunk.bytesize}"
-        sleep 0.001
+        Q.log "[pad/ws] unknown msg #{msg['t']}"
       end
     rescue => e
-      Q.log("[pad/ws] relay err: #{e.message}")
+      Q.log "[pad/ws] err: #{e.class}: #{e.message}"
     end
     nil
   end
