@@ -12,6 +12,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
 const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+// WS 帧头长度 —— 子进程 STDIN 里每段 payload 前面带的头
+//
+//   [len u32 BE][rem u32 BE][payload]
+//
+//   len = 本次这段 payload 有多少字节（子进程读这么多）
+//   rem = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+//
+// 子进程 STDIN 是字节流，靠这个头还原帧边界 —— 没有它就会粘包。
+const FRAME_HEADER_LEN: usize = 8;
+
 pub struct Websocket {
     last_op: AtomicU8,
     base_on: Http,
@@ -246,6 +257,13 @@ impl Websocket {
 }
 
 impl Req for Websocket {
+    /// 读一段 payload，产出 [len u32 BE][rem u32 BE][payload]
+    ///
+    ///   len = 本次读到的 payload 字节数（子进程读这么多）
+    ///   rem = 整个 WS 帧的 payload 还剩多少（0 = 这一帧读完）
+    ///
+    /// 帧边界知识全部收在这里 —— call_bridge 只是把 read 出来的字节转发出去，
+    /// 不需要理解 [len][rem] 的含义，也不需要 remainder() 钩子。
     async fn read(&self, data: &mut [u8]) -> Result<Option<usize>, Error> {
         if self.remainder.load(Ordering::Relaxed) == 0 {
             let header_rst = self.read_head().await.and_then(|(len_opt, mask)| {
@@ -261,10 +279,14 @@ impl Req for Websocket {
                 return header_rst;
             }
         }
-        if self.remainder.load(Ordering::Relaxed) > data.len() {
-            self.base_on.read(data).await.and_then(|len_opt| {
+
+        // payload 缓冲区：留出 8 字节头的位置
+        let body = &mut data[FRAME_HEADER_LEN..];
+
+        if self.remainder.load(Ordering::Relaxed) > body.len() {
+            self.base_on.read(body).await.and_then(|len_opt| {
                 if let Some(len) = len_opt {
-                    self.unmask(data, len);
+                    self.unmask(body, len);
                     self.processed.fetch_add(len, Ordering::Relaxed);
                     self.remainder.fetch_sub(len, Ordering::Relaxed);
                 }
@@ -275,8 +297,8 @@ impl Req for Websocket {
             let mut buffer = vec![0u8; residue];
             self.base_on.read(&mut buffer).await.and_then(|len_opt| {
                 if let Some(len) = len_opt {
-                    data[0..len].copy_from_slice(buffer.as_slice());
-                    self.unmask(data, len);
+                    body[0..len].copy_from_slice(buffer.as_slice());
+                    self.unmask(body, len);
                     self.processed.fetch_add(len, Ordering::Relaxed);
                     self.remainder.fetch_sub(len, Ordering::Relaxed);
                 }
@@ -286,13 +308,23 @@ impl Req for Websocket {
                 Ok(len_opt)
             })
         }
+        .map(|len_opt| {
+            // 组帧：[len][rem][payload]
+            // len == 0 是 EOF（连接关闭），不是一帧 —— 不加头。
+            if let Some(len) = len_opt {
+                if len == 0 {
+                    return Some(0);
+                }
+                let rem = self.remainder.load(Ordering::Relaxed);
+                data[0..4].copy_from_slice(&(len as u32).to_be_bytes());
+                data[4..8].copy_from_slice(&(rem as u32).to_be_bytes());
+                return Some(len + FRAME_HEADER_LEN);
+            }
+            len_opt
+        })
     }
 
-    fn remainder(&self) -> Option<usize> {
-        Some(self.remainder.load(Ordering::Relaxed))
-    }
-
-     async fn write(&self, data: &[u8]) ->Result<usize, Error> {
+    async fn write(&self, data: &[u8]) ->Result<usize, Error> {
         let mut consumed = 0usize;
 
         // ---- 1. 补上次未收完的半帧 payload ----

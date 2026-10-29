@@ -39,11 +39,6 @@ impl Req for FileSync {
             })
     }
 
-    fn remainder(&self) -> Option<usize> {
-        //Some(self.file_length - self.file_processed.load(Ordering::Relaxed))
-        None
-    }
-
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         self.file_writer.lock().await.write(data).await
     }

@@ -38,10 +38,6 @@ impl Req for Tcp {
             })
     }
 
-    fn remainder(&self) -> Option<usize> {
-        None
-    }
-
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         let mut writer = self.req_writer.lock().await;
         let len = writer.write(data).await?;

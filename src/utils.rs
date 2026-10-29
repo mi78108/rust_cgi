@@ -101,7 +101,6 @@ pub mod core {
             &self,
             data: &mut [u8],
         ) -> impl Future<Output = Result<Option<usize>, Error>> + Send;
-        fn remainder(&self) -> Option<usize>;
         fn write(&self, data: &[u8]) -> impl Future<Output = Result<usize, Error>> + Send;
         fn close(&self) -> impl Future<Output = Result<(), Error>> + Send;
         fn env(&self) -> &HashMap<String, String>;
@@ -137,10 +136,6 @@ pub mod core {
                     }
                     Ok(Some(len))
                 })
-        }
-
-        fn remainder(&self) -> Option<usize> {
-            None
         }
 
         async fn write(&self, data: &[u8]) -> Result<usize, Error> {
@@ -261,26 +256,6 @@ pub mod core {
                 }
                 let mut remaining = &rst[0..read_len];
                 while remaining.len() > 0 {
-                    if let Some(rem_len) = reader_src.remainder() {
-                        let combined: u64 = ((read_len as u64) << 32) | (rem_len as u64);
-                        let len_info = combined.to_be_bytes();
-                        if let Ok(written_len) =
-                            writer_dst.write(&len_info).await.inspect_err(|e| {
-                                error!(
-                                    "Req src -> dst Write remainder failed (written: {}/{}/{}): {}",
-                                    read_len - remaining.len(),
-                                    read_len,
-                                    rem_len,
-                                    e
-                                )
-                            })
-                        {
-                            debug!("Req src remainder -> dst {}:{} bytes", written_len, rem_len);
-                        } else {
-                            break;
-                        }
-                    }
-
                     if let Ok(written_len) = writer_dst.write(remaining).await.inspect_err(|e| {
                         error!(
                             "Req src -> dst Write failed (written: {}/{}): {}",

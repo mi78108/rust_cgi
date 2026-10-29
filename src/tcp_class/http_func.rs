@@ -47,11 +47,6 @@ impl Req for Http {
         })
     }
 
-    fn remainder(&self) -> Option<usize> {
-        None
-        //Some(self.req_content_length - self.req_content_read.load(std::sync::atomic::Ordering::Acquire))
-    }
-
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         self.base_on.write(data).await
     }
