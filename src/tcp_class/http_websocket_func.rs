@@ -231,7 +231,9 @@ impl Websocket {
         let mask = self.payload_mask.load(Ordering::Relaxed).to_be_bytes();
         let read = self.processed.load(Ordering::Relaxed);
         for i in 0..len {
-            data[i] = data[i] ^ mask[read + i % 4];
+            // 掩码是 4 字节循环的，索引必须整体取模：(read + i) % 4
+            // 写成 mask[read + i % 4] 会在 read > 0 时越界 panic。
+            data[i] = data[i] ^ mask[(read + i) % 4];
         }
     }
 
@@ -297,7 +299,9 @@ impl Req for Websocket {
             let mut buffer = vec![0u8; residue];
             self.base_on.read(&mut buffer).await.and_then(|len_opt| {
                 if let Some(len) = len_opt {
-                    body[0..len].copy_from_slice(buffer.as_slice());
+                    // 只拷实际读到的 len 字节；buffer 是按 residue 开的，
+                    // 一次 read 不一定读满，直接拷整个 buffer 会长度不匹配 panic。
+                    body[0..len].copy_from_slice(&buffer[0..len]);
                     self.unmask(body, len);
                     self.processed.fetch_add(len, Ordering::Relaxed);
                     self.remainder.fetch_sub(len, Ordering::Relaxed);
