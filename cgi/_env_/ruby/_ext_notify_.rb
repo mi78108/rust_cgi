@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 #
 # Notify 抽象基类 + SocketNotify (Socket 实现) + FsNotify (文件系统 IPC 实现)
+#                          + TcpNotify (TCP 长连接, BDR 协议客户端)
 #
 # 定位：只负责「把字节从 A 搬到 B」，附带必要的路由元数据。
 #       不关心 payload 是什么 —— 永远是 ASCII-8BIT 原始字节，
@@ -12,6 +13,7 @@
 #                            + 通用逻辑 (subscriber dispatch、HEADER 拼解、mutex)
 #   class SocketNotify   -- Notify 子类：用 UDP multicast socket 收发
 #   class FsNotify       -- Notify 子类：用「每 channel 一个 token 文件」append 收发
+#   class TcpNotify      -- Notify 子类：用 TCP 长连接收发（BDR 协议）
 #
 # 子类需实现 (protected):
 #   do_send_packet(bytes)   -- 发 packet bytes
@@ -31,6 +33,10 @@
 #      主线程同步调用。
 #   5) meta / channel 拼进 HEADER 时不能含空格或 \n（用 \s+ 解析）——
 #      调用方自己保证，框架不校验。
+#   6) TCP 读 socket 时 IO#read(n) 可能返回少于 n 字节（TCP 分段），
+#      必须循环读满 —— 一次 read 就当拿齐了会解析出垃圾帧。
+#   7) BDR 的连接 id 0 是**合法**的（第一个连接就分到 0）。
+#      判断"帧里有没有 id"要用 nil，不能用 != 0。
 #
 # 协议：HEADER 行 + "\n" + PAYLOAD（ASCII-8BIT 原始字节）
 #   HEADER (短 key，省字节):
@@ -43,16 +49,20 @@
 #   因为 payload 不解析，channel / seq / pid 这些路由元数据必须在 HEADER 里，
 #   否则二进制 payload 里没法挖字段。
 #
+#   ★ TcpNotify 是例外 —— 它走 BDR 二进制帧协议，没有 HEADER 行。
+#
 # Message 字段:
 #   kind     — 'msg' | 'hb'
 #   name     — 实例名（发送方传入的 name）        ← header n=
 #   host     — 发送方主机名                        ← header h=
 #   pid      — 发送方进程 pid                      ← header p=
+#              ★ TcpNotify 复用这个字段放**连接 id**（BDR 没有 pid 概念）
 #   seq      — 发送方递增序号                      ← header s=
 #   from     — 发送方标识（socket 是 "ip:port"）    ← 来自 socket 地址，不在 header
 #   channel  — Symbol                             ← header c=
 #   data     — ★ ASCII-8BIT 原始字节               ← payload
 #   header   — 原始 HEADER 行（读自定义 meta 用 msg.header）
+#              ★ TcpNotify 里是 "id=<连接id>" 形式
 #
 # 用法：
 #   m = SocketNotify.new('alice')              # 自动 start
@@ -67,8 +77,8 @@
 #
 #   m.notify(:chat, 'hi')                       # 发（String → UTF-8 bytes）
 #   m.notify(:chat, {a: 1}.to_json)             # 发 JSON（自己序列化）
-#   m.notify(:chat, some_binary)               # 发任意二进制
-#   m.notify(:chat, payload, tag: 'x')         # 附加自定义 meta 进 HEADER
+#   m.notify(:chat, payload)                    # 发任意二进制
+#   m.notify(:chat, payload, tag: 'x')          # 附加自定义 meta 进 HEADER
 #
 #   m.stop
 #
@@ -76,6 +86,16 @@
 #   f.notify(:file) { |msg| puts msg.data }
 #   f.notify(:file, 'hello')
 #   f.stop                                     # 删自己的 token 文件
+#
+#   t = TcpNotify.new('alice', channel: 'room1')
+#   t.notify(:room1) { |msg| puts msg.data }
+#   t.notify(:room1, 'hello')
+#   t.id                                       # 本连接的 id
+#   t.stop
+#
+#   host/port 不传时: 127.0.0.1 + ENV['Cgi_Port']（spider 注入的自己的监听端口），
+#   再默认 3000。要连别处就显式传:
+#     TcpNotify.new('alice', host: '10.0.0.9', port: 9999, channel: 'room1')
 
 require 'socket'
 require 'ipaddr'
@@ -149,11 +169,24 @@ class Notify
   # @subs 里每项是 [cb, want_echo] —— want_echo=false 的订阅跳过自己发的消息
   def dispatch_msg(msg)
     subs = @notify_lock.synchronize { (@subs[msg.channel] || []) + (@subs[:default] || []) }
-    own = msg.pid.to_i == Process.pid
+    own = own_message?(msg)
     subs.each do |cb, want_echo|
       next if own && !want_echo
       cb.call(msg) rescue warn("[#{@name}] notify callback error: #{$!.class}: #{$!.message}")
     end
+  end
+
+  # 这条消息是不是「自己发的」——
+  # dispatch_msg 用它决定 want_echo=false 的订阅要不要跳过。
+  #
+  # 默认按 pid 比对：SocketNotify / FsNotify 都是「同进程 = 自己发的」模型
+  # （组播订阅时 want_echo=false 靠这个跳过回环）。
+  #
+  # TcpNotify 要覆盖成按**连接 id** 比对 —— BDR 协议里发送者身份是
+  # 连接 id，同一个进程可以开多个连接（pid 相同但 id 不同），
+  # 用 pid 比对会把别的连接的广播也误判成「自己的」。
+  def own_message?(msg)
+    msg.pid.to_i == Process.pid
   end
 
  # payload 一律当 bytes，不判断类型 / 不编码转换。
@@ -464,5 +497,299 @@ class FsNotify < Notify
       end
     end
     removed.each { |_| }   # 暂不处理删除事件
+  end
+end
+
+# ============================================================
+# TcpNotify — TCP 长连接广播客户端（对齐 rust TcpBroadcast 的 BDR 协议）
+#
+# 跟 SocketNotify / FsNotify 的区别:
+#   SocketNotify — UDP 组播, 进程间广播, 无中心服务器
+#   FsNotify     — 文件 IPC, 进程间广播, 无中心服务器
+#   TcpNotify    — TCP 长连接, **有**中心服务器 (spider), 消息由服务端转发
+#
+# BDR 协议（跟 src/tcp_class/tcp_broadcast_func.rs 严格一致）:
+#
+#   握手（客户端 -> 服务端）:
+#     [0x89 'B' 'R' 'D' 0x0d 0x0a 0x1a 0x00]   8 字节定长魔数
+#     + "<channel>\n"                          变长频道名, \n 结尾
+#
+#   服务端 -> 客户端（握手确认）:
+#     [len u32 BE][id 8 字节]                  len == 8
+#     id = 本连接的连接 id（u64 大端）—— 客户端收到这条 = 通讯建立
+#
+#   客户端 -> 服务端:
+#     [len u32 BE][payload]                    len == payload.bytesize
+#
+#   服务端 -> 订阅者（广播）:
+#     [len u32 BE][id 8 字节][payload]          len == 8 + payload.bytesize
+#     id = 发送者的连接 id
+#
+# 为什么帧里带长度前缀:
+#   TCP 是字节流, 直接广播原始字节的话各客户端的切分点可能不同。
+#   长度前缀保证所有订阅者收到的字节流完全一致。
+#
+# 为什么 id 定长 8 字节:
+#   客户端按固定偏移就能把 id 和 payload 切开, 不需要额外长度前缀。
+#
+# 回环语义:
+#   Rust 端用 tokio::broadcast, 消息发给该频道**所有**订阅者,
+#   **包括发送者自己**。TcpNotify 保持一致 —— 自己发的自己也收得到。
+#   want_echo=false 时按**连接 id** 跳过自己发的。
+#   （不能用 pid 判断: 同一个 Ruby 进程可以开多条 TCP 连接, pid 相同但连接不同）
+#
+# 用法:
+#   t = TcpNotify.new('alice', host: '127.0.0.1', port: 3000, channel: 'room1')
+#   t.notify(:room1) { |msg| puts msg.data.force_encoding('UTF-8') }
+#   t.notify(:room1, 'hello')                 # 发
+#   t.id                                       # 本连接的 id (u64)
+#   t.stop
+#
+# ★ 频道在**握手时**就定死了 —— 一条连接只有一个频道。
+#   notify(:ch) 的 :ch 只用于本地订阅匹配, 不会发给服务器。
+#   要发到别的频道, 得另开一条连接。
+# ============================================================
+class TcpNotify < Notify
+  # 握手魔数 —— 8 字节定长, 必须跟 rust 侧一致
+  MAGIC = [0x89, 0x42, 0x52, 0x44, 0x0d, 0x0a, 0x1a, 0x00].pack('C*').freeze
+
+  MAGIC_LEN   = 8
+  LEN_PREFIX  = 4          # 长度前缀字节数
+  ID_LEN      = 8          # 连接 id 字节数（u64 大端）
+  MAX_MSG_LEN = 16 * 1024 * 1024   # 单条消息上限, 跟 rust 侧一致
+
+  DEFAULT_HOST = '127.0.0.1'
+  DEFAULT_PORT = 3000
+
+  # 服务端地址
+  #
+  #   默认 127.0.0.1 + Cgi_Port —— spider 注入的自己的监听端口。
+  #   主机名写死 127.0.0.1: BDR 是**本机进程之间**的连接,
+  #   而 spider 的 bind 地址可能是 0.0.0.0（监听所有网卡）——
+  #   那不是可连接的目标。127.0.0.1 一定通。
+  #
+  #   要连别处就显式传 host/port:
+  #     TcpNotify.new('alice', host: '10.0.0.9', port: 9999, channel: 'room1')
+  ENV_CGI_PORT = 'Cgi_Port'
+
+  attr_reader :host, :port, :channel, :id
+
+  # 构造 = 连接 + 握手 + 起读线程
+  #
+  # @param name    实例名（只用于日志和 header）
+  # @param host    服务端地址（默认 127.0.0.1）
+  # @param port    服务端端口（默认取 ENV['Cgi_Port']，再默认 3000）
+  # @param channel 订阅的频道名（握手时定死）
+  def initialize(name, host: nil, port: nil, channel: 'default')
+    raise ArgumentError, 'TcpNotify needs name' if name.nil? || name.empty?
+    raise ArgumentError, 'TcpNotify needs channel' if channel.nil? || channel.to_s.empty?
+
+    super(name)
+    auto_host, auto_port = resolve_endpoint
+    @host    = host || auto_host
+    @port    = port || auto_port
+    @channel = channel.to_s
+    @id      = nil
+    @sock    = nil
+    @stop_pipe_r = nil
+    @stop_pipe_w = nil
+
+    connect!
+  end
+
+  # 连接 + 握手 + 起读线程
+  #
+  # 断了之后可以手动调这个重连（不自动重连 —— 后台悄悄重连很难排查）。
+  def connect!
+    close_socket
+    @sock = TCPSocket.new(@host, @port)
+
+    # ---- 握手: 魔数 + 频道名 ----
+    @sock.write(MAGIC + @channel.to_s.b + "\n")
+
+    # ---- 读服务端的连接 id: [len u32 BE][id 8 字节] ----
+    head = read_exactly(LEN_PREFIX)
+    raise IOError, 'BDR handshake EOF at len prefix' if head.nil?
+    (len,) = head.unpack('N')
+    raise IOError, "BDR handshake bad id len #{len} (expect #{ID_LEN})" if len != ID_LEN
+
+    id_raw = read_exactly(ID_LEN)
+    raise IOError, 'BDR handshake EOF at id' if id_raw.nil?
+    @id, = id_raw.unpack('Q>')   # Q> = u64 大端
+
+    # ---- 起读线程 ----
+    @stop_pipe_r, @stop_pipe_w = IO.pipe
+    @running = true
+    @loop_thread = Thread.new { loop_main }
+    @loop_thread.name = "TcpNotify-#{@name}"
+    @loop_thread.abort_on_exception = false
+
+    warn "[#{@name}] up id=#{@id} host=#{@host}:#{@port} channel=#{@channel}"
+    self
+  end
+
+  # 断开并重连 —— 保留已有的订阅
+  def reconnect!
+    connect!
+  end
+
+  def connected?
+    @running && !@sock.nil? && !@sock.closed?
+  end
+
+  def stop
+    return self unless @running
+    @running = false
+    @stop_pipe_w&.write_nonblock('.') rescue nil
+    @loop_thread&.join(2)
+    close_socket
+    warn "[#{@name}] down id=#{@id}"
+    self
+  end
+
+  # 消息来源标识 —— BDR 里没有 "host:port" 这种 from, 用连接 id
+  def peer_id; @id; end
+
+  protected
+
+  # TcpNotify 不走 HEADER 协议 —— BDR 是二进制帧, 没有 header 行。
+  # header_fields 只在 build_packet 里用, 这里用不到。
+  def header_fields; []; end
+
+  def do_send_packet(packet)
+    @sock.write(packet)
+  end
+
+  # BDR 没有 "HEADER + payload" 这一层 —— 帧是纯二进制。
+  # 发送路径直接写 [len u32 BE][payload]。
+  def send_msg(channel, payload, meta = {})
+    body = payload_bytes(payload)
+    return self if body.bytesize > MAX_MSG_LEN
+    frame = [body.bytesize].pack('N') + body
+    @send_mutex.synchronize { do_send_packet(frame) }
+    self
+  end
+
+  # BDR 不需要 —— 收到的是二进制帧, 直接在读线程里解析。
+  def parse_packet(_data, _addr); raise NotImplementedError; end
+
+  # 业务消息分发 —— 覆盖基类。
+  #
+  # 基类用 `msg.pid == Process.pid` 判断"自己发的", 但 BDR 的发送者身份是
+  # **连接 id**: 同一个 Ruby 进程可以开多条 TCP 连接, pid 相同但连接不同,
+  # 按 pid 判断会误杀别的连接发来的消息。
+  #
+  # 这里的 own = (帧里的 id == 本连接的 id)。
+  #
+  # ★ 不能用 `id != 0` 来判断"帧里有没有 id" —— 连接 id 0 是**合法**的
+  #   (第一个连接就分到 0)。要区分"没有 id"得用 nil。
+  def dispatch_msg(msg)
+    subs = @notify_lock.synchronize { (@subs[msg.channel] || []) + (@subs[:default] || []) }
+    from_id = msg.pid
+    own = !from_id.nil? && !@id.nil? && from_id.to_i == @id.to_i
+    subs.each do |cb, want_echo|
+      next if own && !want_echo
+      cb.call(msg) rescue warn("[#{@name}] notify callback error: #{$!.class}: #{$!.message}")
+    end
+  end
+
+  private
+
+  # 解析服务端地址 —— 返回 [host, port]
+  #
+  # 默认: 127.0.0.1 + Cgi_Port（spider 注入的自己的监听端口）
+  # 显式传的 host/port 优先（见 initialize）。
+  def resolve_endpoint
+    [DEFAULT_HOST, injected_port || DEFAULT_PORT]
+  end
+
+  # spider 注入的端口 (Cgi_Port) —— 没有或非法就 nil
+  def injected_port
+    v = ENV[ENV_CGI_PORT].to_s.strip
+    return nil if v.empty?
+    n = v.to_i
+    n > 0 ? n : nil
+  end
+
+  # 读线程主循环 —— IO.select 挂在 socket + stop pipe 上
+  def loop_main
+    while @running
+      rd, = IO.select([@sock, @stop_pipe_r], nil, nil, 0.5)
+      rd&.each do |io|
+        break if io.equal?(@stop_pipe_r)
+        handle_read(io)
+      end
+    end
+  rescue => e
+    warn "[#{@name}] loop crashed: #{e.class}: #{e.message}" if @running
+  ensure
+    @running = false
+  end
+
+  # 读一帧: [len u32 BE][id 8 字节][payload]
+  #
+  # id 和 payload 一起广播 —— 客户端按固定偏移切。
+  # 握手确认帧是 [len][id] 没有 payload, 这里靠 len == ID_LEN 区分。
+  def handle_read(io)
+    head = read_exactly(LEN_PREFIX)
+    return if head.nil?                     # EOF —— 对端关闭
+    (len,) = head.unpack('N')
+
+    if len < ID_LEN
+      warn "[#{@name}] bad frame len #{len} (< #{ID_LEN})"
+      return
+    end
+
+    body = read_exactly(len)
+    return if body.nil?                     # 帧不完整 —— 丢弃
+
+    id_raw = body[0, ID_LEN]
+    payload = body[ID_LEN..] || ''.b
+    (from_id,) = id_raw.unpack('Q>')
+
+    # id 塞进 header（按约定不扩展 Message 结构, 应用层自己读）
+    # header 用 "id=<n>" 的形式, 跟自定义 meta 一个路子
+    header = "id=#{from_id}"
+    ch = (@channel || 'default').to_sym
+
+    msg = Message.new(
+      kind:    'msg',
+      name:    nil,
+      host:    nil,
+      pid:     from_id,        # 借用 pid 字段放连接 id（own 判断要用）
+      seq:     nil,
+      from:    from_id.to_s,
+      channel: ch,
+      data:    payload,
+      header:  header,
+    )
+    dispatch_msg(msg)
+  rescue IOError, Errno::ECONNRESET, Errno::EPIPE => e
+    warn "[#{@name}] read failed: #{e.class}: #{e.message}" if @running
+    @running = false
+  end
+
+  # 读满 n 字节 —— EOF 返回 nil
+  #
+  # IO#read(n) 在 socket 上可能返回少于 n 字节（TCP 分段），
+  # 所以必须循环读满。
+  def read_exactly(n)
+    buf = ''.dup.force_encoding(Encoding::ASCII_8BIT)
+    while buf.bytesize < n
+      chunk = @sock.read(n - buf.bytesize)
+      return nil if chunk.nil?      # EOF
+      break if chunk.empty?
+      buf << chunk
+    end
+    buf
+  end
+
+  def close_socket
+    @stop_pipe_w&.close rescue nil
+    @stop_pipe_r&.close rescue nil
+    @stop_pipe_w = nil
+    @stop_pipe_r = nil
+    @sock&.close rescue nil
+    @sock = nil
   end
 end
