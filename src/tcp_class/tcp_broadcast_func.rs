@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io::Error;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -50,26 +49,20 @@ fn channels() -> &'static Channels {
 /// 一个已连接的客户端
 #[derive(Debug, Clone)]
 pub struct ConnInfo {
-    /// 连接名（uuid v4 文本，36 字符）
-    #[allow(dead_code)]
-    pub uuid: String,
     /// 所在频道
     pub channel: String,
 }
 
-/// 全局连接表: 连接 id -> 连接信息
+/// 全局连接表: uuid -> 连接信息
 ///
-/// 用来查"某频道有哪些成员"，连接断开时移除。
-type Connections = Mutex<HashMap<u64, ConnInfo>>;
+/// key 就是 uuid（连接的唯一身份），所以 ConnInfo 里不再重复存一份。
+type Connections = Mutex<HashMap<String, ConnInfo>>;
 
 static CONNECTIONS: OnceLock<Connections> = OnceLock::new();
 
 fn connections() -> &'static Connections {
     CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
-/// 连接 id —— 只为了日志能区分是哪个连接
-static CONN_ID: AtomicU64 = AtomicU64::new(0);
 
 /// 生成 UUID v4（文本格式 36 字符）
 ///
@@ -94,6 +87,11 @@ fn gen_uuid() -> String {
         out.push(hex[(b & 0x0f) as usize] as char);
     }
     out
+}
+
+/// 日志里用的短标识 —— uuid 前 8 字符，够定位且不占太多日志宽度
+fn short_id(uuid: &str) -> &str {
+    &uuid[..8.min(uuid.len())]
 }
 
 /// TCP 广播通道
@@ -157,8 +155,6 @@ impl TcpBroadcast {
 
     /// 主流程：握手 -> 订阅频道 -> 收发循环
     pub async fn run(stream: Tcp) -> Result<bool, Error> {
-        let id = CONN_ID.fetch_add(1, Ordering::Relaxed);
-
         // ---- 1. 读握手头 + 频道名 ----
         let channel_name = {
             let mut reader = stream.req_reader.lock().await;
@@ -168,11 +164,11 @@ impl TcpBroadcast {
             // —— 那个函数内部会再 lock 同一个 mutex，死锁。
             let mut head = [0u8; HEAD_LEN];
             if reader.read_exact(&mut head).await.is_err() {
-                debug!("TcpBroadcast#{} handshake EOF at head", id);
+                debug!("TcpBroadcast handshake EOF at head");
                 return Ok(false);
             }
             if head != MAGIC {
-                debug!("TcpBroadcast#{} bad magic {:?}", id, head);
+                debug!("TcpBroadcast bad magic {:?}", head);
                 return Ok(false);
             }
 
@@ -180,7 +176,7 @@ impl TcpBroadcast {
             let mut line = Vec::new();
             let n = reader.read_until(b'\n', &mut line).await?;
             if n == 0 {
-                debug!("TcpBroadcast#{} handshake EOF at channel name", id);
+                debug!("TcpBroadcast handshake EOF at channel name");
                 return Ok(false);
             }
             // read_until 会把 \n 也读进来，去掉尾部换行
@@ -188,14 +184,19 @@ impl TcpBroadcast {
                 .trim_end_matches(['\r', '\n'])
                 .to_string();
             if name.is_empty() {
-                debug!("TcpBroadcast#{} empty channel name", id);
+                debug!("TcpBroadcast empty channel name");
                 return Ok(false);
             }
-            debug!("TcpBroadcast#{} handshake ok channel={}", id, name);
+            debug!("TcpBroadcast handshake ok channel={}", name);
             name
         };
 
-        // ---- 2. 订阅频道 ----
+        // ---- 2. 生成连接名（uuid）—— 连接的唯一身份 ----
+        //
+        // 后面所有日志、连接表、广播消息里的 id 都用它，不再另起一套编号。
+        let uuid = gen_uuid();
+
+        // ---- 3. 订阅频道 ----
         let tx = {
             let mut map = channels().lock().await;
             map.entry(channel_name.clone())
@@ -208,48 +209,46 @@ impl TcpBroadcast {
         };
         let rx = tx.subscribe();
         info!(
-            "TcpBroadcast#{} join channel={} receivers={}",
-            id,
+            "TcpBroadcast[{}] join channel={} receivers={}",
+            short_id(&uuid),
             channel_name,
             tx.receiver_count()
         );
 
-        // ---- 3. 下发连接名（uuid）—— 表示通讯建立 ----
+        // ---- 4. 下发连接名（uuid）—— 表示通讯建立 ----
         //
         // 客户端收到这条消息 = 握手完成、连接可用。
         // 只发给这个连接自己（不广播给频道里的其他人）。
         //
         // 必须在写任务启动**之前**写 —— 否则跟写任务并发写 socket，字节顺序会乱。
-        let uuid = gen_uuid();
         {
             let mut frame = Vec::with_capacity(LEN_PREFIX + UUID_LEN);
             frame.extend_from_slice(&(UUID_LEN as u32).to_be_bytes());
             frame.extend_from_slice(uuid.as_bytes());
             if let Err(e) = stream.write(&frame).await {
-                error!("TcpBroadcast#{} send uuid failed {:?}", id, e);
+                error!("TcpBroadcast[{}] send uuid failed {:?}", short_id(&uuid), e);
                 return Ok(false);
             }
             if let Err(e) = stream.req_writer.lock().await.flush().await {
-                error!("TcpBroadcast#{} flush uuid failed {:?}", id, e);
+                error!("TcpBroadcast[{}] flush uuid failed {:?}", short_id(&uuid), e);
                 return Ok(false);
             }
         }
-        info!("TcpBroadcast#{} established name={}", id, uuid);
+        info!("TcpBroadcast[{}] established", short_id(&uuid));
 
         // ---- 4. 保存连接信息（查成员列表用），断开时移除 ----
         {
             let mut map = connections().lock().await;
             map.insert(
-                id,
+                uuid.clone(),
                 ConnInfo {
-                    uuid: uuid.clone(),
                     channel: channel_name.clone(),
                 },
             );
             let members = map.values().filter(|c| c.channel == channel_name).count();
             debug!(
-                "TcpBroadcast#{} channel={} members={}",
-                id, channel_name, members
+                "TcpBroadcast[{}] channel={} members={}",
+                short_id(&uuid), channel_name, members
             );
         }
 
@@ -259,12 +258,13 @@ impl TcpBroadcast {
             let tcp = Arc::clone(&tcp);
             let tx = tx.clone();
             let uuid = uuid.clone();
-            tokio::spawn(async move { read_loop(tcp, tx, id, uuid).await })
+            tokio::spawn(async move { read_loop(tcp, tx, uuid).await })
         });
 
         let mut writer_task = Some({
             let tcp = Arc::clone(&tcp);
-            tokio::spawn(async move { write_loop(tcp, rx, id).await })
+            let uuid = uuid.clone();
+            tokio::spawn(async move { write_loop(tcp, rx, uuid).await })
         });
 
         // 任一方向结束就整体结束
@@ -297,14 +297,14 @@ impl TcpBroadcast {
         // 6a. 移除连接记录
         {
             let mut map = connections().lock().await;
-            map.remove(&id);
+            map.remove(&uuid);
         }
         // 6b. 没人订阅了就删掉 channel
         {
             let mut map = channels().lock().await;
             if tx.receiver_count() == 0 {
                 map.remove(&channel_name);
-                debug!("TcpBroadcast#{} channel {} removed", id, channel_name);
+                debug!("TcpBroadcast[{}] channel {} removed", short_id(&uuid), channel_name);
             }
         }
         let _ = tcp.close().await;
@@ -320,12 +320,7 @@ impl TcpBroadcast {
 /// 订阅者据此知道每条消息是谁发的。
 ///
 /// **按固定大小分块读写**（用 env 里的 Req_Buffer_Size），不一次性按 len 分配大缓冲。
-async fn read_loop(
-    tcp: Arc<Tcp>,
-    tx: broadcast::Sender<Arc<Vec<u8>>>,
-    id: u64,
-    uuid: String,
-) {
+async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uuid: String) {
     let buf_size = buffer_size(&tcp);
     let mut buf = vec![0u8; buf_size];
 
@@ -335,11 +330,11 @@ async fn read_loop(
         match read_full(&tcp, &mut len_bytes).await {
             Ok(true) => {}
             Ok(false) => {
-                debug!("TcpBroadcast#{} read EOF at len prefix", id);
+                debug!("TcpBroadcast[{}] read EOF at len prefix", short_id(&uuid));
                 break;
             }
             Err(e) => {
-                debug!("TcpBroadcast#{} read len err {:?}", id, e);
+                debug!("TcpBroadcast[{}] read len err {:?}", short_id(&uuid), e);
                 break;
             }
         }
@@ -347,8 +342,8 @@ async fn read_loop(
 
         if len > MAX_MSG_LEN {
             error!(
-                "TcpBroadcast#{} msg too large {} > {}, drop connection",
-                id, len, MAX_MSG_LEN
+                "TcpBroadcast[{}] msg too large {} > {}, drop connection",
+                short_id(&uuid), len, MAX_MSG_LEN
             );
             break;
         }
@@ -367,13 +362,13 @@ async fn read_loop(
                 Ok(false) => {
                     // 不完整的消息 —— 丢弃（连接断了，TCP 语义下这条消息不完整）
                     debug!(
-                        "TcpBroadcast#{} incomplete msg, dropped ({} bytes left)",
-                        id, remaining
+                        "TcpBroadcast[{}] incomplete msg, dropped ({} bytes left)",
+                        short_id(&uuid), remaining
                     );
                     return;
                 }
                 Err(e) => {
-                    debug!("TcpBroadcast#{} read payload err {:?}", id, e);
+                    debug!("TcpBroadcast[{}] read payload err {:?}", short_id(&uuid), e);
                     return;
                 }
             }
@@ -394,23 +389,22 @@ async fn read_loop(
         match tx.send(Arc::new(frame)) {
             Ok(n) => {
                 debug!(
-                    "TcpBroadcast#{} broadcast {} bytes (from {}) to {} peers",
-                    id,
+                    "TcpBroadcast[{}] broadcast {} bytes to {} peers",
+                    short_id(&uuid),
                     payload.len(),
-                    uuid,
                     n
                 );
             }
             Err(e) => {
                 // 一个订阅者都没有 —— 频道空了，消息丢掉无所谓
-                debug!("TcpBroadcast#{} broadcast failed (no peer): {}", id, e);
+                debug!("TcpBroadcast[{}] broadcast failed (no peer): {}", short_id(&uuid), e);
             }
         }
     }
 }
 
 /// 写任务：从频道收消息 -> 写 socket
-async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, id: u64) {
+async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, uuid: String) {
     let buf_size = buffer_size(&tcp);
 
     loop {
@@ -424,12 +418,12 @@ async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, id
                     match tcp.write(&frame[off..end]).await {
                         Ok(n) if n > 0 => off += n,
                         Ok(_) => {
-                            debug!("TcpBroadcast#{} write zero", id);
+                            debug!("TcpBroadcast[{}] write zero", short_id(&uuid));
                             failed = true;
                             break;
                         }
                         Err(e) => {
-                            debug!("TcpBroadcast#{} write err {:?}", id, e);
+                            debug!("TcpBroadcast[{}] write err {:?}", short_id(&uuid), e);
                             failed = true;
                             break;
                         }
@@ -444,7 +438,7 @@ async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, id
                 // 注意: 这里单独 lock req_writer, 不能跟 write 一起 lock ——
                 // Tcp::write 内部已经 lock 了同一个 mutex, 重复 lock 会死锁。
                 if let Err(e) = tcp.req_writer.lock().await.flush().await {
-                    debug!("TcpBroadcast#{} flush err {:?}", id, e);
+                    debug!("TcpBroadcast[{}] flush err {:?}", short_id(&uuid), e);
                     return;
                 }
             }
@@ -452,13 +446,13 @@ async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, id
                 // TCP 是字节流，丢消息会导致上层解析错乱 —— 不能像"可丢"那样继续。
                 // 直接断开，让客户端重连并重新同步。
                 error!(
-                    "TcpBroadcast#{} lagged {} msgs, closing (byte stream cannot lose data)",
-                    id, n
+                    "TcpBroadcast[{}] lagged {} msgs, closing (byte stream cannot lose data)",
+                    short_id(&uuid), n
                 );
                 return;
             }
             Err(broadcast::error::RecvError::Closed) => {
-                debug!("TcpBroadcast#{} channel closed", id);
+                debug!("TcpBroadcast[{}] channel closed", short_id(&uuid));
                 return;
             }
         }
