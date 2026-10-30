@@ -353,58 +353,58 @@ impl Websocket {
         // 这里收到的 opcode 是纯 opcode（不含 fin/rsv），统一在这里补上 fin=1。
         // 服务端发出去的帧都是完整帧，不做分片。
         let b0 = ((fin as u8) << 7) | (opcode & 0x0f);
-        if let Ok(_) = self.base_on.write(&[b0]).await {
-            //B2=  +mask+len*7
-            let len = data.len();
-            debug!("websocket ready to write len {}", data.len());
-            match len {
-                n if n < 126 => {
-                    self.base_on.write(&[len as u8]).await?;
-                }
-                n if n >= 126 && n < (2usize).pow(16) => {
-                    self.base_on.write(&[126]).await?;
-                    // 2byte
-                    self.base_on
-                        .write(&[(len >> 8) as u8, len as u8])
-                        .await
-                        .unwrap();
-                }
-                n if n >= (2usize).pow(16) => {
-                    // 8byte
-                    //
-                    // 上界就是 usize::MAX —— usize 不可能 >= 2^64,
-                    // 所以原来的 `&& n < (2usize).pow(64)` 是死条件,
-                    // 而且 (2usize).pow(64) 本身就溢出 (2^64 > usize::MAX):
-                    //   debug build  -> panic (attempt to multiply with overflow)
-                    //   release build -> 静默 wrap 成 0, 于是大帧永远落到
-                    //                   下面的 _ => FileTooLarge, 发不出去
-                    let mut len_bytes = [0u8; 9];
-                    len_bytes[0] = 127;
-                    len_bytes[1..9].copy_from_slice(&len.to_be_bytes());
-                    self.base_on.write(&len_bytes).await?;
-                    //self.base_on.write(&[127]).await.unwrap();
-                    // (0..=7).for_each(|v| {
-                    //     self.base_on.write(&[(len >> 8 * (7 - v)) as u8]).await.unwrap();
-                    // });
-                }
-                _ => {
-                    return Err(Error::from(ErrorKind::FileTooLarge));
-                }
+        //B2=  +mask+len*7
+        let len = data.len();
+        debug!("websocket ready to write len {}", data.len());
+
+        // 帧头一次算好 —— [len 形式][len 字节...]
+        //
+        // 上界就是 usize::MAX —— usize 不可能 >= 2^64,
+        // 所以原来的 `&& n < (2usize).pow(64)` 是死条件,
+        // 而且 (2usize).pow(64) 本身就溢出 (2^64 > usize::MAX):
+        //   debug build  -> panic (attempt to multiply with overflow)
+        //   release build -> 静默 wrap 成 0, 于是大帧永远落到
+        //                   下面的 _ => FileTooLarge, 发不出去
+        let mut head = [0u8; 10];
+        let head_len = match len {
+            n if n < 126 => {
+                head[0] = len as u8;
+                1
             }
-            self.base_on.base_on.write(data).await?;
-            // 必须在这里 flush：控制帧(pong/close)是直接写的，
-            // 不 flush 的话会一直留在缓冲区，直到别的地方碰巧写数据才发出去。
-            self.base_on
-                .base_on
-                .req_writer
-                .lock()
-                .await
-                .flush()
-                .await?;
-            Ok(len)
-        } else {
-            Err(Error::from(ErrorKind::WriteZero))
-        }
+            n if n < (2usize).pow(16) => {
+                head[0] = 126;
+                head[1] = (len >> 8) as u8;
+                head[2] = len as u8;
+                3
+            }
+            n => {
+                head[0] = 127;
+                head[1..9].copy_from_slice(&n.to_be_bytes());
+                9
+            }
+        };
+
+        // ★ 整帧在**同一次持锁**里写出去 —— 两个原因：
+        //
+        //   1. 帧头和 payload 必须连续，中间不能插进别的帧。
+        //      原来头(1~3 次 write)和 payload(1 次 write) 各抢一次锁，
+        //      期间 pong/close 帧可能插进来 -> 帧被撕裂。
+        //
+        //   2. payload 必须**写满**。write() 只保证写一部分：
+        //      底层是 tokio BufWriter(8KB)，大 payload 走直通路径 =
+        //      单次 write() 系统调用，写多少完全看内核 socket 缓冲。
+        //      帧长超过 sndbuf 时 write() 静默少写，帧头声明的长度
+        //      和实际发出的字节数对不上 -> 客户端解析错位 -> 直接 RST。
+        //      write_all 内部循环补写直到写完。
+        let mut writer = self.base_on.base_on.req_writer.lock().await;
+        writer.write_all(&[b0]).await?;
+        writer.write_all(&head[..head_len]).await?;
+        writer.write_all(data).await?;
+        // 必须在这里 flush：控制帧(pong/close)是直接写的，
+        // 不 flush 的话会一直留在缓冲区，直到别的地方碰巧写数据才发出去。
+        writer.flush().await?;
+        drop(writer);
+        Ok(len)
     }
 
     fn unmask(&self, data: &mut [u8], len: usize) {
