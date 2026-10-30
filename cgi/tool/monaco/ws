@@ -363,8 +363,8 @@ Q.ws do |req, rsp|
         rsp.ws_write(JSON.generate({ t: 'members', members: members }))
 
       when 'sync'
-        ops = read_ops# .first(1500)
-        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops, total: ops.size }).force_encoding(Encoding::UTF_8))
+        ops = read_ops
+        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops, total: ops.size }))
 
       when 'seed'
         # ★ 用本地文件内容**替换当前 doc**。
