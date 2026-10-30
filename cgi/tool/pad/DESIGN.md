@@ -92,6 +92,40 @@ RGA 的 op 满足交换律 + 幂等：
 
 前提：op 到达所有副本。服务器转发 + 新客户端拿全量 log，保证这点。
 
+## 多文档（doc）
+
+`/tool/pad?doc=xxx` —— 不同 doc 是**完全独立的空间**：
+
+- 独立的 op log：`$SPIDER_DATA/pad/<docId>/ops.log`
+- 独立的成员表：`$SPIDER_DATA/pad/<docId>/members/`
+- 独立的 BDR 频道：`pad-<docId>`（**必须分频道**，否则不同 doc 的 op 会互相串）
+
+**doc id 怎么传的**：
+
+```
+页面  /tool/pad?doc=myproj          → 前端从 location.search 读
+WS    /tool/pad/ws?doc=myproj       → 前端透传
+后端  req.param('doc')              → spider 在解析 query 时就把
+                                       Req_Param_doc 注入了 WS 请求
+```
+
+页面本身的路由不变（`/tool/pad` 还是走 `cgi/tool/pad/index` → `cgi/pub`，
+query 不影响脚本选择）。
+
+**doc id 必须严格校验** —— 它会拼进**文件路径**和**频道名**：
+
+```ruby
+DOC_ID_RE = /\A[A-Za-z0-9_-]{1,64}\z/
+```
+
+只允许字母/数字/下划线/连字符。放开的话 `?doc=../../etc` 能目录穿越、
+`?doc=a/b` 能写进子目录。**非法 / 没给 → 退回 `default`**。
+
+频道表不会泄漏 —— Rust 侧本来就有「没人订阅了就删掉 channel」的逻辑
+（`tcp_broadcast_func.rs` 的 6b）。
+
+---
+
 ## 消息格式（JSON over WS text frame）
 
 客户端 → 服务器：
@@ -206,10 +240,15 @@ $SPIDER_DATA/pad/<docId>/ops.log      # 每行一个 op (JSON)
 $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一份
 ```
 
+`<docId>` 来自 URL 的 `?doc=` 参数（没给就是 `default`）。
+
 - ops.log 只追加，不重写 → 简单、无锁（单进程 append 原子）
 - 成员表每个 ws 进程写自己那一份？不行，会互相覆盖。
   → 用 **每客户端一个文件**：`members/<clientId>.json`，
     进程退出时删掉自己的。谁在线 = 目录里有哪些文件。
+- 这些路径是**每连接**算出来的（全局变量 `$ops_log` / `$mem_dir`）——
+  每个 WS 连接 = 一个独立 ruby 进程，一个进程只服务一个 doc，
+  所以进程内用全局变量不会有并发问题。
 
 ### 转发
 

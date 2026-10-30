@@ -57,14 +57,18 @@ require 'securerandom'
 
 # ── 配置 ────────────────────────────────────────────────────
 PAD_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/pad' : ENV['SPIDER_DATA']
-DOC_ID   = 'default'
 
-DOC_DIR  = File.join(PAD_ROOT, DOC_ID)
-OPS_LOG  = File.join(DOC_DIR, 'ops.log')
-MEM_DIR  = File.join(DOC_DIR, 'members')
+# 默认 doc id —— URL 上没带 ?doc= 时用它
+DEFAULT_DOC_ID = 'default'
 
-# BDR 频道名 —— 所有 pad 客户端共用一个
-PAD_CHANNEL = 'pad'
+# doc id 允许的字符。
+#
+# ★ doc id 会拼进**文件路径**（$SPIDER_DATA/pad/<doc>/ops.log）和
+#   **BDR 频道名**（pad-<doc>），所以必须严格限制 ——
+#   放开的话 `?doc=../../etc` 能目录穿越，`?doc=a/b` 能写进子目录。
+#
+#   只允许字母/数字/下划线/连字符，1~64 字符。
+DOC_ID_RE = /\A[A-Za-z0-9_-]{1,64}\z/
 
 # 成员心跳间隔：超过这个时间没更新就认为掉线了
 MEMBER_TTL = 30
@@ -72,7 +76,38 @@ MEMBER_TTL = 30
 # 单条 op 最大字节（防呆）
 MAX_OP_BYTES = 64 * 1024
 
-FileUtils.mkdir_p(MEM_DIR)
+# ── 每连接的文档状态 ────────────────────────────────────────
+#
+# 每个 WS 连接 = 一个独立的 ruby 进程（spider fork-per-request），
+# 所以一个进程只服务一个客户端、一个 doc —— 用全局变量存不会有并发问题。
+#
+# 这几个在 Q.ws 块里按 ?doc= 参数重设。
+$doc_id     = DEFAULT_DOC_ID
+$doc_dir    = nil
+$ops_log    = nil
+$mem_dir    = nil
+$pad_channel = nil
+
+# 校验并规范化 doc id —— 非法就退回默认
+def normalize_doc_id(raw)
+  d = raw.to_s.strip
+  return DEFAULT_DOC_ID if d.empty?
+  return DEFAULT_DOC_ID unless d =~ DOC_ID_RE
+  d
+end
+
+# 设定当前连接的 doc（doc id + 目录 + 频道）
+def setup_doc(doc_id)
+  $doc_id      = doc_id
+  $doc_dir     = File.join(PAD_ROOT, doc_id)
+  $ops_log     = File.join($doc_dir, 'ops.log')
+  $mem_dir     = File.join($doc_dir, 'members')
+  # BDR 频道名 —— **每个 doc 一个频道**，否则不同 doc 的 op 会互相串。
+  # 频道名在握手时就定死了，所以必须在 TcpNotify.new 之前算好。
+  $pad_channel = "pad-#{doc_id}"
+  FileUtils.mkdir_p($mem_dir)
+  $doc_id
+end
 
 # ── op log ──────────────────────────────────────────────────
 # 只追加，一行一个 JSON op。并发 append 在 POSIX 下对 < PIPE_BUF 的写入
@@ -80,7 +115,7 @@ FileUtils.mkdir_p(MEM_DIR)
 
 def log_lock
   @log_lock ||= begin
-    File.open(OPS_LOG, File::WRONLY | File::CREAT | File::APPEND)
+    File.open($ops_log, File::WRONLY | File::CREAT | File::APPEND)
   end
 end
 
@@ -93,7 +128,7 @@ end
 def op_seen_set
   @op_seen ||= begin
     s = {}
-    File.foreach(OPS_LOG) do |line|
+    File.foreach($ops_log) do |line|
       line = line.strip
       next if line.empty?
       begin
@@ -139,9 +174,9 @@ rescue => e
 end
 
 def read_ops
-  return [] unless File.exist?(OPS_LOG)
+  return [] unless File.exist?($ops_log)
   out = []
-  File.foreach(OPS_LOG) do |line|
+  File.foreach($ops_log) do |line|
     line = line.strip
     next if line.empty?
     begin
@@ -174,11 +209,11 @@ def new_client_id
 end
 
 def member_file(cid)
-  File.join(MEM_DIR, "#{cid}.json")
+  File.join($mem_dir, "#{cid}.json")
 end
 
 def write_member(cid, info)
-  FileUtils.mkdir_p(MEM_DIR)
+  FileUtils.mkdir_p($mem_dir)
   tmp = member_file(cid) + '.tmp'
   File.write(tmp, JSON.generate(info))
   File.rename(tmp, member_file(cid))   # 原子替换
@@ -194,7 +229,7 @@ end
 
 def read_members
   out = []
-  Dir.glob(File.join(MEM_DIR, '*.json')).each do |f|
+  Dir.glob(File.join($mem_dir, '*.json')).each do |f|
     begin
       info = JSON.parse(File.read(f))
       # 心跳超时的不算在线
@@ -216,6 +251,12 @@ end
 
 # ── WS 端点 ────────────────────────────────────────────────
 Q.ws do |req, rsp|
+  # ★ 先定 doc —— 频道名和文件路径都跟它有关，必须在 TcpNotify.new 之前算好。
+  #   doc id 来自 URL query：/tool/pad/ws?doc=myproj
+  #   非法 / 没给 → 用 default
+  doc_id = setup_doc(normalize_doc_id(req.param('doc')))
+  PAD_CHANNEL = $pad_channel        # 本连接的频道（每个 doc 一个）
+
   # BDR 连接 —— 连 spider 自己的端口
   #
   # host/port 不传 → 127.0.0.1 + $Cgi_Port（spider 注入的监听端口）
@@ -234,7 +275,7 @@ Q.ws do |req, rsp|
     rsp.ws_write(data)
   end
 
-  Q.log "[pad/ws] + client"
+  Q.log "[pad/ws] + client doc=#{doc_id} channel=#{PAD_CHANNEL}"
 
   Q.on_close do
     # ★ 离线通知 —— 删完成员文件**必须广播一次**成员表。
@@ -287,7 +328,7 @@ Q.ws do |req, rsp|
         color = msg['color'].to_s[0, 16]
         write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
                             'cursor' => 0, 'ts' => Time.now.to_i })
-        Q.log "[pad/ws] hello #{cid} #{name}"
+        Q.log "[pad/ws] hello #{cid} #{name} doc=#{doc_id}"
 
         # ★ 把服务端分配的 id 告诉客户端。
         #   客户端自己也有一个 clientId（crypto.randomUUID），

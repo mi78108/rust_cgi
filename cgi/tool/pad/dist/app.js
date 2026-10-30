@@ -42,11 +42,24 @@ const opsEl    = $('ops');
 const localOpsEl = $('ops-local');
 const globalOpsEl = $('ops-global');
 const meEl     = $('me');
+const docEl    = $('doc');
 const toastEl  = $('toast');
 
 // ── 常量 ────────────────────────────────────────────────────
 const WS_PATH = '/tool/pad/ws';
-const WS_URL  = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${WS_PATH}`;
+
+/**
+ * 文档 id —— 来自页面 URL 的 query：/tool/pad?doc=myproj
+ *
+ * 不同 doc = 不同空间：独立的 op log、独立的成员表、独立的 BDR 频道。
+ * 后端从 WS URL 的 ?doc= 参数读同一个值，两边必须一致。
+ *
+ * 没带 ?doc= → 'default'（跟后端的 DEFAULT_DOC_ID 对应）。
+ */
+const DOC_ID = new URLSearchParams(location.search).get('doc') || 'default';
+
+const WS_URL  = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${WS_PATH}` +
+                `?doc=${encodeURIComponent(DOC_ID)}`;
 
 const PEER_COLORS = ['#ff7eb6', '#7eb6ff', '#ffd07e', '#7effc4', '#d07eff'];
 
@@ -437,6 +450,21 @@ function connect() {
   myColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
   meEl.textContent = myName;
   meEl.style.color = myColor;
+
+  // 状态栏显示当前 doc —— 多个 tab 时很容易搞混自己在哪个空间。
+  // 做成可点的 → 换个 doc 直接点（在新标签页打开同一个 doc）。
+  if (docEl) {
+    docEl.textContent = DOC_ID;
+    docEl.title = `当前文档: ${DOC_ID}（点击复制链接）`;
+    docEl.classList.add('who-btn');
+    docEl.addEventListener('click', () => {
+      const url = `${location.origin}/tool/pad?doc=${encodeURIComponent(DOC_ID)}`;
+      navigator.clipboard?.writeText(url).then(
+        () => showToast('link copied'),
+        () => showToast(url)
+      );
+    });
+  }
 
   sync = new Sync(WS_URL, {
     name: myName,
