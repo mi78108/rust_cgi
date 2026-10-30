@@ -138,7 +138,40 @@ export class TcpNotify extends EventEmitter {
     this.subs = new Map();          // channel -> [{ handler, wantEcho }]
     this._buffer = Buffer.alloc(0);  // 读到的字节（可能是半帧）
 
+    // ★ 握手完成前的发送队列
+    //
+    //   node 的 net.connect 是**异步**的 —— 连接建好之前 socket.write()
+    //   会把数据排在队列里，等连上再发。但 BDR 的握手帧和业务帧
+    //   必须**按顺序**到达服务端：
+    //
+    //     [MAGIC][channel]\n   ← 握手
+    //     [len][dst][payload]   ← 业务
+    //
+    //   如果业务帧先于握手帧发出（或者挤在一起），spider 端
+    //   tcp_broadcast_func.rs 读到的第一段就不是 MAGIC →
+    //   「bad magic」→ 连接被拒 → 广播全部丢失。
+    //
+    //   ruby 版没这问题：TcpNotify.new 里 connect! 是**阻塞**的，
+    //   返回时握手已经完成。node 是异步的 → 必须显式等。
+    //
+    //   解法：握手 id 收到之前把业务帧排队，握手完成后按序冲刷。
+    this._ready = false;
+    this._pendingFrames = [];
+    this._readyPromise = new Promise((resolve, reject) => {
+      this._resolveReady = resolve;
+      this._rejectReady = reject;
+    });
+    // 没人 await 时也不能有 unhandled rejection
+    this._readyPromise.catch(() => {});
+
     this.connect();
+  }
+
+  // 握手完成的 promise —— 业务代码可以 await 它
+  //
+  //   await notifier.ready;   ← 之后 send() 一定走真实 socket
+  get ready_promise() {
+    return this._readyPromise;
   }
 
   // 连接 + 握手 + 起读循环
@@ -150,7 +183,7 @@ export class TcpNotify extends EventEmitter {
 
     sock.on('connect', () => {
       // ---- 握手：魔数 + 频道名 ----
-      const name = Buffer.from(this.channel, 'binary');
+      const name = Buffer.from(this.channel, 'utf8');
       const hello = Buffer.concat([MAGIC, name, Buffer.from('\n', 'binary')]);
       sock.write(hello);
 
@@ -164,10 +197,18 @@ export class TcpNotify extends EventEmitter {
         process.stderr.write(`[${this.name}] socket error: ${e?.message ?? e}\n`);
       }
       this.running = false;
+      if (!this._ready) {
+        this._ready = true;                 // 失败也算「结束等待」
+        this._rejectReady?.(e);
+      }
       this.emit('error', e);
     });
     sock.on('close', () => {
       this.running = false;
+      if (!this._ready) {
+        this._ready = true;
+        this._rejectReady?.(new Error(`${this.name}: socket closed before handshake`));
+      }
       this.emit('close');
     });
 
@@ -213,6 +254,10 @@ export class TcpNotify extends EventEmitter {
   // payload: string | Buffer | Uint8Array
   // dst: 目标连接 id —— 0n（默认）= 广播给全频道；
   //      其它值 = 只发给那一个连接（服务端在 write_loop 里过滤）
+  //
+  // ★ 握手没完成时**排队**，不直接写 socket。
+  //   理由见构造函数里的说明：业务帧必须排在握手帧之后。
+  //   队列在握手 id 到达时按序冲刷。
   send(payload, dst = DST_BROADCAST) {
     const body = toBuffer(payload);
     if (body.length > MAX_MSG_LEN) return false;
@@ -223,6 +268,11 @@ export class TcpNotify extends EventEmitter {
     frame.writeUInt32BE(DST_LEN + body.length, 0);
     frame.writeBigUInt64BE(d, LEN_PREFIX);
     body.copy(frame, LEN_PREFIX + DST_LEN);
+
+    if (!this._ready) {
+      this._pendingFrames.push(frame);
+      return true;
+    }
 
     if (!this.socket || this.socket.destroyed) return false;
     this.socket.write(frame);
@@ -239,6 +289,45 @@ export class TcpNotify extends EventEmitter {
   sendTo(dst, payload) {
     const d = dst === null || dst === undefined ? DST_BROADCAST : BigInt(dst);
     return this.send(payload, d <= 0n ? DST_BROADCAST : d);
+  }
+
+  // 异步发送 —— 等 socket 真正 flush 完再 resolve
+  //
+  // ★ 什么时候需要它：**进程即将退出**时。
+  //   socket.write() 只是把数据排进 libuv 的写队列，
+  //   紧接着 process.exit() 的话队列里的数据就丢了 ——
+  //   典型场景：客户端断开时要广播「下线通知」，
+  //   消息发不出去 → 对端的成员列表里一直挂着幽灵成员。
+  //
+  //   sendAsync(payload) → Promise<boolean>
+  //   resolve(true) = 已 flush；resolve(false) = socket 已断 / 超长
+  sendAsync(payload, dst = DST_BROADCAST) {
+    const body = toBuffer(payload);
+    if (body.length > MAX_MSG_LEN) return Promise.resolve(false);
+
+    const d = BigInt(dst ?? 0) < 0n ? DST_BROADCAST : BigInt(dst ?? 0);
+    const frame = Buffer.allocUnsafe(LEN_PREFIX + DST_LEN + body.length);
+    frame.writeUInt32BE(DST_LEN + body.length, 0);
+    frame.writeBigUInt64BE(d, LEN_PREFIX);
+    body.copy(frame, LEN_PREFIX + DST_LEN);
+
+    // 握手没完成 → 等握手，再写
+    if (!this._ready) {
+      return this._readyPromise.then(
+        () => this._writeFrame(frame),
+        () => false,
+      );
+    }
+    return this._writeFrame(frame);
+  }
+
+  // 真正把一帧写出去（等 flush 回调）
+  _writeFrame(frame) {
+    if (!this.socket || this.socket.destroyed) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      // write 的回调在数据交给内核后才触发
+      this.socket.write(frame, (err) => resolve(!err));
+    });
   }
 
   // emit 风格别名 —— 跟 ruby's notify(:ch, payload) 对应
@@ -261,6 +350,18 @@ export class TcpNotify extends EventEmitter {
   }
 
   // ----- 内部 -----
+
+  // 冲刷握手前排队的业务帧
+  //
+  // 按入队顺序写出去 —— BDR 帧之间有顺序要求（虽然每帧自带 len/dst，
+  // 但保持顺序更符合协议语义，也方便抓包排查）。
+  _flushPending() {
+    if (!this._pendingFrames.length) return;
+    const frames = this._pendingFrames;
+    this._pendingFrames = [];
+    if (!this.socket || this.socket.destroyed) return;
+    for (const f of frames) this.socket.write(f);
+  }
 
   _teardownSocket() {
     const sock = this.socket;
@@ -302,6 +403,15 @@ export class TcpNotify extends EventEmitter {
         process.stderr.write(
           `[${this.name}] up id=${this.id} host=${this.host}:${this.port} channel=${this.channel}\n`);
         this.emit('connected', this.id);
+
+        // ★ 握手完成 —— 冲刷排队中的业务帧
+        //
+        //   到这里服务端已经确认了我们的连接 id，
+        //   之后的业务帧一定能被正确路由。
+        this._ready = true;
+        this._resolveReady?.(this.id);
+        this._flushPending();
+
         continue;
       }
 

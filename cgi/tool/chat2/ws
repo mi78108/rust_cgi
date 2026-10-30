@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// tool/chat2/ws — 在线聊天室 WebSocket 端点（Node 版）
+//
+//   WS /tool/chat2/ws
+//
+// 架构（跟 tool/chat/ws 一样，单主机多进程）：
+//   浏览器 A ──ws──> node 进程 A ─┐
+//                                 ├─ BDR 频道 chat2-<room>（TCP 长连接，由 spider 扇出）
+//   浏览器 B ──ws──> node 进程 B ─┘
+//
+// spider 是 fork-per-request：每个 ws 连接一个独立的 node 进程，
+// 进程之间不共享内存 → 跨进程消息必须走 BDR（连 spider 自己的端口）。
+//
+// 为什么用 BDR 而不是 UDP 组播（chat/ws 用的 SocketNotify）：
+//   BDR 由**服务端**做扇出 —— 有序、可靠、不丢包。
+//   而且 node 侧本来就有 TcpNotify 实现（_ext_notify_.mjs），
+//   跟 tool/pad 一致，不用再写一遍组播。
+//
+// 每个连接一个 node 进程，各自持有：
+//   room     当前房间名（client 发 join 时定）
+//   me       {name, color} —— 自己的身份
+//   peers    房内已知 peer 缓存（从别的进程的 join/up/down 广播累积）
+//
+// 协议（JSON text）：
+//   client → server
+//     {op:'join',  name, color, room}    切房间（会先 leave 旧房间）
+//     {op:'msg',   text}
+//     {op:'leave'}
+//     {op:'ping'}
+//   server → client
+//     {type:'init',  you, peers}         join 后回（自己的身份 + 已知 peer）
+//     {type:'msg',   from, color, text, ts}
+//     {type:'join',  peer}               别人进来了
+//     {type:'leave', name}               别人走了
+//     {type:'peers', peers}              房内 peer 全量（who 的回应）
+//     {type:'error', msg}
+//
+// ★ 频道名在 BDR 握手时**定死** —— 一条连接只有一个频道。
+//   所以切房间必须重开一条 BDR 连接（换频道名）。
+
+import { Q } from '../../_env_/node/_base_.mjs';
+import { TcpNotify } from '../../_env_/node/_ext_notify_.mjs';
+
+// ── 配置 ────────────────────────────────────────────────────
+const MSG_MAX = 4 * 1024;        // 单条消息长度上限（防狂刷）
+const NAME_MAX = 32;
+const ROOM_MAX = 32;
+const DEFAULT_ROOM = 'default';
+
+// 名字/房间名白名单 —— 跟 chat/ws 的清洗规则一致
+const clean = (s, max) => String(s ?? '')
+  .trim()
+  .replace(/[^A-Za-z0-9_-]/g, '')
+  .slice(0, max);
+
+// 颜色：只留 hex 字符
+const cleanColor = (s) => {
+  const c = String(s ?? '').replace(/[^0-9A-Fa-f#]/g, '').slice(0, 9);
+  return c || '#c4f542';
+};
+
+// ── 每个连接的状态 ──────────────────────────────────────────
+// spider fork-per-request：一个进程只服务一个客户端 → 用模块级变量存，无并发问题。
+let myname = null;
+let mycolor = null;
+let room = null;
+let chan = null;          // 当前 BDR 频道
+let mcast = null;         // TcpNotify 实例
+const peers = new Map();  // name -> {name, color}
+
+// 换房间时重开 BDR 连接（频道名在握手时定死）
+//
+// ★ rsp 必须**传进来** —— subscribe 回调是闭包，要用它写回 WS 帧，
+//   而 rsp 是 handler 的局部变量，模块级函数拿不到。
+const openChannel = (roomName, rsp) => {
+  if (mcast) mcast.stop();
+  chan = `chat2-${roomName}`;
+  mcast = new TcpNotify(`cgi-chat2-${process.pid}`, { channel: chan });
+
+  // 订阅：别的客户端发来的消息
+  //
+  // ★ wantEcho=false —— BDR 会把消息发给**发送者自己**，
+  //   这里跳过自己发的（自己那份直接 rsp.wsWrite）。
+  //   不加这个选项的话，发送者会收到**两份**：一份是 rsp.wsWrite
+  //   直接写回的，一份是 BDR 回环的。
+  mcast.subscribe(chan, (msg) => {
+    let val = null;
+    try {
+      val = JSON.parse(msg.data.toString('utf8'));
+    } catch {
+      return;
+    }
+    if (!val || typeof val !== 'object') return;
+
+    switch (val.op) {
+      case 'msg':
+        rsp.wsWrite({
+          type: 'msg', from: val.from, color: val.color,
+          text: val.text, ts: val.ts,
+        });
+        break;
+
+      case 'up': {
+        const p = val.peer;
+        if (p && p.name && p.name !== myname) {
+          peers.set(p.name, p);
+          rsp.wsWrite({ type: 'join', peer: p });
+        }
+        break;
+      }
+
+      case 'down': {
+        const n = String(val.name ?? '');
+        if (peers.delete(n)) {
+          rsp.wsWrite({ type: 'leave', name: n });
+        }
+        break;
+      }
+
+      case 'who':
+        // 有人问房内都有谁（新人加入时问一圈）→ 回一份全量
+        mcast.notify(chan, JSON.stringify({ op: 'peers', peers: [...peers.values()] }));
+        break;
+
+      case 'peers': {
+        // 别人回应了 who's 询问
+        const incoming = Array.isArray(val.peers) ? val.peers : [];
+        for (const p of incoming) {
+          if (!p || !p.name || p.name === myname) continue;
+          if (peers.has(p.name)) continue;
+          peers.set(p.name, p);
+          rsp.wsWrite({ type: 'join', peer: p });
+        }
+        break;
+      }
+    }
+  }, { wantEcho: false });
+};
+
+// ── WS 端点 ────────────────────────────────────────────────
+Q.ws('/', async (req, rsp) => {
+  Q.log('[chat2/ws] + client');
+
+  // ★ 异步读 stdin —— 不能用同步版：
+  //   同步版 readSync 会**饿死事件循环**，BDR socket 的 'data' 事件
+  //   永远排不上队 → 广播进来的消息收不到
+  //   （表现：自己说话有回声，别人说话没反应）。
+  await req.onMessageAsync((raw) => {
+    const text = raw.toString('utf8');
+    if (!text.trim()) return null;
+
+    let msg = null;
+    try {
+      msg = JSON.parse(text);
+    } catch {
+      Q.log('[chat2/ws] bad json');
+      return null;
+    }
+    if (!msg || typeof msg !== 'object') return null;
+
+    switch (msg.op) {
+      case 'join': {
+        const newRoom = clean(msg.room, ROOM_MAX) || DEFAULT_ROOM;
+        const newName = clean(msg.name, NAME_MAX) || `anon-${process.pid % 10000}`;
+        const newColor = cleanColor(msg.color);
+
+        // 退旧房间 —— 频道名变了，BDR 连接也要重开
+        if (chan && myname && chan !== `chat2-${newRoom}`) {
+          mcast.notify(chan, JSON.stringify({ op: 'down', name: myname }));
+        }
+
+        myname = newName;
+        mycolor = newColor;
+        room = newRoom;
+        peers.set(myname, { name: myname, color: mycolor });
+
+        openChannel(room, rsp);
+
+        // 广播我来了
+        mcast.notify(chan, JSON.stringify({ op: 'up', peer: peers.get(myname) }));
+
+        // 回 init（你 + 当前已知 peer，稍后 who's 会补全）
+        rsp.wsWrite({
+          type: 'init',
+          you: { name: myname, color: mycolor },
+          peers: [...peers.values()],
+        });
+
+        // 问一圈房内都有谁
+        mcast.notify(chan, JSON.stringify({ op: 'who', from: myname }));
+        break;
+      }
+
+      case 'msg': {
+        if (!chan || !myname) return null;
+        let t = String(msg.text ?? '').trim();
+        if (!t) return null;
+        if (Buffer.byteLength(t, 'utf8') > MSG_MAX) {
+          t = Buffer.from(t, 'utf8').subarray(0, MSG_MAX).toString('utf8');
+        }
+        const ts = Math.floor(Date.now() / 1000);
+        const payload = { op: 'msg', from: myname, color: mycolor, text: t, ts };
+
+        mcast.notify(chan, JSON.stringify(payload));
+        // 自己也要看到（BDR 用 wantEcho=false 跳过了自己发的）
+        rsp.wsWrite({ type: 'msg', from: myname, color: mycolor, text: t, ts });
+        break;
+      }
+
+      case 'leave': {
+        if (chan && myname) {
+          mcast.notify(chan, JSON.stringify({ op: 'down', name: myname }));
+        }
+        break;
+      }
+
+      case 'ping': {
+        rsp.wsWrite({ type: 'error', msg: 'pong' });
+        break;
+      }
+    }
+    return null;      // 返回 null → 不自动回写
+  });
+
+  Q.log('[chat2/ws] - client (EOF)');
+});
+
+// ── 关闭时的清理 ────────────────────────────────────────────
+// ★ 客户端断开时必须广播「下线」，否则其他人的成员列表里
+//   一直挂着幽灵成员（只有等下次有人说话才会被顺带刷新）。
+//
+//   这里用 async 回调 + sendAsync —— 等数据真的 flush 出去再退出，
+//   否则 process.exit() 会把写队列里的数据丢掉。
+Q.onClose(async () => {
+  if (chan && myname) {
+    await mcast.sendAsync(JSON.stringify({ op: 'down', name: myname }));
+  }
+  if (mcast) mcast.stop();
+  return 'closed';
+});

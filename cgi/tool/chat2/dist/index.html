@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>chat2 · 在线聊天室</title>
+
+  <!-- ★ 全部用**绝对路径**（/tool/chat2/...）——
+       不能用相对路径：页面经 index → pub 软连接提供，
+       浏览器解析相对路径时用的是 URL 里的 /tool/chat2/，
+       但 pub 是从 /tool/ 派发的，相对路径会少一级 → 404。 -->
+  <link rel="stylesheet" href="/tool/chat2/style.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>chat2</h1>
+    <span class="meta">realtime rooms · node · BDR broadcast</span>
+    <span class="spacer"></span>
+    <span id="status" class="pill pending">disconnected</span>
+  </header>
+
+  <div class="body">
+
+    <!-- 左栏：身份 + 房间 + 在线成员 -->
+    <aside class="side">
+      <div class="block">
+        <label class="lbl">identity</label>
+        <div class="row">
+          <span id="me-dot" class="dot"></span>
+          <input id="nick" placeholder="nickname" spellcheck="false" autocomplete="off">
+          <button id="btn-random" class="mini" title="随机昵称 + 颜色">↻</button>
+        </div>
+        <div class="swatches" id="swatches"></div>
+      </div>
+
+      <div class="block">
+        <label class="lbl">room</label>
+        <div class="row">
+          <span class="hash">#</span>
+          <input id="room" placeholder="default" spellcheck="false" autocomplete="off">
+          <button id="btn-room" class="mini" title="切换房间">↵</button>
+        </div>
+      </div>
+
+      <div class="block grow">
+        <label class="lbl">online · <span id="peer-count" class="lime">0</span></label>
+        <ul class="peers" id="peers"></ul>
+      </div>
+    </aside>
+
+    <!-- 中栏：消息流 + 输入框 -->
+    <main class="main">
+      <div class="stream-head">
+        <span class="mono">#<span id="room-label">default</span></span>
+        <span class="spacer"></span>
+        <button id="btn-bottom" class="mini wide">↓ bottom</button>
+      </div>
+
+      <div class="stream" id="msgs"></div>
+
+      <div class="composer">
+        <span id="send-dot" class="dot"></span>
+        <textarea id="text" rows="1" placeholder="message #default …  (Enter 发送 / Shift+Enter 换行)"
+                  spellcheck="false"></textarea>
+        <button id="btn-send" class="send">send</button>
+      </div>
+    </main>
+
+    <!-- 右栏：事件日志 -->
+    <aside class="side right">
+      <label class="lbl">event log</label>
+      <ul class="events" id="events"></ul>
+    </aside>
+
+  </div>
+</div>
+
+<script type="module" src="/tool/chat2/app.js"></script>
+</body>
+</html>

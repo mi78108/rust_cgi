@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>monaco · collaborative markdown editor</title>
+
+<!-- ★ 全部用**绝对路径**（/tool/monaco/...）——
+     不能用相对路径：页面经 index → pub 软连接提供，浏览器解析相对路径时
+     用的是 URL 里的 /tool/monaco/，但 pub 是从 /tool/ 派发的，
+     相对路径会解析成 /tool/vendor/... （少一级）→ 404。
+     pad 也用绝对路径，原因相同。 -->
+<link rel="stylesheet" href="/tool/monaco/vendor/vs/editor/editor.main.css">
+<link rel="stylesheet" href="/tool/monaco/style.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>monaco</h1>
+    <span class="meta">collaborative markdown editor · CRDT over WebSocket · monaco</span>
+    <span class="spacer"></span>
+    <span class="meta mono">/tool/monaco/ws</span>
+    <button id="btn-open" title="打开本地文件（替换当前文档内容）">open</button>
+    <button id="btn-download" title="下载当前文档为 .md 文件">download</button>
+    <button id="btn-copy" title="复制当前文档内容到剪贴板">copy</button>
+    <button id="btn-clear" title="清空文档（所有客户端都会清空）">clear</button>
+    <!-- ★ 刷新 —— 不重连 WS，只发 sync 让服务端重发全量 op。
+         ★ 断开时也能用：sync.js 的 _send 会把消息攒着，
+           重连后自动补发。 -->
+    <button id="btn-refresh" title="从服务端重新拉取全文（发送 sync）">refresh</button>
+    <!-- ★ 连接状态 + 重连 —— 合并成一个：pill 显示状态，
+         点它就重连。connected 时显示 connected（绿），
+         断开时显示 disconnected（红），点击都是重连。 -->
+    <button id="btn-conn" class="pill pending" title="点击重新连接">disconnected</button>
+  </header>
+
+  <div class="editor-bar">
+    <span>monaco</span>
+    <span class="meta">·</span>
+    <span class="meta">peers online: <span id="peers" class="who">0</span></span>
+    <span class="meta">·</span>
+    <span class="meta">ops: <span id="ops-local" class="who">0</span> local / <span id="ops-global" class="who">0</span> global</span>
+    <span class="spacer"></span>
+    <!-- ★ 语言选择 —— 放在「doc:」左边。
+         ★ 选项由 app.js 在 monaco 加载后按 monaco.languages 动态填充，
+           这里只放一个占位 option（monaco 没加载成功时不至于是个空框）。 -->
+    <span class="lang">
+      <span class="meta lang-label">lang:</span>
+      <select id="lang" class="lang-select" title="文档语言 —— 决定语法高亮 / 补全 / 跳转" disabled>
+        <option value="markdown">Markdown</option>
+      </select>
+    </span>
+    <span class="meta">·</span>
+    <span class="meta">doc: <span id="doc" class="who">default</span></span>
+    <span class="meta">·</span>
+    <span class="meta">you: <button id="me" class="who who-btn" title="点击修改名称和颜色">—</button></span>
+  </div>
+
+  <!-- monaco 编辑器挂载点 -->
+  <div id="editor" class="editor-host"></div>
+
+  <!-- 远端光标用 monaco 的 decorations 实现（不用 mirror 量像素） -->
+</div>
+
+<!-- ★ 隐藏的本地文件选择器 —— 「open」按钮点它。
+     ★ 不用 File System Access API（showOpenFilePicker）—— 那个只支持
+       Chromium，而且要用户手势 + 权限，Firefox/Safari 不支持。
+       <input type="file"> 兼容性最好。
+     ★ accept 里带上代码文件扩展名 —— 打开 .py/.rs/.ts 时
+       app.js 会按扩展名自动切语言（langFromFilename）。 -->
+<input id="file-input" type="file"
+       accept=".md,.markdown,.txt,.py,.js,.ts,.tsx,.jsx,.json,.css,.html,.rs,.go,.java,.c,.cpp,.h,.hpp,.sh,.yaml,.yml,.xml,.toml,text/*"
+       hidden>
+
+<!-- ══ 弹窗（通用）═══════════════════════════════════════════
+     一个壳子，多种用途 —— 目前两种：
+       · 修改名字和颜色（#dlg-profile）
+       · 清空文档确认（#dlg-clear）
+     ★ 不用原生 prompt()/confirm() —— 那个太难看，且样式不可控。
+     隐藏时用 hidden 属性（display:none），不占布局。 -->
+<div id="dlg-profile" class="dlg-mask" hidden>
+  <div class="dlg">
+    <div class="dlg-title">修改名字和颜色</div>
+    <label class="dlg-row">
+      <span>名字</span>
+      <input id="dlg-name" type="text" maxlength="24" placeholder="你的名字" autocomplete="off">
+    </label>
+    <label class="dlg-row">
+      <span>颜色</span>
+      <span class="dlg-color">
+        <input id="dlg-color" type="color" value="#7eb6ff">
+        <input id="dlg-hex" type="text" maxlength="7" spellcheck="false" placeholder="#7eb6ff">
+      </span>
+    </label>
+    <div class="dlg-swatches" id="dlg-swatches"></div>
+    <div class="dlg-actions">
+      <button id="dlg-cancel" class="dlg-btn">取消</button>
+      <button id="dlg-ok" class="dlg-btn primary">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="dlg-clear" class="dlg-mask" hidden>
+  <div class="dlg dlg-narrow">
+    <div class="dlg-title">清空文档？</div>
+    <div class="dlg-msg">所有客户端的文档内容都会被清空，此操作不可撤销。</div>
+    <div class="dlg-actions">
+      <button id="dlg-clear-cancel" class="dlg-btn">取消</button>
+      <button id="dlg-clear-ok" class="dlg-btn danger">清空</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 打开本地文件前的确认 —— 打开会**替换当前文档内容**，
+     别人正在编辑的内容也会没，所以先问一下。 -->
+<div id="dlg-open" class="dlg-mask" hidden>
+  <div class="dlg dlg-narrow">
+    <div class="dlg-title">打开本地文件？</div>
+    <div class="dlg-msg">当前文档的内容会被替换，所有客户端都会同步到这个新内容。此操作不可撤销。</div>
+    <div class="dlg-actions">
+      <button id="dlg-open-cancel" class="dlg-btn">取消</button>
+      <button id="dlg-open-ok" class="dlg-btn primary">选择文件</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ monaco 本地化加载 ══
+     vendor/vs/ 是 npm 包 monaco-editor 的 min 目录（已 vendor 到本地，不走 CDN）。
+     AMD loader 按需加载模块 —— base + editor + basic-languages(markdown) 已够用。
+     ★ 路径用**绝对路径** —— 同上，相对路径会少一级。 -->
+<script src="/tool/monaco/vendor/vs/loader.js"></script>
+
+<!-- ★ loader 的 vs 基础路径要在 editor.main.js **之前**设好。
+     AMD loader 用它拼模块 URL 和 worker URL（oe.toUrl("vs/base/worker/workerMain.js")）。
+     之前设在 app.js 里太晚 —— editor.main.js 是经典脚本，先于 app.js 执行，
+     worker 路径就已经按错的 base 算好了。 -->
+<script>
+  window.require.config({ paths: { vs: '/tool/monaco/vendor/vs' } });
+</script>
+
+<!-- ★ MonacoEnvironment 必须在 editor.main.js **之前**设置。
+     monaco 在模块求值时就读 globalThis.MonacoEnvironment（缓存住），
+     之后再设就晚了 —— worker 路径仍会用 AMD loader 的 toUrl() 拼，
+     解析成 /vs/base/worker/... （少一级）→ worker 加载失败。
+     workerMain.js 内部再 importScripts 其它模块，所以 base 是目录。 -->
+<script>
+  window.MonacoEnvironment = {
+    getWorkerUrl: function () {
+      return '/tool/monaco/vendor/vs/base/worker/workerMain.js';
+    },
+  };
+</script>
+
+<script src="/tool/monaco/vendor/vs/editor/editor.main.js"></script>
+
+<script type="module" src="/tool/monaco/app.js"></script>
+</body>
+</html>

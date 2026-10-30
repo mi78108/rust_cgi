@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+// tool/chat2/room — 房间名 path 段 → query 的 302 跳转
+//
+//   GET /tool/chat2/room/abc   → /tool/chat2?room=abc
+//   GET /tool/chat2/room       → /tool/chat2?room=default
+//   GET /tool/chat2/room/a/b   → /tool/chat2?room=a      （多余段丢弃）
+//
+// 为什么要有这个：
+//   chat2/index 是 symlink 到 cgi/pub，pub 只认 '/' 和 '/'+静态文件名，
+//   无法把「房间名段」和「静态资源」区分开。所以房间名走 path 段的请求
+//   （/tool/chat2/room/abc，好记、好分享）由本脚本拦下来，
+//   302 到 query 形式（/tool/chat2?room=abc）交给 index + 前端解析。
+//   最终渲染只有一条路径：pub 静态 serve dist/index.html。
+//
+// MAP_PATH（spider 剥掉脚本名后剩下的路径）：
+//   /tool/chat2/room          →  /
+//   /tool/chat2/room/abc      →  /abc
+//   /tool/chat2/room/a/b      →  /a/b
+//
+// 房间名白名单 [A-Za-z0-9_-]{1,32}，跟 chat2/ws 端点的清洗规则一致。
+// 不合法的当 default，避免拼出坏 URL / open redirect。
+
+import { Q } from '../../_env_/node/_base_.mjs';
+
+const ROOM_MAX = 32;
+const DEFAULT_ROOM = 'default';
+const CHAT_URL = '/tool/chat2';
+
+const sanitize = (s) => {
+  const v = String(s ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, ROOM_MAX);
+  return v || DEFAULT_ROOM;
+};
+
+const toChat = (room) => `${CHAT_URL}?room=${room}`;
+
+// /tool/chat2/room/a/b —— 取第一段做房间名，多余段丢弃
+//
+// ★ 正则**不能**写成 /^\/(?<room>[^/]+)$/ —— 框架会再包一层锚点
+//   （^(?:...)$），内层的 $ 会要求整串结束 → '/a/b' 匹配不上。
+//   所以尾部用 (?:\/.*)?$ 把多余段吃掉，但 room 只捕获第一段。
+Q.get(/^\/(?<room>[^/]+)(?:\/.*)?$/, (req, rsp) => {
+  rsp.redirect(toChat(sanitize(req.named('room'))));
+});
+
+// /tool/chat2/room —— default 房间
+Q.get('/', (_req, rsp) => {
+  rsp.redirect(toChat(DEFAULT_ROOM));
+});

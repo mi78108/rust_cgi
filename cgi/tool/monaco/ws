@@ -1,0 +1,476 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# tool/monaco/ws — Monaco 协同编辑器的服务端
+#
+# 架构跟 tool/pad/ws 一模一样（服务器持有权威状态）：
+#   · op log（文件）—— 收到 op → 追加 → 广播
+#   · 成员表（文件）—— 谁在线
+#   · BDR 频道 —— 进程间广播（跨 CGI 进程）
+#
+# 与 pad 的差别只有两点：
+#   1. 频道名/目录用 monaco 前缀，不跟 pad 混
+#   2. op 里的字符是 markdown 源码（文本），CRDT 逻辑跟 pad 完全一样
+#
+# 为什么单独一个 tool 而不是改 pad：
+#   pad 的 textarea 方案是稳定的，monaco 还在验证阶段 —— 分开做，互不影响。
+
+require_relative '../../_env_/ruby/_base_'
+require_relative '../../_env_/ruby/_ext_notify_'
+require 'json'
+require 'fileutils'
+require 'securerandom'
+
+# ── 配置 ────────────────────────────────────────────────────
+MONACO_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/monaco' : ENV['SPIDER_DATA']
+
+DEFAULT_DOC_ID = 'default'
+
+# doc id 允许的字符。
+#
+# ★ doc id 会拼进**文件路径**和**BDR 频道名**，所以必须严格限制 ——
+#   放开的话 `?doc=../../etc` 能目录穿越，`?doc=a/b` 能写进子目录。
+DOC_ID_RE = /\A[A-Za-z0-9_-]{1,64}\z/
+
+MEMBER_TTL = 30          # 成员心跳间隔（秒）—— 超过没更新就认为掉线
+MAX_OP_BYTES = 64 * 1024 # 单条 op 最大字节（防呆）
+
+# seed（用本地文件内容**替换当前 doc**）的限制
+#
+# ★ 内容走 WS 一帧发过来，所以有大小上限。
+#   spider 的 WS 帧最大能到 usize::MAX，但 op log 是逐字符 append，
+#   一次写几十万字符会拖慢所有在线客户端（每个都要重放）。
+MAX_SEED_BYTES = 2 * 1024 * 1024   # 2MB
+
+
+# ── seed：把一段纯文本变成一个 doc 的 op log ──────────────────
+#
+# ★ RGA 是**逐字符**模型 —— 一个字符一个 op，id = [clientId, seq]，
+#   l = 前面那个字符的 id（链式）。
+#
+#   为什么要链式而不是全锚在 ROOT：
+#   RGA 同层节点按 id **逆序**排（childrenOf 里 list.reverse()），
+#   如果所有字符都锚在 ROOT，它们就是兄弟节点 → 逆序排 → 顺序全乱。
+#   链式（a→b→c）时每个字符是上一个的子节点 → 渲染顺序就是插入顺序。
+#
+# ★ seed 用的 clientId 要跟文档里的其它 op 区分开 ——
+#   用 'seed' 前缀，保证字典序排在正常客户端 id 前面/后面都不影响
+#   （链式结构下顺序只由父子关系决定，不受 id 字典序影响）。
+def build_seed_ops(content, client_id)
+  ops = []
+  seq = 0
+  prev = ['ROOT', 0]
+  # ★ 按 **code point** 迭代（each_char），不是 UTF-16 code unit ——
+  #   RGA 一个节点存一个字符（v 可以是代理对，2 个 unit）。
+  #   客户端的 localInsertText 也是按 code point 拆的，两边一致。
+  content.each_char do |ch|
+    id = [client_id, seq]
+    ops << { 't' => 'i', 'id' => id, 'v' => ch, 'l' => prev }
+    prev = id
+    seq += 1
+  end
+  ops
+end
+
+# ★ **覆盖**一个 doc 的 op log（替换，不是追加）—— 返回 op 数量
+#
+# ★ 为什么是覆盖而不是「删光 + 追加」：
+#   删光是 N 个 delete op + N 个 insert op，日志会**永久增长** ——
+#   反复打开文件几次，日志就是几倍大，每个客户端 sync 都要重放全部。
+#   覆盖写 = 日志永远只有当前内容那么大。
+#
+# ★ 覆盖后 @op_seen 必须**清空** —— 否则新 op 的 id 会被当成「已见过」
+#   而丢弃（seed 的 clientId 带随机后缀，但保险起见清掉）。
+def replace_ops_log(doc_id, content)
+  dir = File.join(MONACO_ROOT, doc_id)
+  FileUtils.mkdir_p(dir)
+  path = File.join(dir, 'ops.log')
+  ops = build_seed_ops(content, "seed_#{SecureRandom.hex(4)}")
+  tmp = path + '.tmp'
+  File.open(tmp, 'w') do |f|
+    ops.each { |op| f.write(JSON.generate(op) + "\n") }
+  end
+  File.rename(tmp, path)
+  ops.size
+end
+
+
+# ── 每连接的文档状态 ────────────────────────────────────────
+#
+# spider 是 fork-per-request：每个 ws 连接一个独立的 ruby 进程，
+# 所以一个进程只服务一个客户端、一个 doc —— 用全局变量存不会有并发问题。
+$doc_id      = DEFAULT_DOC_ID
+$doc_dir     = nil
+$ops_log     = nil
+$mem_dir     = nil
+$monaco_channel = nil
+
+def normalize_doc_id(raw)
+  d = raw.to_s.strip
+  return DEFAULT_DOC_ID if d.empty?
+  return DEFAULT_DOC_ID unless d =~ DOC_ID_RE
+  d
+end
+
+# 设定当前连接的 doc（doc id + 目录 + 频道）
+def setup_doc(doc_id)
+  $doc_id  = doc_id
+  $doc_dir = File.join(MONACO_ROOT, doc_id)
+  $ops_log = File.join($doc_dir, 'ops.log')
+  $mem_dir = File.join($doc_dir, 'members')
+  # BDR 频道名 —— **每个 doc 一个频道**，否则不同 doc 的 op 会互相串。
+  # 频道名在握手时就定死了，所以必须在 TcpNotify.new 之前算好。
+  $monaco_channel = "monaco-#{doc_id}"
+  FileUtils.mkdir_p($mem_dir)
+  $doc_id
+end
+
+# ── op log ──────────────────────────────────────────────────
+# 只追加，一行一个 JSON op。
+
+def log_lock
+  @log_lock ||= begin
+    File.open($ops_log, File::WRONLY | File::CREAT | File::APPEND)
+  end
+end
+
+# ★ op log 被**整体替换**（seed / replace_ops_log）后调用 ——
+#   重建 log_lock 句柄。
+#
+# ★ **为什么必须重建** ——
+#   log_lock 是个**缓存的文件句柄**（@log_lock ||= ...），
+#   而且是以 **APPEND** 模式打开的。
+#   replace_ops_log 用 `File.rename(tmp, path)` 替换文件 ——
+#   rename 换的是**inode**，旧 inode 上还挂着 log_lock 这个句柄。
+#   于是后续 append_op 写进的是**已经被 unlink 的孤儿文件** ——
+#   磁盘上看不到，日志里也没有 append 记录，
+#   症状是「编辑了但文档不变 / op 丢了」。
+#
+#   症状极隐蔽：文件内容是对的（新 seed 的内容），
+#   但之后所有编辑都消失。
+def reset_log_lock
+  @log_lock.close if @log_lock && !@log_lock.closed?
+  @log_lock = nil
+end
+
+# 已写入 op 的 id 集合 —— 防止重复追加。
+#
+# 键必须带 op 类型 —— 插入 op 和删除 op 指向同一个节点 id，
+# 但它们是两个不同的操作。只用 id 去重会把删除 op 当成重复而丢掉。
+#
+# ★ 这是**进程级缓存**（每个 WS 连接一个 ruby 进程，各有各的）。
+#   op log 被**覆盖**（seed / replace）之后，缓存必须**失效并重新加载** ——
+#   文件里的 op 已经换了一批，缓存里还是旧的。
+#   详见 invalidate_op_seen。
+def op_seen_set
+  @op_seen ||= load_op_seen
+end
+
+# 从 op log 文件加载已见 op 的 id 集合
+def load_op_seen
+  s = {}
+  return s unless File.exist?($ops_log)
+  File.foreach($ops_log) do |line|
+    line = line.strip
+    next if line.empty?
+    begin
+      op = JSON.parse(line)
+      id = op['id']
+      next unless id.is_a?(Array) && id.size == 2
+      s["#{op['t']}:#{id[0]}:#{id[1]}"] = true
+    rescue JSON::ParserError
+      next
+    end
+  end
+  s
+end
+
+# ★ op log 被覆盖后调用 —— 让缓存失效，下次 op_seen_set 重新从文件加载。
+#
+# ★ 不能简单 `@op_seen = {}` ——
+#   那样缓存变空，**旧的 op id 就忘了** → 重复的 op 会被再追加一次。
+#   （虽然 op id 全局唯一不会真的重复，但清空缓存的语义是错的：
+#    缓存应该反映「文件里现在有什么」。）
+def invalidate_op_seen
+  @op_seen = nil
+end
+
+def append_op(op)
+  line = JSON.generate(op)
+  return false if line.bytesize > MAX_OP_BYTES
+  id = op['id']
+  return false unless id.is_a?(Array) && id.size == 2
+  # id[0] 必须是**非空字符串** —— 客户端没收到 hello-ack 时会生成 [null, seq]，
+  # 这种 op 写进 log 会污染所有客户端的 CRDT。
+  return false unless id[0].is_a?(String) && !id[0].empty?
+  return false unless id[1].is_a?(Integer)
+  key = "#{op['t']}:#{id[0]}:#{id[1]}"
+
+  log_lock.flock(File::LOCK_EX)
+  begin
+    if op_seen_set.key?(key)
+      Q.log "[monaco/ws] append skipped (dup id) key=#{key}"
+      return false
+    end
+    log_lock.write(line + "\n")
+    log_lock.flush
+    op_seen_set[key] = true
+  ensure
+    log_lock.flock(File::LOCK_UN)
+  end
+  true
+rescue => e
+  Q.log "[monaco/ws] append failed: #{e.class}: #{e.message}"
+  false
+end
+
+def read_ops
+  return [] unless File.exist?($ops_log)
+  out = []
+  File.foreach($ops_log) do |line|
+    line = line.strip
+    next if line.empty?
+    begin
+      out << JSON.parse(line)
+    rescue JSON::ParserError
+      # 半行（写了一半）→ 跳过
+    end
+  end
+  out
+end
+
+# ── 成员表 ─────────────────────────────────────────────────
+# 每个客户端一个文件，避免多进程互相覆盖。
+
+# 生成客户端 id —— 同时用作 **CRDT 身份** 和 **成员表身份**。
+#
+# 格式: c{pid}_{8位随机十六进制}
+#   · 固定前缀 + 定长随机 → 字典序 = 数值序（compareId 用字符串比较）
+#   · pid 便于排查
+#   · 随机后缀保证全局唯一（多机部署时 pid 可能撞 → seq 冲突 → op 丢失）
+def new_client_id
+  "c#{Process.pid}_#{SecureRandom.hex(4)}"
+end
+
+def member_file(cid)
+  File.join($mem_dir, "#{cid}.json")
+end
+
+def write_member(cid, info)
+  FileUtils.mkdir_p($mem_dir)
+  tmp = member_file(cid) + '.tmp'
+  File.write(tmp, JSON.generate(info))
+  File.rename(tmp, member_file(cid))   # 原子替换
+rescue => e
+  Q.log "[monaco/ws] member write failed: #{e.class}: #{e.message}"
+end
+
+def remove_member(cid)
+  File.unlink(member_file(cid)) if File.exist?(member_file(cid))
+rescue => e
+  Q.log "[monaco/ws] member remove failed: #{e.class}: #{e.message}"
+end
+
+def read_members
+  out = []
+  Dir.glob(File.join($mem_dir, '*.json')).each do |f|
+    begin
+      info = JSON.parse(File.read(f))
+      # 心跳超时的不算在线
+      next if info['ts'].to_i < Time.now.to_i - MEMBER_TTL
+      out << info
+    rescue JSON::ParserError, Errno::ENOENT
+      next
+    end
+  end
+  out
+end
+
+def broadcast_members(mcast)
+  members = read_members
+  payload = JSON.generate({ t: 'members', members: members })
+  mcast.notify($monaco_channel, payload)
+  members
+end
+
+# ── WS 端点 ────────────────────────────────────────────────
+Q.ws do |req, rsp|
+  # ★ 先定 doc —— 频道名和文件路径都跟它有关，必须在 TcpNotify.new 之前算好。
+  #   doc id 来自 URL query：/tool/monaco/ws?doc=myproj
+  doc_id = setup_doc(normalize_doc_id(req.param('doc')))
+  CHANNEL = $monaco_channel       # 本连接的频道（每个 doc 一个）
+
+  # BDR 连接 —— 连 spider 自己的端口
+  # host/port 不传 → 127.0.0.1 + $Cgi_Port（spider 注入的监听端口）
+  mcast = TcpNotify.new("cgi-monaco-#{Process.pid}", channel: CHANNEL)
+  cid   = nil
+  name  = 'anon'
+  color = '#7eb6ff'
+
+  # 订阅广播：别的客户端的 op 和成员表
+  #
+  # want_echo=false —— 跳过自己发的（BDR 会把消息发给发送者自己）。
+  # 自己那份走 rsp.ws_write（见下面各分支）。
+  mcast.notify(CHANNEL, false) do |msg|
+    data = msg.data
+    next if data.nil? || data.empty?
+    rsp.ws_write(data)
+  end
+
+  Q.log "[monaco/ws] + client doc=#{doc_id} channel=#{CHANNEL}"
+
+  Q.on_close do
+    # ★ 离线通知 —— 删完成员文件**必须广播一次**成员表。
+    #   顺序：先删文件 → 再广播 → 最后才 stop
+    if cid
+      remove_member(cid)
+      broadcast_members(mcast)
+      Q.log "[monaco/ws] - client #{cid}"
+    end
+    mcast.stop
+  end
+
+  req.on_ws_data do |chunk|
+    begin
+      line = chunk.to_s
+      next nil if line.empty?
+
+      msg = begin
+        JSON.parse(line)
+      rescue JSON::ParserError
+        Q.log '[monaco/ws] bad json'
+        next nil
+      end
+      next nil unless msg.is_a?(Hash)
+
+      case msg['t']
+      when 'hello'
+        # 首次 hello → 分配 clientId
+        #
+        # ★ 这个 id 同时是 **CRDT 身份** 和 **成员表身份** —— 全局只有一个。
+        cid   = new_client_id
+        name  = msg['name'].to_s[0, 32]
+        color = msg['color'].to_s[0, 16]
+        write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
+                            'cursor' => 0, 'ts' => Time.now.to_i })
+        Q.log "[monaco/ws] hello #{cid} #{name} doc=#{doc_id}"
+
+        # ★ 把服务端分配的 id 告诉客户端（客户端用它当 CRDT 身份）。
+        rsp.ws_write(JSON.generate({ t: 'hello-ack', id: cid }))
+
+        # ★ 这里**不**发全量 op —— 全量只由 'sync' 分支发一次，避免重复。
+        members = broadcast_members(mcast)
+        rsp.ws_write(JSON.generate({ t: 'members', members: members }))
+
+      when 'sync'
+        ops = read_ops# .first(1500)
+        rsp.ws_write(JSON.generate({ t: 'ops', ops: ops, total: ops.size }).force_encoding(Encoding::UTF_8))
+
+      when 'seed'
+        # ★ 用本地文件内容**替换当前 doc**。
+        #
+        #   客户端（浏览器）读本地文件 → 把内容发过来
+        #   → 服务端**覆盖**当前 doc 的 op log
+        #   → 广播 replace 给所有客户端（他们重建 Doc + 替换内容）
+        #
+        #   当前页面**不跳转** —— 就是「在当前空间打开这个文件」。
+        #
+        #   为什么不在客户端直接生成 op 发过去：
+        #   op 是逐字符的，一个 10KB 文件 = 10000 个 op，
+        #   一帧 WS 发 10000 个 JSON op 会超大，而且每个客户端都要重放一遍。
+        #   服务端覆盖写 op log 更省事（新客户端 sync 一次拿全量）。
+        if cid
+          content = msg['content'].to_s
+
+          if content.bytesize > MAX_SEED_BYTES
+            rsp.ws_write(JSON.generate({ t: 'seed-error',
+                                         'error' => "content too large: #{content.bytesize} bytes (max #{MAX_SEED_BYTES})" }))
+            next nil
+          end
+
+          begin
+            n = replace_ops_log($doc_id, content)
+            # ★ op log 被覆盖 → 两件事必须做：
+            #   1. 重建 log_lock 句柄（rename 换了 inode，旧句柄写进孤儿文件）
+            #   2. 已见 op 的缓存失效（下次重新从文件加载）
+            reset_log_lock
+            invalidate_op_seen
+          rescue => e
+            Q.log "[monaco/ws] seed failed: #{e.class}: #{e.message}"
+            rsp.ws_write(JSON.generate({ t: 'seed-error', 'error' => "#{e.class}: #{e.message}" }))
+            next nil
+          end
+
+          Q.log "[monaco/ws] seed replaced doc=#{$doc_id} chars=#{content.length} ops=#{n} by #{cid}"
+
+          # ★ 广播给所有客户端（包括自己）—— 他们要重建 Doc。
+          #   want_echo=false 会跳过发送者自己，所以自己单独发一份。
+          payload = JSON.generate({ t: 'replace', ops: nil, chars: content.length })
+          mcast.notify(CHANNEL, payload)
+          rsp.ws_write(payload)
+          rsp.ws_write(JSON.generate({ t: 'seed-ack', doc: $doc_id, chars: content.length }))
+        end
+
+      when 'clear'
+        # 清空文档 —— 服务器删掉 op log，通知所有客户端重置本地 Doc。
+        log_lock.flock(File::LOCK_EX)
+        begin
+          log_lock.truncate(0)
+          log_lock.flush
+          # ★ op log 被清空 → 已见 op 的缓存必须失效
+          invalidate_op_seen
+        ensure
+          log_lock.flock(File::LOCK_UN)
+        end
+        mcast.notify(CHANNEL, JSON.generate({ t: 'clear' }))
+        rsp.ws_write(JSON.generate({ t: 'clear' }))
+        Q.log '[monaco/ws] document cleared'
+
+      when 'op'
+        op = msg['op']
+        if append_op(op)
+          # 广播给其他客户端（自己那份本地已经应用了）
+          mcast.notify(CHANNEL, JSON.generate({ t: 'ops', ops: [op] }))
+        end
+
+      when 'presence'
+        # 光标位置 → 更新成员文件
+        #
+        # ★ 光标变化要**立刻推给其他人** —— 不广播的话，对方的远端光标
+        #   不会跟着动（成员表只在 hello/profile 时才推）。
+        #   广播是 want_echo=false（跳过自己发的），所以自己也直接发一份。
+        if cid
+          info = { 'id' => cid, 'name' => name, 'color' => color,
+                   'cursor' => msg['cursor'].to_i,
+                   'anchor' => msg['anchor'],
+                   'ts' => Time.now.to_i }
+          write_member(cid, info)
+          members = read_members
+          payload = JSON.generate({ t: 'members', members: members })
+          mcast.notify(CHANNEL, payload)
+          rsp.ws_write(payload)
+        end
+
+      when 'profile'
+        # 改名称 / 颜色
+        name  = msg['name'].to_s[0, 32]
+        color = msg['color'].to_s[0, 16]
+        if cid
+          info = { 'id' => cid, 'name' => name, 'color' => color,
+                   'cursor' => 0, 'ts' => Time.now.to_i }
+          write_member(cid, info)
+        end
+        # 广播 —— 别人的成员表要更新
+        members = read_members
+        payload = JSON.generate({ t: 'members', members: members })
+        mcast.notify(CHANNEL, payload)
+        rsp.ws_write(JSON.generate({ t: 'members', members: members }))
+
+      end
+      nil                       # ★ 返回 nil —— 阻止 on_ws_data 自动 Q.write
+    rescue => e
+      Q.log "[monaco/ws] error: #{e.class}: #{e.message}"
+      nil
+    end
+  end
+end

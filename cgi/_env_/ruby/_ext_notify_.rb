@@ -615,6 +615,11 @@ class TcpNotify < Notify
     @sock    = nil
     @stop_pipe_r = nil
     @stop_pipe_w = nil
+    # ★ 主动 stop 标志 —— 区分「主动关闭」和「意外断开」。
+    #   意外断开要自动重连；主动关闭不能重连（否则进程退出了还在重连）。
+    @stopping = false
+    # EOF 标记 —— handle_read 返回 false 时置位，loop_main 用它跳出读循环
+    @eof = false
 
     connect!
   end
@@ -622,7 +627,11 @@ class TcpNotify < Notify
   # 连接 + 握手 + 起读线程
   #
   # 断了之后可以手动调这个重连（不自动重连 —— 后台悄悄重连很难排查）。
-  def connect!
+  # 建立 socket 连接 + 握手（**不起线程**）
+  #
+  # ★ 和 connect! 分开 —— 重连时只需要重新握手，
+  #   读线程还在（loop_main 内部调这个）。
+  def connect_socket!
     close_socket
     @sock = TCPSocket.new(@host, @port)
 
@@ -638,6 +647,11 @@ class TcpNotify < Notify
     id_raw = read_exactly(ID_LEN)
     raise IOError, 'BDR handshake EOF at id' if id_raw.nil?
     @id, = id_raw.unpack('Q>')   # Q> = u64 大端
+    @id
+  end
+
+  def connect!
+    connect_socket!
 
     # ---- 起读线程 ----
     @stop_pipe_r, @stop_pipe_w = IO.pipe
@@ -661,10 +675,17 @@ class TcpNotify < Notify
 
   def stop
     return self unless @running
+    # ★ 主动关闭 —— 不要触发自动重连
+    @stopping = true
     @running = false
     @stop_pipe_w&.write_nonblock('.') rescue nil
     @loop_thread&.join(2)
     close_socket
+    # ★ stop pipe 在这里关（close_socket 不再管它 —— 那是读线程的生命周期）
+    @stop_pipe_w&.close rescue nil
+    @stop_pipe_r&.close rescue nil
+    @stop_pipe_w = nil
+    @stop_pipe_r = nil
     warn "[#{@name}] down id=#{@id}"
     self
   end
@@ -757,16 +778,77 @@ class TcpNotify < Notify
   end
 
   # 读线程主循环 —— IO.select 挂在 socket + stop pipe 上
+  #
+  # ★ **断线自动重连**（2026-10-30 加）
+  #
+  #   之前：socket EOF → handle_read 里 `return if head.nil?` →
+  #         回到 while 继续循环 → IO.select 对已 EOF 的 socket
+  #         **立即返回** → 100% CPU 忙循环，
+  #         而且**永远收不到广播**（socket 已经死了）。
+  #
+  #   症状：客户端页面看着一切正常（WS 连接还在），
+  #         但别人的编辑/广播**永远收不到** ——
+  #         「有时候是自己没反应，有时候是对面没反应」
+  #         （取决于谁的 BDR 连接先断）。
+  #
+  #   现在：EOF/异常 → 退出循环 → 退避重连 → 恢复。
   def loop_main
+    backoff = 0.5
     while @running
-      rd, = IO.select([@sock, @stop_pipe_r], nil, nil, 0.5)
-      rd&.each do |io|
-        break if io.equal?(@stop_pipe_r)
-        handle_read(io)
+      @eof = false
+      begin
+        rd, = IO.select([@sock, @stop_pipe_r], nil, nil, 0.5)
+        unless rd
+          next
+        end
+        rd.each do |io|
+          break if io.equal?(@stop_pipe_r)
+          # ★ handle_read 返回 false = EOF → 标记，跳出读循环去重连
+          unless handle_read(io)
+            @eof = true
+            break
+          end
+        end
+        backoff = 0.5 if backoff > 0.5    # 成功读到东西 → 重置退避
+      rescue IOError, Errno::ECONNRESET, Errno::EPIPE, Errno::ECONNABORTED => e
+        warn "[#{@name}] loop io error: #{e.class}: #{e.message}" if @running
+        @eof = true
+      rescue => e
+        warn "[#{@name}] loop crashed: #{e.class}: #{e.message}" if @running
+        @eof = true
+      end
+
+      # ★ 读线程断了（EOF / 异常）—— **在循环内部**重连。
+      #
+      #   为什么必须在循环内部：重连后要**继续读**，
+      #   如果在 ensure 里重连，那个线程马上就结束了，
+      #   新 socket 没人读 → 还是收不到广播。
+      #
+      #   ★ 为什么不能直接 `break` 跳出 while ——
+      #     break 会跳过下面这段重连代码（break 直接跳到循环外）。
+      #     要用「标志 + 继续循环」的方式。
+      #
+      #   用 connect_socket!（不起新线程）—— 当前就在读线程里。
+      next unless @eof
+      break if @stopping
+      attempt = 0
+      until @stopping
+        attempt += 1
+        delay = [0.5 * (2 ** [attempt - 1, 6].min), 30.0].min
+        warn "[#{@name}] disconnected, reconnecting in #{delay}s (attempt #{attempt})"
+        sleep(delay)
+        break if @stopping
+        begin
+          connect_socket!
+          warn "[#{@name}] reconnected id=#{@id}"
+          backoff = 0.5
+          @eof = false
+          break
+        rescue => e
+          warn "[#{@name}] reconnect failed: #{e.class}: #{e.message}"
+        end
       end
     end
-  rescue => e
-    warn "[#{@name}] loop crashed: #{e.class}: #{e.message}" if @running
   ensure
     @running = false
   end
@@ -783,7 +865,18 @@ class TcpNotify < Notify
   #   所以这里只会看到广播帧。
   def handle_read(io)
     head = read_exactly(LEN_PREFIX)
-    return if head.nil?                     # EOF —— 对端关闭
+    # ★ EOF —— 对端关闭。
+    #   返回 false → loop_main 退出 while 去重连。
+    #
+    #   ★ 不能只 `return`（回到 while 继续循环）——
+    #     IO.select 对已 EOF 的 socket **立即返回** → 100% CPU 忙循环，
+    #     而且永远收不到广播。
+    #   ★ 也不能设 @running = false —— 那样 while 直接结束，
+    #     走不到重连那段代码。
+    if head.nil?
+      warn "[#{@name}] EOF from peer" if @running
+      return false
+    end
     (len,) = head.unpack('N')
 
     if len < ID_LEN
@@ -815,9 +908,10 @@ class TcpNotify < Notify
       header:  header,
     )
     dispatch_msg(msg)
+    true                                   # ← 正常读到一帧
   rescue IOError, Errno::ECONNRESET, Errno::EPIPE => e
     warn "[#{@name}] read failed: #{e.class}: #{e.message}" if @running
-    @running = false
+    false                                  # ← 读失败 → 去重连
   end
 
   # 读满 n 字节 —— EOF 返回 nil
@@ -836,10 +930,12 @@ class TcpNotify < Notify
   end
 
   def close_socket
-    @stop_pipe_w&.close rescue nil
-    @stop_pipe_r&.close rescue nil
-    @stop_pipe_w = nil
-    @stop_pipe_r = nil
+    # ★ **只关 socket，不动 stop pipe** ——
+    #   stop pipe 是**读线程的生命周期**，不是连接的。
+    #   重连时（connect_socket! → close_socket）如果把 stop pipe 关了，
+    #   loop_main 里的 IO.select([@sock, @stop_pipe_r]) 就拿到 nil
+    #   → TypeError: no implicit conversion of nil into IO
+    #   → 线程崩 → 又触发重连 → 无限循环。
     @sock&.close rescue nil
     @sock = nil
   end

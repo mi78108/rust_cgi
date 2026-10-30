@@ -1,0 +1,250 @@
+/* style.css — monaco 协同编辑器
+ *
+ * 深色主题，跟 monaco 的 vs-dark 一致 —— 浅色页面 + 深色编辑器会很割裂。
+ * 状态栏沿用 pad 的视觉语言（mono 字体、pill 状态灯、who 按钮）。
+ */
+
+:root{
+  --bg:#16181d;
+  --bg-2:#1e2027;
+  --bg-3:#262931;
+  --ink:#e6e6e6;
+  --ink-2:#c8c8c8;
+  --muted:#8a8a94;
+  --rule:#33363f;
+  --lime:#c4f542;
+  --cyan:#22c7d6;
+  --red:#ff4d4d;
+  --green:#3aa76d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Inter","Helvetica Neue",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  font-size:16px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"JetBrains Mono","IBM Plex Mono","Menlo","Courier New",ui-monospace,monospace}
+
+a{color:inherit;text-decoration:none}
+
+/* ---------- layout ---------- */
+.wrap{
+  display:flex;flex-direction:column;height:100%;
+  max-width:1100px;margin:0 auto;padding:16px;
+}
+
+header{
+  display:flex;align-items:center;gap:14px;padding:0 4px 14px;
+}
+header h1{
+  margin:0;font-size:20px;font-weight:700;letter-spacing:.04em;
+}
+header h1:before{content:"//";color:var(--lime);margin-right:8px;font-weight:400}
+header .spacer,.editor-bar .spacer{flex:1}
+
+.meta{color:var(--muted);font-size:12px}
+
+header>button{
+  background:var(--bg-2);color:var(--ink);border:1px solid var(--rule);
+  padding:4px 12px;font:inherit;font-size:13px;cursor:pointer;
+}
+/* ★ :not(.pill) —— 状态 pill 是按钮，但它**不能**走 lime hover
+   （见下面 .pill 那组规则）—— 状态色有语义，不能被交互色盖掉。 */
+header>button:not(.pill):hover{background:var(--lime);color:#0f0f12;border-color:var(--lime)}
+
+.pill{
+  padding:3px 8px;border:1px solid var(--rule);border-radius:0;
+  font-size:11px;letter-spacing:.06em;color:var(--ink-2);
+  font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+}
+.pill.ok{color:var(--green);border-color:var(--green)}
+.pill.err,.pill.bad{color:var(--red);border-color:var(--red)}
+.pill.pending{color:var(--cyan);border-color:var(--cyan)}
+
+/* ---------- 连接状态（= reconnect 按钮，跟状态合并成一个）---------- */
+/* ★ pill 本身就是按钮 —— 显示连接状态，点击即重连。
+     不用原生 button 的外观（会跟 .pill 的直角风格打架）。 */
+header>button.pill{
+  background:var(--bg-2);
+  font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  letter-spacing:.06em;
+  text-transform:lowercase;
+  cursor:pointer;
+  /* ★ 高度跟同排其它按钮对齐 —— .pill 默认 padding 3px + 11px 字号
+     只有 23px，而 header>button 是 30px，不齐会显得矮一截。
+     这里锁 30px，用 flex 居中文字。 */
+  height:30px;
+  display:inline-flex;align-items:center;
+  padding:0 12px;
+}
+/* ★ hover **不变 lime** —— 状态色有语义（绿=连着 / 红=断了），
+     hover 只提亮，不改语义色。 */
+header>button.pill:hover{
+  background:var(--bg-3);
+  filter:brightness(1.35);
+}
+header>button.pill:active{filter:brightness(1.1)}
+
+/* ---------- 语言选择 ---------- */
+/* ★ 跟状态栏其它元素同一套语言：深底、直角边框、mono 字体、
+     hover 变 lime（跟 header>button 的交互一致）。
+   ★ 高度锁 20px —— 状态栏文字是 18px（12px × line-height 1.5），
+     下拉框不能更高，否则会在那一行里凸出来。 */
+.lang{display:inline-flex;align-items:center;gap:6px}
+.lang-select{
+  background:var(--bg-3);color:var(--ink);
+  border:1px solid var(--rule);border-radius:0;
+  height:20px;padding:0 20px 0 7px;
+  font:inherit;font-size:12px;line-height:18px;
+  font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  letter-spacing:.02em;
+  cursor:pointer;
+  appearance:none;-webkit-appearance:none;
+  /* 下拉箭头 —— 自绘，保持跟整体一致的直角风格 */
+  background-image:
+    linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+    linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%;
+  background-size:4px 4px,4px 4px;
+  background-repeat:no-repeat;
+}
+.lang-select:hover:not(:disabled){border-color:var(--lime);color:var(--lime)}
+.lang-select:focus{outline:none;border-color:var(--lime)}
+.lang-select:disabled{opacity:.45;cursor:default}
+/* ★ 下拉面板（option 列表）—— 各浏览器样式差异大，尽量统一 */
+.lang-select option{
+  background:var(--bg-2);color:var(--ink);
+  font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+}
+
+/* ---------- editor ---------- */
+.editor-bar{
+  display:flex;align-items:center;gap:10px;padding:6px 10px;
+  background:var(--bg-2);border:1px solid var(--rule);border-bottom:none;
+  font-size:12px;color:var(--muted);
+}
+
+/* monaco 挂载点 —— 必须给确定的高度，否则 monaco 渲染不出来 */
+.editor-host{
+  flex:1;min-height:0;
+  border:1px solid var(--rule);
+  background:var(--bg-2);
+}
+.editor-host .monaco-editor{margin:0}
+
+/* ---------- who / peers ---------- */
+.who{color:var(--ink-2);font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+.who-btn{
+  background:none;border:none;color:inherit;font:inherit;cursor:pointer;
+  padding:0 2px;border-bottom:1px dashed var(--muted);
+}
+.who-btn:hover{color:var(--lime);border-bottom-color:var(--lime)}
+
+/* ---------- 远端光标（monaco decorations） ----------
+ * 不用 pad 的 mirror 量像素 —— monaco 原生 decorations 会跟着滚动/换行走。
+ * ★ 颜色**不写在这里** —— 每个 peer 的 class 由 app.js 动态生成
+ *   （peerCaretClass），把对端颜色写进规则。见 app.js 的 peerCaretClass()。 */
+
+/* ---------- 远端光标名字标签（content widget）----------
+ * ★ 标签是 monaco 的 content widget（浮在行上方），不是 decoration ——
+ *   decoration 在文字流里，标签会撑开行宽把后面的字挤走。
+ *   content widget 是独立浮层，不影响文本排版。
+ *   颜色也由 app.js 动态注入（.pc-<id>-label）。
+ *
+ * ★ 两层结构（见 app.js 的 renderPeerLabel）：
+ *   .peer-label-outer —— monaco 的 widget DOM（它会改写这层的 style.display）
+ *   .peer-label       —— 内层，标签真正的内容（常驻显示）
+ */
+.peer-label-outer{
+  /* 浮层不能挡住鼠标 —— 否则用户选词/点击会受影响 */
+  pointer-events:none;
+}
+.peer-label{
+  position:relative;
+  padding:1px 6px;
+  font-size:11px;
+  line-height:1.35;
+  letter-spacing:.02em;
+  font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  white-space:nowrap;
+  border-radius:2px 2px 2px 0;
+  /* 阴影让标签从文字上浮起来 */
+  box-shadow:0 1px 3px rgba(0,0,0,.45);
+  pointer-events:none;
+  user-select:none;
+}
+
+/* ---------- 修改名字/颜色 弹窗 ---------- */
+.dlg-mask{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(0,0,0,.55);
+  display:flex;align-items:center;justify-content:center;
+}
+/* [hidden] 要能压过上面的 display:flex */
+.dlg-mask[hidden]{display:none}
+.dlg{
+  width:320px;max-width:calc(100vw - 32px);
+  background:var(--bg-2);border:1px solid var(--rule);
+  box-shadow:0 12px 40px rgba(0,0,0,.6);
+  padding:18px 18px 14px;
+}
+.dlg-title{
+  font-size:13px;font-weight:600;letter-spacing:.04em;
+  color:var(--ink);margin-bottom:14px;
+}
+/* 窄版 —— 纯确认类弹窗（没有输入框） */
+.dlg-narrow{width:280px}
+/* 说明文字 */
+.dlg-msg{
+  font-size:12px;line-height:1.6;color:var(--muted);
+  margin:-4px 0 16px;
+}
+.dlg-row{
+  display:flex;align-items:center;gap:10px;
+  margin-bottom:10px;font-size:12px;color:var(--muted);
+}
+.dlg-row>span:first-child{width:32px;flex:none}
+.dlg-row input[type=text]{
+  flex:1;min-width:0;
+  background:var(--bg-3);color:var(--ink);
+  border:1px solid var(--rule);padding:5px 8px;
+  font:inherit;font-size:13px;font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+}
+.dlg-row input[type=text]:focus{outline:none;border-color:var(--lime)}
+.dlg-color{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.dlg-color input[type=color]{
+  width:32px;height:28px;flex:none;padding:0;
+  background:var(--bg-3);border:1px solid var(--rule);cursor:pointer;
+}
+.dlg-color input[type=text]{flex:1;min-width:0;text-transform:lowercase}
+.dlg-swatches{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 14px}
+.dlg-swatch{
+  width:20px;height:20px;padding:0;cursor:pointer;
+  border:1px solid rgba(255,255,255,.18);border-radius:3px;
+}
+.dlg-swatch:hover{transform:scale(1.12)}
+.dlg-actions{display:flex;justify-content:flex-end;gap:8px}
+.dlg-btn{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:5px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+.dlg-btn:hover{border-color:var(--muted)}
+.dlg-btn.primary{background:var(--lime);color:#0f0f12;border-color:var(--lime)}
+.dlg-btn.primary:hover{filter:brightness(1.08)}
+/* 危险操作 —— 红色 */
+.dlg-btn.danger{background:var(--red);color:#fff;border-color:var(--red)}
+.dlg-btn.danger:hover{filter:brightness(1.12)}
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(12px);
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:8px 16px;font-size:13px;
+  opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;
+  z-index:99;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
