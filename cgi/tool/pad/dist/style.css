@@ -97,14 +97,25 @@ textarea:focus{outline:none}
 .cursor-layer{
   position:absolute;inset:0;pointer-events:none;overflow:hidden;
 }
-/* mirror: 一份跟 textarea 排版完全一致的隐藏文本, 用来量光标像素位置 */
+/* mirror: 一份跟 textarea 排版完全一致的隐藏文本, 用来量光标像素位置
+ *
+ * ★ 必须**可滚动**（overflow:auto）—— 否则文档比容器高时,
+ *   mirror 的 scrollTop 永远是 0, 量出来的是"文档坐标"而不是"视口坐标",
+ *   远端光标会跑到可见区域外面。
+ *   JS 每次测量前把 mirror.scrollTop 同步成 textarea.scrollTop。
+ */
 .cursor-mirror{
   position:absolute;top:0;left:0;visibility:hidden;
   white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;
   line-height:1.6;font-size:13px;padding:14px;
   border:0;box-sizing:border-box;width:100%;
   font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  /* 关键: 让 mirror 能滚, 高度由 JS 设成 textarea.clientHeight */
+  overflow:auto;height:100%;
+  /* 跟 textarea 一样不显示滚动条, 但保留滚动能力 */
+  scrollbar-width:none;
 }
+.cursor-mirror::-webkit-scrollbar{display:none}
 .cursor-anchor{display:inline-block;width:0;min-height:1em;line-height:inherit}
 
 .peer-cursor{

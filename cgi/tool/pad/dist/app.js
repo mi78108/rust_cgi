@@ -132,10 +132,42 @@ const setStatus = (text, kind) => {
 const mirror = $('mirror');
 const anchor = $('anchor');
 
+/**
+ * 光标位置 → 像素坐标。
+ *
+ * ★ 用 mirror（隐藏的同排版文本）量，跟 textarea 的排版一致。
+ *
+ * 两个必须处理的问题：
+ *
+ * 1) **滚动条** —— textarea 滚了，mirror 不会自动跟着滚。
+ *    mirror 是独立元素，它的 scrollTop 永远是 0。
+ *    结果：文档一长，量出来的 y 就是「文档坐标」而不是「视口坐标」，
+ *    远端光标会跑到可见区域外面（实测滚到底时 y=1242 而容器只有 439 高）。
+ *    → 每次测量前把 mirror 的 scrollTop/scrollLeft 同步成 textarea 的。
+ *
+ * 2) **非 ASCII** —— cursor 是 UTF-16 code unit 索引（textarea.selectionStart）。
+ *    slice(0, cursor) 落在代理对中间时（比如 emoji 是 2 个 code unit），
+ *    半个代理对会被渲染成 2 个替换字符，宽度算错。
+ *    → 量之前把 cursor 夹到 code point 边界。
+ */
 function cursorPoint(cursor) {
-  const text = ta.value.slice(0, cursor);
-  mirror.textContent = text;
+  // ---- 2) 夹到 code point 边界（别落在代理对中间）----
+  let c = Math.max(0, Math.min(cursor, ta.value.length));
+  if (c > 0 && c < ta.value.length) {
+    const prev = ta.value.charCodeAt(c - 1);
+    // 高位代理 (0xD800-0xDBFF) —— 说明 c 正好切在一个代理对中间
+    if (prev >= 0xD800 && prev <= 0xDBFF) c -= 1;
+  }
+
+  mirror.textContent = ta.value.slice(0, c);
   mirror.appendChild(anchor);
+
+  // ---- 1) 同步滚动 ----
+  // mirror 必须跟 textarea 一样的尺寸和可滚动高度，否则量不出来
+  mirror.style.height = ta.clientHeight + 'px';
+  mirror.scrollTop = ta.scrollTop;
+  mirror.scrollLeft = ta.scrollLeft;
+
   const a = anchor.getBoundingClientRect();
   const f = mirror.parentElement.getBoundingClientRect();
   return { x: a.left - f.left, y: a.top - f.top };
@@ -166,16 +198,21 @@ function renderPeers() {
       peerEls.set(id, rec);
     }
 
-    if (rec.cursor === p.cursor && rec.name === p.name && rec.color === p.color) continue;
-
+    // ★ 位置**总是**重算 —— 光标位置是像素坐标，
+    //   文本一滚 / 窗口一缩放，同一个 cursor 索引对应的像素位置就变了。
+    //   以前这里有 "cursor 没变就 continue" 的早退，滚动时远端光标就不动了。
+    //   （名字/颜色没变时可以跳过那部分更新，但坐标必须重算。）
     const pt = cursorPoint(p.cursor ?? 0);
     rec.el.style.left = pt.x + 'px';
     rec.el.style.top = pt.y + 'px';
-    rec.el.style.setProperty('--peer-color', p.color || 'var(--cyan)');
-    rec.label.textContent = p.name || 'anon';
-    rec.cursor = p.cursor;
-    rec.name = p.name;
-    rec.color = p.color;
+
+    if (rec.cursor !== p.cursor || rec.name !== p.name || rec.color !== p.color) {
+      rec.el.style.setProperty('--peer-color', p.color || 'var(--cyan)');
+      rec.label.textContent = p.name || 'anon';
+      rec.cursor = p.cursor;
+      rec.name = p.name;
+      rec.color = p.color;
+    }
   }
 
   for (const [id, rec] of peerEls) {
@@ -417,6 +454,14 @@ const reportPresence = () => {
 ta.addEventListener('keyup', reportPresence);
 ta.addEventListener('click', reportPresence);
 ta.addEventListener('select', reportPresence);
+
+// ★ 滚动 / 改变大小 → 远端光标要重新定位。
+//   远端光标是**像素坐标**画的（.peer-cursor 的 left/top），
+//   文本一滚，坐标就全错了 —— 而且它们不会跟着 textarea 滚
+//   （cursor-layer 是绝对定位的，overflow:hidden）。
+//   所以滚动时必须重新量一遍。
+ta.addEventListener('scroll', () => { renderPeers(); }, { passive: true });
+window.addEventListener('resize', () => { renderPeers(); });
 
 // ── 状态栏 ──────────────────────────────────────────────────
 function updateStatus() {
