@@ -86,7 +86,7 @@ function renderOpCounts() {
  *   · 不能排除自己（成员表里还没有自己）
  *   所以 localInsert / localDelete 都要先查 initialized。
  *
- *   id 格式由服务端保证：c<10位时间戳>-<8位随机>，字典序可比、全局唯一。
+ *   id 格式由服务端保证：c{pid}_{8位随机}，字典序可比、全局唯一。
  */
 let myClientId = null;
 

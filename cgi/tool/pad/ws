@@ -21,7 +21,7 @@
 #     {"t":"sync"}
 #
 #   服务器 → 客户端
-#     {"t":"hello-ack","id":"c1793323820-3f2a9b1c"}   // 服务端分配的 id
+#     {"t":"hello-ack","id":"c2665723_3f2a9b1c"}   // 服务端分配的 id
 #     {"t":"ops","ops":[...],"total":13}
 #     {"t":"members","members":[{"id":..,"name":..,"color":..,"cursor":..}]}
 #
@@ -159,16 +159,18 @@ end
 
 # 生成客户端 id —— 同时用作 **CRDT 身份** 和 **成员表身份**。
 #
-# 格式: c<10位时间戳>-<8位随机数>
+# 格式: c{pid}_{8位随机十六进制}
+#   例: c2665723_3f2a9b1c
 #
-#   · 固定前缀 'c' + 零填充数字 → 字典序 == 数值序
-#     (compareId 用 a[0] < b[0] 字符串比较，所以位数必须固定，
-#      否则 "c9-xxx" > "c10-xxx" 这种反直觉的顺序会破坏收敛)
-#   · 时间戳保证大致递增，乱序无所谓（CRDT 靠 seq 而不是 id 顺序）
-#   · 随机数保证全局唯一 —— 之前用 pid，多机部署时两台机器的 pid 可能撞
-#     (同 pid + 同秒 → 同 id → seq 冲突 → op 被误判重复而丢失)
+#   · 固定前缀 'c' + 数字 pid + '_' + 定长随机 → 字典序可比
+#     (compareId 用 a[0] < b[0] 字符串比较，所以随机部分必须定长，
+#      否则 "c1_a" > "c1_bb" 这种长度不齐的比较没有稳定含义)
+#   · pid 便于排查（日志里一眼看出是哪个 CGI 进程发的）
+#   · 随机后缀保证全局唯一 —— 单靠 pid 不够：
+#     多机部署时两台机器的 pid 可能撞，同 pid 再加同秒就会生成同 id
+#     → seq 冲突 → op 被误判重复而丢失
 def new_client_id
-  "c#{Time.now.to_i.to_s.rjust(10, '0')}-#{SecureRandom.hex(4)}"
+  "c#{Process.pid}_#{SecureRandom.hex(4)}"
 end
 
 def member_file(cid)
