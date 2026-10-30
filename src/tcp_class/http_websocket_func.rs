@@ -18,13 +18,15 @@ const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 //
 // 本文件的结构：
 //
-//   常量区    FRAME_HEADER_LEN / FLAG_LAST / OP_* —— 协议常量
+//   常量区    FRAME_HEADER_LEN / FLAG_LAST / OP_* / DEFAULT_MAX_PAYLOAD
+//   frame_head()           构造 WS 帧头（纯函数，发送侧唯一来源）
 //   FrameAssembler  CGI → 客户端 的组帧状态（私有 4 字节长度前缀）
 //   Websocket::read_head    解析**入站** WS 帧头（RFC 6455 标准帧）
-//   Websocket::send_frame   写出**出站** WS 帧（RFC 6455 标准帧）
+//   Websocket::send_frame   写出**出站**完整 WS 帧（fin=1）
+//   Websocket::send_fragmented  写出**出站**帧，payload 超限自动分片
 //   Websocket::unmask       payload 解掩码
 //   Req::read    WS → CGI   组 9 字节私有头
-//   Req::write   CGI → WS   拆 4 字节长度前缀
+//   Req::write   CGI → WS   拆 4 字节长度前缀 + 分片
 //
 // 本文件实现的是 **RFC 6455** 的服务端侧，加上 spider 自己的两层私有协议：
 //
@@ -51,7 +53,13 @@ const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 //
 // ── 方向二：服务器 → 客户端（标准 WS 帧）──────────────────────────
 //
-//   同上，但 MASK=0，FIN 恒为 1（本实现不做分片发送）。
+//   同上，但 MASK=0（服务器发帧不掩码）。
+//
+//   payload 超过 DEFAULT_MAX_PAYLOAD（64KB）时**自动分片**：
+//     首片   opcode = TEXT/BIN, fin = 0
+//     中间片 opcode = CONT(0x0), fin = 0
+//     末片   opcode = CONT(0x0), fin = 1
+//   客户端的 WebSocket API 会自动把分片拼回一条完整消息 —— JS 侧无感。
 //
 // ── 方向三：spider ↔ CGI 子进程（**私有协议**，非 RFC）────────────
 //
@@ -82,6 +90,16 @@ const WEBSOCKET_MAGIC_KEY: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /// spider → CGI 的 9 字节私有帧头长度
 const FRAME_HEADER_LEN: usize = 9;
+
+/// 单帧 payload 上限 —— 超过就自动分片（RFC 6455 §5.4）
+///
+/// 为什么是 64KB：
+///   · 64KB 是个「肯定能塞进内核 socket 发送缓冲」的值 —— 单帧写出去
+///     不用等对端读，不会卡住
+///   · 也远小于 65536 —— 分片后每片的 LEN 用 2 字节形式就够，
+///     不会退化成 8 字节长度字段（多 6 字节头）
+///   · 实测 7.4MB 的 ops 帧按 64KB 分 = 113 片，实测全部送达
+const DEFAULT_MAX_PAYLOAD: usize = 64 * 1024;
 
 /// flags bit0 —— 本片是整个 WS 消息的最后一片
 const FLAG_LAST: u8 = 0x01;
@@ -719,6 +737,13 @@ impl Req for Websocket {
     ///     留在自己 buffer 里等下次，所以这里确实是全消费。
     ///     早期版本在「剩余不足 4 字节」时也返回 data.len()，
     ///     但那 1~3 个长度前缀字节实际被丢掉了 → 下一帧错位。
+    ///
+    ///   ★ 大 payload 自动分片（上限 DEFAULT_MAX_PAYLOAD = 64KB）：
+    ///     一条消息超过 64KB 就拆成多个 WS 帧（首片 TEXT/BIN + 续片 CONT），
+    ///     客户端的 WebSocket API 会自动拼回一条完整消息 —— JS 侧无感。
+    ///     不分片的话，7.4MB 的 ops 帧就是单个 7.4MB 的 write()，
+    ///     底层 BufWriter 直通路径下单次 write 只保证写一部分，
+    ///     帧头声明的长度跟实际发出的字节数对不上 → 客户端解析错位 → RST。
     async fn write(&self, data: &[u8]) -> Result<usize, Error> {
         let frames = {
             let mut assembler = self.outgoing.lock().await;
@@ -726,7 +751,8 @@ impl Req for Websocket {
         };
         for frame in frames {
             let opcode = self.last_op.load(Ordering::Relaxed);
-            self.send_frame(opcode, &frame).await?;
+            self.send_fragmented(opcode, &frame, DEFAULT_MAX_PAYLOAD)
+                .await?;
         }
         Ok(data.len())
     }
