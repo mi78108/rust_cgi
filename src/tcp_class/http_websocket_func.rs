@@ -232,7 +232,7 @@ impl Websocket {
                 //ctrl close 0x8 0b10001000
                 debug!("websocket ctrl close event");
                 // 回 close 帧时对端可能已经走了，写失败不该 panic。
-                if let Err(e) = self.write_with_opcode(OP_CLOSE, &[]).await {
+                if let Err(e) = self.write_with_opcode(true,OP_CLOSE, &[]).await {
                     error!("websocket ctrl close write fail {:?}", e);
                 }
                 //return Err(Error::from(ErrorKind::UnexpectedEof));
@@ -269,7 +269,7 @@ impl Websocket {
                         *b ^= mask[i % 4];
                     }
                 }
-                if let Err(e) = self.write_with_opcode(OP_PONG, &payload).await {
+                if let Err(e) = self.write_with_opcode(true, OP_PONG, &payload).await {
                     error!("websocket ctrl pong write fail {:?}", e);
                 }
                 // 返回 len=Some(0) 表示"控制帧已处理，没有数据帧 payload"。
@@ -288,7 +288,54 @@ impl Websocket {
         }
     }
 
-    async fn write_with_opcode(&self, opcode: u8, data: &[u8]) -> std::io::Result<usize> {
+    // async fn write_fragmented(
+    //     &self,
+    //     opcode: u8,
+    //     payload: &[u8],
+    //     max: usize,
+    // ) -> std::io::Result<usize> {
+    //     let len = payload.len();
+    //
+    //     // 控制帧不允许分片
+    //     if opcode & 0x08 != 0 {
+    //         if len > 125 {
+    //             return Err(std::io::Error::new(
+    //                 std::io::ErrorKind::InvalidInput,
+    //                 "control frame payload > 125",
+    //             ));
+    //         }
+    //         return self.write_with_opcode(true, opcode, payload).await;
+    //     }
+    //
+    //     if max == 0 {
+    //         return Err(std::io::Error::new(
+    //             std::io::ErrorKind::InvalidInput,
+    //             "max must be > 0",
+    //         ));
+    //     }
+    //
+    //     // 单帧
+    //     if len <= max {
+    //         return self.write_with_opcode(true, opcode, payload).await;
+    //     }
+    //
+    //     // 分片
+    //     let mut offset = 0;
+    //     let mut first = true;
+    //     while offset < len {
+    //         let end = (offset + max).min(len);
+    //         let chunk = &payload[offset..end];
+    //         let fin = end == len;
+    //         let op = if first { opcode } else { 0x00 };
+    //         debug!("websocket fragmented op={} fin={} op={}",op,fin,op);
+    //         self.write_with_opcode(fin, op, chunk).await?;
+    //         first = false;
+    //         offset = end;
+    //     }
+    //     Ok(len)
+    // }
+
+    async fn write_with_opcode(&self, fin:bool,opcode: u8, data: &[u8]) -> std::io::Result<usize> {
         // byte[0]  [+fin,+rsv1,+rsv2,+rsv3,++++opcode]
         // fin = 1; rsv1-3 保留
         // opcode 4bit 0附加数据 1文本数据 2二进制数据 3-7保留为控制帧 8链接关闭 9ping 0xApong b-f同3-7保留
@@ -305,7 +352,7 @@ impl Websocket {
         //
         // 这里收到的 opcode 是纯 opcode（不含 fin/rsv），统一在这里补上 fin=1。
         // 服务端发出去的帧都是完整帧，不做分片。
-        let b0 = 0x80 | (opcode & 0x0f);
+        let b0 = ((fin as u8) << 7) | (opcode & 0x0f);
         if let Ok(_) = self.base_on.write(&[b0]).await {
             //B2=  +mask+len*7
             let len = data.len();
@@ -383,7 +430,9 @@ impl Websocket {
             let buf = self.payload_buffer.read().await;
             buf.clone()
         };
-        self.write_with_opcode(self.last_op.load(Ordering::Relaxed), &payload)
+
+        //self.write_fragmented(self.last_op.load(Ordering::Relaxed), &payload, 64*1024).await?;
+        self.write_with_opcode(true,self.last_op.load(Ordering::Relaxed), &payload)
             .await?;
         self.base_on
             .base_on
@@ -522,7 +571,9 @@ impl Req for Websocket {
 
             // 整帧：直接投递
             let frame = &data[payload_start..payload_start + len];
-            self.write_with_opcode(self.last_op.load(Ordering::Relaxed), frame)
+
+            //self.write_fragmented(self.last_op.load(Ordering::Relaxed),frame, 32*1024).await?;
+            self.write_with_opcode(true,self.last_op.load(Ordering::Relaxed), frame)
                 .await?;
             self.base_on
                 .base_on
@@ -582,7 +633,7 @@ impl Req for Websocket {
     // }
 
     async fn close(&self) -> Result<(), Error> {
-        if self.write_with_opcode(OP_CLOSE, &[]).await.is_ok() {
+        if self.write_with_opcode(true, OP_CLOSE, &[]).await.is_ok() {
             if let Err(_) = self.base_on.base_on.req_writer.lock().await.flush().await {}
         }
         self.base_on.close().await
