@@ -200,6 +200,15 @@ export class Doc {
    * ★ 同样用显式栈迭代（理由同 visibleOf）——
    *   而且它跟 getText() 走的是**同一套遍历**，
    *   保证"渲染出来的文本"和"光标换算用的索引"永远一致。
+   *
+   * ★ 每个**节点**一项（不是每个 UTF-16 code unit）。
+   *   一个节点的 v 可能是多个 code unit（比如 emoji 是代理对 = 2 个 unit），
+   *   所以这里用 `for (const ch of node.v)` 按 code point 展开。
+   *
+   * ★ 由此带来的单位不一致（下面 anchorAt 处理）：
+   *     textIndex() 的下标 = code point 序号
+   *     ta.selectionStart  = UTF-16 code unit 序号
+   *     有 emoji 时两者不等（比如 "a中😀b" → 4 vs 5）。
    */
   textIndex() {
     const list = [];
@@ -220,25 +229,62 @@ export class Doc {
    * 插入位置 → anchor（"插在谁后面"）。
    *   pos = 0 → ROOT
    *   pos = n → 第 n 个字符所在节点（插在它后面）
+   *
+   * ★ **pos 的单位是 UTF-16 code unit** —— 因为它来自
+   *   `ta.selectionStart`（浏览器 API 就是这个单位）。
+   *
+   *   但 textIndex() 返回的是**按 code point 展开**的列表，两者单位不同：
+   *   "a中😀b" → textIndex 4 项，JS 字符串 length 5（emoji 占 2 个 unit）。
+   *
+   *   直接用 list[pos-1] 会错位：pos=3（emoji 代理对中间）时
+   *   list[2] 是 emoji 自己 → 插到 emoji 后面（应该是 emoji 前面）。
+   *
+   *   所以这里不能按 code point 序号取，要按**累计的 UTF-16 长度**定位。
    */
   anchorAt(pos) {
     const list = this.textIndex();
     if (pos <= 0) return ROOT_ID;
-    if (pos > list.length) {
-      return list.length ? list[list.length - 1].node.id : ROOT_ID;
+
+    // 累加 UTF-16 长度，找到 pos 落在哪个 code point 上
+    let units = 0;
+    let prevId = null;               // 上一个字符的**节点 id**（不是节点对象）
+    for (const item of list) {
+      const next = units + item.ch.length;   // ch.length 是 UTF-16 unit 数
+      if (pos <= next) {
+        // pos 落在这个字符的范围内
+        //   pos == next  → 光标在这个字符**之后** → anchor = 它自己
+        //   pos <  next  → 光标在这个字符**中间**（只可能是代理对）
+        //                  → 应该在它**前面** → anchor = 上一个字符
+        return pos === next ? item.node.id : (prevId || ROOT_ID);
+      }
+      units = next;
+      prevId = item.node.id;
     }
-    return list[pos - 1].node.id;
+
+    // pos 超出末尾 → anchor = 最后一个字符
+    return list.length ? list[list.length - 1].node.id : ROOT_ID;
   }
 
-  /** [start, start+len) 区间的字符分别属于哪些节点（去重，保持顺序） */
+  /**
+   * [start, start+len) 区间的字符分别属于哪些节点（去重，保持顺序）
+   *
+   * ★ start / len 的单位也是 UTF-16 code unit（来自 selectionStart/End）。
+   */
   nodesInRange(start, len) {
     const list = this.textIndex();
     const out = [];
     const seen = new Set();
-    for (let i = start; i < start + len && i < list.length; i++) {
-      const n = list[i].node;
-      const k = idKey(n.id);
-      if (!seen.has(k)) { seen.add(k); out.push(n); }
+    const end = start + len;
+    let units = 0;
+    for (const item of list) {
+      const next = units + item.ch.length;
+      // 与 [start, end) 有交集 → 这个字符被选中
+      if (next > start && units < end) {
+        const k = idKey(item.node.id);
+        if (!seen.has(k)) { seen.add(k); out.push(item.node); }
+      }
+      units = next;
+      if (units >= end) break;
     }
     return out;
   }

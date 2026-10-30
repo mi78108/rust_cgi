@@ -315,7 +315,12 @@ function localInsertText(text, at) {
   let pos = at;
   for (const ch of text) {
     localInsert(ch, pos);
-    pos++;
+    // ★ pos 是 **UTF-16 code unit** 索引（doc.anchorAt / ta.selectionStart 都用它），
+    //   所以要按 ch.length（UTF-16 长度）递增，**不是** 1。
+    //   for...of 按 code point 迭代，emoji 是 1 个 code point 但 2 个 UTF-16 unit。
+    //   只加 1 的话，emoji 后面所有字符的 pos 都偏小 → anchor 选错 →
+    //   插入位置跑到 emoji 前面去了。
+    pos += ch.length;
   }
 }
 
