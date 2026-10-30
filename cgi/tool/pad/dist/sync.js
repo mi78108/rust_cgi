@@ -26,6 +26,7 @@ export class Sync extends EventTarget {
    *                                 total = 服务器 op log 的权威总数（可能是 undefined）
    *   opts.onMembers(members[]) => void   收到成员表
    *   opts.onHelloAck(id) => void         服务端分配的成员表 id（hello-ack）
+   *   opts.onOpen () => void               WS 刚连上（重连时要重置 id）
    *   opts.onStatus (status) => void      连接状态变化
    */
   constructor(url, opts = {}) {
@@ -38,6 +39,7 @@ export class Sync extends EventTarget {
     this.onClear = opts.onClear || (() => {});
     this.onStatus = opts.onStatus || (() => {});
     this.onHelloAck = opts.onHelloAck || (() => {});
+    this.onOpen = opts.onOpen || (() => {});
 
     this.ws = null;
     this.connected = false;
@@ -68,6 +70,11 @@ export class Sync extends EventTarget {
     ws.addEventListener('open', () => {
       this.connected = true;
       this.reconnectDelay = 1000;
+      // ★ 连接刚建立 —— 通知上层"要重新初始化了"。
+      //   服务端每次 hello 都会分配**新的** id（重连 = 新进程 = 新 cid），
+      //   所以上层必须把旧的 id / 初始化状态清掉，等新的 hello-ack。
+      //   不清的话会用旧 id 发 op —— 那个 id 在服务器 log 里已经不属于你了。
+      this.onOpen();
       this.onStatus('connected');
       // 打招呼 + 要全量
       this._send({ t: 'hello', name: this.name, color: this.color });

@@ -21,8 +21,12 @@
 #     {"t":"sync"}
 #
 #   服务器 → 客户端
-#     {"t":"ops","ops":[...]}
+#     {"t":"hello-ack","id":"c1793323820-3f2a9b1c"}   // 服务端分配的 id
+#     {"t":"ops","ops":[...],"total":13}
 #     {"t":"members","members":[{"id":..,"name":..,"color":..,"cursor":..}]}
+#
+# ★ id 只有一套 —— 服务端分配，同时当 CRDT 身份和成员表身份。
+#   客户端拿到它之前不算初始化成功（不能生成 op，id 会是 [null, seq]）。
 #
 # 为什么用 JSON 而不是二进制：
 #   这个规模（几百字节文档）下带宽开销可忽略，换来可调试（curl 能看懂）
@@ -49,6 +53,7 @@ require_relative '../../_env_/ruby/_base_'
 require_relative '../../_env_/ruby/_ext_notify_'
 require 'json'
 require 'fileutils'
+require 'securerandom'
 
 # ── 配置 ────────────────────────────────────────────────────
 PAD_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/pad' : ENV['SPIDER_DATA']
@@ -109,6 +114,11 @@ def append_op(op)
   return false if line.bytesize > MAX_OP_BYTES
   id = op['id']
   return false unless id.is_a?(Array) && id.size == 2
+  # id[0] 必须是**非空字符串** —— 客户端没收到 hello-ack 时会生成 [null, seq]，
+  # 这种 op 写进 log 会污染所有客户端的 CRDT（别人收到 null id 的节点）。
+  # 前端有 initialized 门控挡着，但服务端也要兜底 —— 不能指望客户端永远正确。
+  return false unless id[0].is_a?(String) && !id[0].empty?
+  return false unless id[1].is_a?(Integer)
   # 键带 op 类型 —— 插入/删除指向同一个 id 时不能互相误判为重复
   key = "#{op['t']}:#{id[0]}:#{id[1]}"
 
@@ -146,6 +156,20 @@ end
 # ── 成员表 ─────────────────────────────────────────────────
 # 每个客户端一个文件，避免多进程互相覆盖。
 # 谁在线 = members/ 目录里有哪些文件。
+
+# 生成客户端 id —— 同时用作 **CRDT 身份** 和 **成员表身份**。
+#
+# 格式: c<10位时间戳>-<8位随机数>
+#
+#   · 固定前缀 'c' + 零填充数字 → 字典序 == 数值序
+#     (compareId 用 a[0] < b[0] 字符串比较，所以位数必须固定，
+#      否则 "c9-xxx" > "c10-xxx" 这种反直觉的顺序会破坏收敛)
+#   · 时间戳保证大致递增，乱序无所谓（CRDT 靠 seq 而不是 id 顺序）
+#   · 随机数保证全局唯一 —— 之前用 pid，多机部署时两台机器的 pid 可能撞
+#     (同 pid + 同秒 → 同 id → seq 冲突 → op 被误判重复而丢失)
+def new_client_id
+  "c#{Time.now.to_i.to_s.rjust(10, '0')}-#{SecureRandom.hex(4)}"
+end
 
 def member_file(cid)
   File.join(MEM_DIR, "#{cid}.json")
@@ -245,7 +269,18 @@ Q.ws do |req, rsp|
       case msg['t']
       when 'hello'
         # 首次 hello → 分配 clientId
-        cid   = "c#{Time.now.to_i}-#{Process.pid}"
+        #
+        # ★ 这个 id 同时是 **CRDT 身份** 和 **成员表身份** —— 全局只有一个。
+        #   客户端拿到它（hello-ack）之后：
+        #     · op 的 id 用它        → id: [cid, seq]
+        #     · 成员表里排除自己用它  → 跟成员表的 id 天然一致，不会对不齐
+        #   之前是客户端自己生成 UUID 做 CRDT 身份、服务端另分配 cid 做成员表身份，
+        #   两套 id 永远不相等 → 前端把自己当成了别人的远端光标。
+        #
+        #   格式要求（compareId 用字典序比较 id[0]）：
+        #     · 固定前缀 + 零填充数字 → 字典序 = 数值序
+        #     · 全局唯一（多机部署时 pid 可能撞 → 掺随机后缀）
+        cid   = new_client_id
         name  = msg['name'].to_s[0, 32]
         color = msg['color'].to_s[0, 16]
         write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,

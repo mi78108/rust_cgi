@@ -75,26 +75,23 @@ function renderOpCounts() {
 }
 
 /**
- * CRDT 身份 —— op 的 id 用它（[clientId, seq]）。
- * 客户端自己生成（crypto.randomUUID），重连换新的。
+ * 客户端 id —— 同时是 **CRDT 身份** 和 **成员表身份**。
+ *
+ * ★ 服务端分配（hello-ack 告知），客户端不自己生成。
+ *   之前是客户端生成 UUID 做 CRDT 身份、服务端另分配 cid 做成员表身份，
+ *   两套 id 永远不相等 → 前端把自己当成别人的远端光标渲染出来了。
+ *
+ * ★ 收到 hello-ack 之前是 null —— 这期间**不算初始化成功**：
+ *   · 不能生成 op（id 会是 [null, seq]）
+ *   · 不能排除自己（成员表里还没有自己）
+ *   所以 localInsert / localDelete 都要先查 initialized。
+ *
+ *   id 格式由服务端保证：c<10位时间戳>-<8位随机>，字典序可比、全局唯一。
  */
-let myClientId = '';
+let myClientId = null;
 
-/**
- * 成员表身份 —— 服务端分配的 id（c<ts>-<pid>），由 hello-ack 告知。
- *
- * ★ 和 myClientId 是**两个不同的东西**，别混：
- *   myClientId  → CRDT 身份，op 的 id 用它。客户端生成。
- *   myMemberId  → 成员表身份。服务端分配（成员表里每个成员的 id 就是它）。
- *
- *   成员表里的 id 用的是服务端的 cid，跟客户端的 UUID 永远不相等 →
- *   渲染远端光标时必须拿 myMemberId 去比，用 myClientId 会把自己当成别人，
- *   渲染出一个"自己的远端光标"。
- *
- *   hello-ack 到达前是 null → 那时候成员表里也还没有自己（后端先分配再广播），
- *   所以用 null 也不会误判。
- */
-let myMemberId = null;
+/** 初始化完成没 —— 收到 hello-ack 才是 true */
+let initialized = false;
 
 /** 远端光标 DOM: clientId → { el, label, name, color, cursor } */
 const peerEls = new Map();
@@ -116,20 +113,6 @@ const setStatus = (text, kind) => {
   statusEl.textContent = text;
   statusEl.className = 'pill ' + kind;
 };
-
-// ── clientId ────────────────────────────────────────────────
-// 必须是 [clientId, seq] 里的 clientId —— 任意唯一字符串都行，
-// 但要能字典序比较（compareId 用它做 tiebreak）。
-function newClientId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  const h = (n) => {
-    const buf = new Uint8Array(n);
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(buf);
-    else for (let i = 0; i < n; i++) buf[i] = Math.floor(Math.random() * 256);
-    return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
-  };
-  return h(4) + h(2) + h(2) + h(2) + h(6);
-}
 
 // ── 光标位置测量 ────────────────────────────────────────────
 // 用 mirror（隐藏的同排版文本）量出第 cursor 个字符的像素位置。
@@ -153,9 +136,9 @@ function renderPeers() {
   const seen = new Set();
 
   for (const [id, p] of members) {
-    // ★ 用 myMemberId（服务端分配的 id）排除自己，不是 myClientId。
-    //   成员表里的 id 是服务端的 cid，跟客户端的 CRDT UUID 不相等。
-    if (id === myMemberId) continue;
+    // ★ 用 myClientId 排除自己 —— 现在它就是服务端分配的 id，
+    //   跟成员表里的 id 天然一致（统一身份后不会再对不齐）。
+    if (id === myClientId) continue;
     seen.add(id);
 
     let rec = peerEls.get(id);
@@ -257,6 +240,11 @@ let imeSnapshot = null;
 
 /** 生成一个插入 op 并本地应用 */
 function localInsert(text, at) {
+  // ★ 没收到 hello-ack 之前不算初始化成功 —— 此时没有自己的 id，
+  //   生成的 op 会是 [null, seq]，其他客户端收到就废了。
+  //   直接丢弃这次输入（textarea 的值已经被浏览器改了，
+  //   但下一轮 sync 会用服务器的全量 op 把内容拉回来）。
+  if (!initialized || !myClientId) return;
   const anchorId = doc.anchorAt(at);
   const op = { t: 'i', id: [myClientId, seq++], v: text, l: anchorId };
   doc.apply(op);
@@ -283,6 +271,9 @@ function localInsertText(text, at) {
 
 /** 生成删除 op 并本地应用 */
 function localDelete(at, len) {
+  // 跟 localInsert 一样：没初始化成功不发 op。
+  // （删除的 id 来自已有节点，不会是 null，但初始化前也不该有删除动作）
+  if (!initialized || !myClientId) return;
   const nodes = doc.nodesInRange(at, len);
   for (const n of nodes) {
     const op = { t: 'd', id: n.id };
@@ -435,10 +426,14 @@ function connect() {
   clearPeerEls();
   members = new Map();
 
-  myClientId = newClientId();
-  myMemberId = null;      // hello-ack 到达前还不知道自己在成员表里的 id
+  // ★ id 由服务端分配（hello-ack 才知道）→ 先置空，
+  //   initialized = false 表示"还没初始化成功"。
+  myClientId = null;
+  initialized = false;
   seq = 0;
-  myName = 'user-' + myClientId.slice(0, 4);
+  // 名字还是要本地生成（hello 时要带上），但不能再从 myClientId 截 ——
+  // 那时候还没有 id。随便取 4 个字符即可。
+  myName = 'user-' + Math.random().toString(16).slice(2, 6);
   myColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
   meEl.textContent = myName;
   meEl.style.color = myColor;
@@ -446,8 +441,24 @@ function connect() {
   sync = new Sync(WS_URL, {
     name: myName,
     color: myColor,
+    onOpen: () => {
+      // ★ WS 重连成功 —— 服务端会分配**新的** id（重连 = 新 CGI 进程 = 新 cid）。
+      //   清掉旧的 id 和初始化状态，等新的 hello-ack。
+      //   不清的话会用旧 id 发 op —— 那个 id 在服务器 log 里已经不是你的了，
+      //   别人收到会当成陌生 id（可能破坏收敛）。
+      myClientId = null;
+      initialized = false;
+      seq = 0;
+      localOpCount = 0;
+    },
     onStatus: (s) => {
-      if (s === 'connected') setStatus('connected', 'ok');
+      // ★ WS 连上 ≠ 初始化成功。
+      //   初始化 = 拿到服务端分配的 id（hello-ack）。
+      //   在那之前不能打字（没有自己的 id），所以状态不能显示 connected。
+      if (s === 'connected') {
+        if (initialized) setStatus('connected', 'ok');
+        else setStatus('initializing…', 'pending');
+      }
       else if (s === 'connecting') setStatus('connecting…', 'pending');
       else if (s === 'reconnecting') setStatus('reconnecting…', 'pending');
       else if (s === 'error') setStatus('error', 'err');
@@ -467,8 +478,13 @@ function connect() {
       renderOpCounts();
     },
     onHelloAck: (id) => {
-      // 服务端分配的成员表 id —— 记住它，用来在成员表里排除自己。
-      myMemberId = id;
+      // ★ 服务端分配的 id —— 初始化成功。
+      //   之前是"客户端 UUID 做 CRDT 身份 + 服务端 cid 做成员表身份"两套，
+      //   现在统一成这一个：op 的 id 用它，成员表排除自己也用它。
+      myClientId = id;
+      initialized = true;
+      // 初始化完成 → 状态从 "initializing…" 变成 connected
+      setStatus('connected', 'ok');
       // 成员表可能已经把自己算进去了（hello 时后端会广播一次），
       // 所以收到 id 后重渲染一次，把"自己的远端光标"去掉。
       renderPeers();
