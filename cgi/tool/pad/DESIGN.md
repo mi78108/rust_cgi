@@ -99,6 +99,7 @@ RGA 的 op 满足交换律 + 幂等：
 {"t":"op","op":{...}}              // 一个 CRDT op
 {"t":"hello","name":"user-ab12","color":"#c4f542"}   // 加入
 {"t":"presence","cursor":42}       // 光标位置
+{"t":"profile","name":"张三","color":"#7eb6ff"}   // 改名称/颜色
 {"t":"sync"}                      // 请求全量（重连后）
 {"t":"clear"}                     // 清空文档（广播给所有客户端）
 ```
@@ -170,6 +171,7 @@ RGA 的 op 数 = 每次按键一个，长文档会涨，但 demo 阶段够用。
 - 本地输入 → 生成 op → 发送
 - 远端 op → apply → 更新 textarea + 变换光标
 - presence：光标位置上报 + 远端光标渲染（mirror 测量法）
+- 个人资料弹窗：点状态栏的 "you" 打开，改名称/颜色 → 发 `profile` 消息
 
 ## 输入 → op 的转换（最容易出错的地方）
 
@@ -216,6 +218,11 @@ $SPIDER_DATA/pad/<docId>/members/<clientId>.json  # 成员表，每客户端一�
   追加到 ops.log
   mcast.notify(PAD_CHANNEL, {t:'ops',ops:[op]})   # BDR 广播给频道里其他客户端
   （自己那份由客户端本地直接应用，不绕一圈）
+
+收到 profile（改名称/颜色）→
+  更新 members/<cid>.json（保留原来的 cursor —— 改名字不该把
+    自己的光标位置抹成 0，否则别人的远端光标会突然跳到开头）
+  广播成员表
 ```
 
 新客户端连上 → 发 `{"t":"ops","ops":[...]}` 全量（从 ops.log 读）。

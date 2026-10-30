@@ -517,6 +517,96 @@ $('btn-clear').addEventListener('click', () => {
   if (sync) sync.sendClear();
 });
 
+// ── 个人资料弹窗 ────────────────────────────────────────────
+// 点状态栏的 "you" 打开 —— 改名称 / 颜色，改完广播给其他客户端。
+const popEl    = $('profile-pop');
+const nameEl   = $('profile-name');
+const colorEl  = $('profile-color');
+const swatchEl = $('profile-swatches');
+
+/** 弹窗里正在编辑的值（还没保存） */
+let draftName = '';
+let draftColor = '';
+
+/** 预设色块 */
+function buildSwatches() {
+  for (const c of PEER_COLORS) {
+    const b = document.createElement('button');
+    b.className = 'swatch';
+    b.style.background = c;
+    b.title = c;
+    b.dataset.color = c;
+    b.addEventListener('click', () => {
+      draftColor = c;
+      colorEl.value = c;
+      markSwatch();
+    });
+    swatchEl.appendChild(b);
+  }
+}
+
+/** 高亮当前选中的色块 */
+function markSwatch() {
+  for (const b of swatchEl.children) {
+    b.classList.toggle('on', b.dataset.color.toLowerCase() === draftColor.toLowerCase());
+  }
+}
+
+function openProfile() {
+  draftName = myName;
+  draftColor = myColor;
+  nameEl.value = myName;
+  colorEl.value = myColor;
+  markSwatch();
+  popEl.hidden = false;
+  nameEl.focus();
+  nameEl.select();
+}
+
+function closeProfile() {
+  popEl.hidden = true;
+}
+
+function saveProfile() {
+  // 名称不能为空 —— 空名字在成员表里没法区分
+  const n = nameEl.value.trim().slice(0, 32) || myName;
+  const c = colorEl.value || myColor;
+
+  myName = n;
+  myColor = c;
+  meEl.textContent = myName;
+  meEl.style.color = myColor;
+
+  // 发给服务器 —— 它会更新成员表并广播
+  if (sync) sync.sendProfile(myName, myColor);
+
+  closeProfile();
+  showToast('profile updated');
+}
+
+buildSwatches();
+
+meEl.addEventListener('click', openProfile);
+$('profile-close').addEventListener('click', closeProfile);
+$('profile-save').addEventListener('click', saveProfile);
+
+// 点弹窗外面（遮罩）关闭
+popEl.addEventListener('click', (e) => {
+  if (e.target === popEl) closeProfile();
+});
+
+// 名称输入框里回车 = 保存
+nameEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); saveProfile(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeProfile(); }
+});
+
+// 自定义颜色
+colorEl.addEventListener('input', () => {
+  draftColor = colorEl.value;
+  markSwatch();
+});
+
 connect();
 
 window.addEventListener('pagehide', () => {

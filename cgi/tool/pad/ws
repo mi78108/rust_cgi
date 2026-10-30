@@ -341,6 +341,26 @@ Q.ws do |req, rsp|
           mcast.notify(PAD_CHANNEL, JSON.generate({ t: 'ops', ops: [op] }))
         end
 
+      when 'profile'
+        # ★ 改自己的名称 / 颜色。
+        #   成员表里的 name/color 是客户端**发过来**的，不是服务器分配的，
+        #   所以这里只更新服务器保存的那份 + 广播新的成员表。
+        if cid
+          name  = msg['name'].to_s[0, 32]
+          color = msg['color'].to_s[0, 16]
+          # 保留原来的 cursor —— 改名字不该把自己的光标位置抹成 0
+          # （否则别人的远端光标会突然跳到开头）
+          old   = read_members.find { |m| m['id'] == cid } || {}
+          write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
+                              'cursor' => old['cursor'].to_i, 'ts' => Time.now.to_i })
+          # 广播 —— 别人的成员表要更新（自己的那份走 rsp.ws_write）
+          members = read_members
+          payload = JSON.generate({ t: 'members', members: members })
+          mcast.notify(PAD_CHANNEL, payload)
+          rsp.ws_write(payload)
+          Q.log "[pad/ws] profile #{cid} #{name} #{color}"
+        end
+
       when 'presence'
         if cid
           info = { 'id' => cid, 'name' => name, 'color' => color,

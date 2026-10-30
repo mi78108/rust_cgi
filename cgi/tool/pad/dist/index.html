@@ -30,7 +30,7 @@
       <span class="meta">·</span>
       <span class="meta">ops: <span id="ops-local" class="who">0</span> local / <span id="ops-global" class="who">0</span> global</span>
       <span class="spacer"></span>
-      <span class="meta">you: <span id="me" class="who">—</span></span>
+      <span class="meta">you: <button id="me" class="who who-btn" title="点击修改名称和颜色">—</button></span>
     </div>
 
     <div class="editor-frame">
@@ -53,6 +53,37 @@
 </div>
 
 <div id="toast" class="toast"></div>
+
+<!-- 个人资料弹窗 —— 点状态栏的 "you" 打开 -->
+<div id="profile-pop" class="pop" hidden>
+  <div class="pop-card" role="dialog" aria-label="个人资料">
+    <div class="pop-head">
+      <span class="pop-title">个人资料</span>
+      <button id="profile-close" class="pop-x" title="关闭">×</button>
+    </div>
+
+    <label class="pop-row">
+      <span class="pop-label">名称</span>
+      <input id="profile-name" type="text" maxlength="32" spellcheck="false"
+             placeholder="user-xxxx" autocomplete="off">
+    </label>
+
+    <div class="pop-row">
+      <span class="pop-label">颜色</span>
+      <div id="profile-swatches" class="swatches"></div>
+    </div>
+
+    <div class="pop-row">
+      <span class="pop-label">自定义</span>
+      <input id="profile-color" type="color" title="自定义颜色">
+    </div>
+
+    <div class="pop-foot">
+      <span class="pop-hint">改动会同步给其他客户端</span>
+      <button id="profile-save" class="pop-save">保存</button>
+    </div>
+  </div>
+</div>
 
 <!-- 普通 js/html, 无构建步骤 -->
 <script type="module" src="/tool/pad/app.js"></script>

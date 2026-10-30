@@ -162,6 +162,11 @@ export class Sync extends EventTarget {
     this._send({ t: 'presence', cursor });
   }
 
+  /** 改自己的名称 / 颜色 */
+  sendProfile(name, color) {
+    this._send({ t: 'profile', name, color });
+  }
+
   /** 请求全量 op */
   requestSync() {
     this._send({ t: 'sync' });

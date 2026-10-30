@@ -147,3 +147,72 @@ footer code{
   transition:opacity .2s,transform .2s;
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ---------- 个人资料弹窗 ---------- */
+/* "you" 那个按钮 —— 长得像普通文字, 但可点 */
+.who-btn{
+  font:inherit;color:var(--cyan);font-weight:600;
+  background:none;border:0;padding:0;cursor:pointer;
+  border-bottom:1px dashed var(--cyan);
+}
+.who-btn:hover{color:var(--lime-ink);background:var(--lime);border-bottom-color:var(--ink)}
+
+.pop{
+  position:fixed;inset:0;z-index:300;
+  display:flex;align-items:flex-start;justify-content:flex-end;
+  padding:52px 14px 0;
+  background:rgba(15,15,18,.28);
+}
+.pop[hidden]{display:none}
+.pop-card{
+  width:280px;
+  background:var(--bg);border:1px solid var(--rule);
+  box-shadow:4px 4px 0 var(--ink);
+}
+.pop-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:7px 10px;background:var(--bg-2);border-bottom:1px solid var(--rule);
+}
+.pop-title{font-size:12px;letter-spacing:.1em;color:var(--ink-2)}
+.pop-x{
+  font:inherit;font-size:16px;line-height:1;
+  background:none;border:0;color:var(--muted);cursor:pointer;padding:0 2px;
+}
+.pop-x:hover{color:var(--red)}
+.pop-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 10px;border-bottom:1px solid var(--grid);
+}
+.pop-label{
+  flex:0 0 44px;font-size:11px;letter-spacing:.08em;color:var(--muted);
+}
+.pop-row input[type=text]{
+  flex:1;min-width:0;
+  padding:4px 6px;font:inherit;font-size:13px;
+  background:var(--bg-2);color:var(--ink);
+  border:1px solid var(--rule);outline:0;
+}
+.pop-row input[type=text]:focus{border-color:var(--cyan)}
+.pop-row input[type=color]{
+  width:44px;height:26px;padding:0;
+  background:none;border:1px solid var(--rule);cursor:pointer;
+}
+/* 预设色块 */
+.swatches{display:flex;flex-wrap:wrap;gap:5px}
+.swatch{
+  width:20px;height:20px;padding:0;cursor:pointer;
+  border:1px solid var(--rule);background:transparent;
+}
+.swatch:hover{transform:translate(-1px,-1px)}
+.swatch.on{outline:2px solid var(--ink);outline-offset:1px}
+.pop-foot{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:8px 10px;
+}
+.pop-hint{font-size:11px;color:var(--muted)}
+.pop-save{
+  padding:4px 14px;font:inherit;font-size:12px;letter-spacing:.08em;
+  background:var(--lime);color:var(--lime-ink);
+  border:1px solid var(--ink);cursor:pointer;
+}
+.pop-save:hover{background:var(--ink);color:var(--lime)}
