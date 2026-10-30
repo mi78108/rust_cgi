@@ -211,9 +211,22 @@ Q.ws do |req, rsp|
   Q.log "[pad/ws] + client"
 
   Q.on_close do
-    remove_member(cid) if cid
+    # ★ 离线通知 —— 删完成员文件**必须广播一次**成员表。
+    #   成员表是"谁在线"的唯一来源（前端 onMembers 直接整个替换 members Map），
+    #   不广播的话其他人不会知道这个人走了 →
+    #   · 远端光标变成幽灵，一直挂在屏幕上
+    #   · peers online 计数不减
+    #   而且只有等下次有人发消息（hello/presence/op）才会顺带更新，
+    #   没人说话的话这个错误状态会一直挂着。
+    #
+    #   顺序：先删文件 → 再广播（广播出去的就是"他已经不在了"的名单）
+    #         → 最后才 stop（notify 是同步写 socket，先发出去再关）
+    if cid
+      remove_member(cid)
+      broadcast_members(mcast)
+      Q.log "[pad/ws] - client #{cid}"
+    end
     mcast.stop
-    Q.log "[pad/ws] - client #{cid}"
   end
 
   req.on_ws_data do |chunk|
@@ -238,6 +251,15 @@ Q.ws do |req, rsp|
         write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
                             'cursor' => 0, 'ts' => Time.now.to_i })
         Q.log "[pad/ws] hello #{cid} #{name}"
+
+        # ★ 把服务端分配的 id 告诉客户端。
+        #   客户端自己也有一个 clientId（crypto.randomUUID），
+        #   但**成员表里的 id 用的是服务端的 cid**（c<ts>-<pid>），
+        #   两者永远不相等 → 前端 `id === myClientId` 判不出"哪个是我自己"，
+        #   会把自己的光标当成别人的远端光标渲染出来。
+        #   所以 hello-ack 里带上 cid，客户端用它覆盖 myClientId。
+        #   （op 的 id 仍用客户端自己的 UUID —— 那是 CRDT 身份，跟成员表 id 无关。）
+        rsp.ws_write(JSON.generate({ t: 'hello-ack', id: cid }))
 
         # ★ 这里**不**发全量 op。
         #   客户端连上时会同时发 hello + sync（见 sync.js），

@@ -74,8 +74,27 @@ function renderOpCounts() {
   if (opsEl) opsEl.textContent = `${localOpCount} / ${globalOpCount}`;
 }
 
-/** 本地 seq 计数器 —— id = [clientId, seq]，全序比较要用 */
+/**
+ * CRDT 身份 —— op 的 id 用它（[clientId, seq]）。
+ * 客户端自己生成（crypto.randomUUID），重连换新的。
+ */
 let myClientId = '';
+
+/**
+ * 成员表身份 —— 服务端分配的 id（c<ts>-<pid>），由 hello-ack 告知。
+ *
+ * ★ 和 myClientId 是**两个不同的东西**，别混：
+ *   myClientId  → CRDT 身份，op 的 id 用它。客户端生成。
+ *   myMemberId  → 成员表身份。服务端分配（成员表里每个成员的 id 就是它）。
+ *
+ *   成员表里的 id 用的是服务端的 cid，跟客户端的 UUID 永远不相等 →
+ *   渲染远端光标时必须拿 myMemberId 去比，用 myClientId 会把自己当成别人，
+ *   渲染出一个"自己的远端光标"。
+ *
+ *   hello-ack 到达前是 null → 那时候成员表里也还没有自己（后端先分配再广播），
+ *   所以用 null 也不会误判。
+ */
+let myMemberId = null;
 
 /** 远端光标 DOM: clientId → { el, label, name, color, cursor } */
 const peerEls = new Map();
@@ -134,7 +153,9 @@ function renderPeers() {
   const seen = new Set();
 
   for (const [id, p] of members) {
-    if (id === myClientId) continue;
+    // ★ 用 myMemberId（服务端分配的 id）排除自己，不是 myClientId。
+    //   成员表里的 id 是服务端的 cid，跟客户端的 CRDT UUID 不相等。
+    if (id === myMemberId) continue;
     seen.add(id);
 
     let rec = peerEls.get(id);
@@ -164,6 +185,11 @@ function renderPeers() {
   for (const [id, rec] of peerEls) {
     if (!seen.has(id)) { rec.el.remove(); peerEls.delete(id); }
   }
+
+  // "peers online" = **别人**的数量，不含自己。
+  // 用 seen.size 而不是 members.size —— seen 只装渲染出来的远端光标，
+  // 排除了自己。成员表里也有自己（后端把所有人都写进去了）。
+  peersEl.textContent = String(seen.size);
 }
 
 function clearPeerEls() {
@@ -393,7 +419,7 @@ function updateStatus() {
   const text = doc.getText();
   const chars = text.length;
   renderOpCounts();
-  peersEl.textContent = String(members.size);
+  // peers 计数由 renderPeers() 负责（它才知道排除了自己之后剩几个）
   return chars;
 }
 
@@ -410,6 +436,7 @@ function connect() {
   members = new Map();
 
   myClientId = newClientId();
+  myMemberId = null;      // hello-ack 到达前还不知道自己在成员表里的 id
   seq = 0;
   myName = 'user-' + myClientId.slice(0, 4);
   myColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
@@ -439,10 +466,16 @@ function connect() {
       }
       renderOpCounts();
     },
+    onHelloAck: (id) => {
+      // 服务端分配的成员表 id —— 记住它，用来在成员表里排除自己。
+      myMemberId = id;
+      // 成员表可能已经把自己算进去了（hello 时后端会广播一次），
+      // 所以收到 id 后重渲染一次，把"自己的远端光标"去掉。
+      renderPeers();
+    },
     onMembers: (list) => {
       members = new Map();
       for (const m of list) members.set(m.id, m);
-      peersEl.textContent = String(members.size);
       renderPeers();
     },
     onClear: () => {

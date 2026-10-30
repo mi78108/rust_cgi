@@ -25,6 +25,7 @@ export class Sync extends EventTarget {
    *   opts.onOps    (ops[], total) => void   收到 op
    *                                 total = 服务器 op log 的权威总数（可能是 undefined）
    *   opts.onMembers(members[]) => void   收到成员表
+   *   opts.onHelloAck(id) => void         服务端分配的成员表 id（hello-ack）
    *   opts.onStatus (status) => void      连接状态变化
    */
   constructor(url, opts = {}) {
@@ -36,6 +37,7 @@ export class Sync extends EventTarget {
     this.onMembers = opts.onMembers || (() => {});
     this.onClear = opts.onClear || (() => {});
     this.onStatus = opts.onStatus || (() => {});
+    this.onHelloAck = opts.onHelloAck || (() => {});
 
     this.ws = null;
     this.connected = false;
@@ -86,6 +88,10 @@ export class Sync extends EventTarget {
       switch (msg.t) {
         case 'ops':
           this.onOps(msg.ops || [], msg.total);
+          break;
+        case 'hello-ack':
+          // 服务端分配了成员表 id → 告诉上层"你是谁"
+          this.onHelloAck(msg.id);
           break;
         case 'members':
           this.onMembers(msg.members || []);
