@@ -45,11 +45,29 @@
 //   t.id;                       // 本连接的 id
 //   t.stop();
 //
+//   // 定向发送（只发给某一个连接）：
+//   t.sendTo(7n, 'hello');      // 只发给连接 id = 7 的那个连接
+//
 //   // 跳过自己发的：
 //   t.subscribe('room1', handler, { wantEcho: false });
 //
 //   // 连别处：
 //   new TcpNotify('alice', { host: '10.0.0.9', port: 9999, channel: 'room1' });
+//
+// BDR 帧格式（2026-10 加 dst）：
+//     客户端 → 服务端: [len u32 BE][dst 8 字节][payload]
+//                   dst = 目标连接 id，0 = 广播给全频道
+//     服务端 → 客户端: [len u32 BE][src 8 字节][payload]
+//                   ★ 下行**不带 dst** —— 服务端已经按 dst 过滤过了
+//                     （只接受 dst == 自己的 id 或 dst == 0），
+//                     发到客户端的一定是给自己的。
+//                   src = 原始发送者的连接 id
+//     握手确认帧:       [len=8][id 8 字节]        ← 不变
+//
+//   连接 id 从 1 开始，0 永远保留给「广播」哨兵。
+//
+//   ★ **定向过滤在服务端做**（write_loop 里按 dst 判断）——
+//     非目标连接的帧不会写进它的 socket，字节不会流到别的客户端。
 //
 // 服务端地址：默认 127.0.0.1 + env('Cgi_Port')（spider 注入的自己的
 // 监听端口），再默认 3000。主机名写死 127.0.0.1 —— BDR 是**本机进程
@@ -65,7 +83,14 @@ const MAGIC = Buffer.from([0x89, 0x42, 0x52, 0x44, 0x0d, 0x0a, 0x1a, 0x00]);
 
 const LEN_PREFIX = 4;          // 长度前缀字节数
 const ID_LEN = 8;              // 连接 id 字节数（u64 大端）
+const DST_LEN = 8;             // 目标 id 字节数（u64 大端）—— 0 = 广播
 const MAX_MSG_LEN = 16 * 1024 * 1024;   // 单条消息上限，跟 rust 侧一致
+
+// 广播哨兵 —— dst == 0n 表示「发给全频道」
+//
+// ★ 连接 id 从 **1** 开始（rust 侧 UID.fetch_add(1)），0 永远保留给这个哨兵。
+//   所以「dst == 0n」就是安全的广播判据，不会跟合法连接 id 撞。
+const DST_BROADCAST = 0n;
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
@@ -186,23 +211,41 @@ export class TcpNotify extends EventEmitter {
   // 发消息
   //
   // payload: string | Buffer | Uint8Array
-  send(payload) {
+  // dst: 目标连接 id —— 0n（默认）= 广播给全频道；
+  //      其它值 = 只发给那一个连接（服务端在 write_loop 里过滤）
+  send(payload, dst = DST_BROADCAST) {
     const body = toBuffer(payload);
     if (body.length > MAX_MSG_LEN) return false;
 
-    // BDR 发送帧：[len u32 BE][payload]
-    const frame = Buffer.allocUnsafe(LEN_PREFIX + body.length);
-    frame.writeUInt32BE(body.length, 0);
-    body.copy(frame, LEN_PREFIX);
+    // BDR 发送帧：[len u32 BE][dst 8 字节][payload]
+    const d = BigInt(dst ?? 0) < 0n ? DST_BROADCAST : BigInt(dst ?? 0);
+    const frame = Buffer.allocUnsafe(LEN_PREFIX + DST_LEN + body.length);
+    frame.writeUInt32BE(DST_LEN + body.length, 0);
+    frame.writeBigUInt64BE(d, LEN_PREFIX);
+    body.copy(frame, LEN_PREFIX + DST_LEN);
 
     if (!this.socket || this.socket.destroyed) return false;
     this.socket.write(frame);
     return true;
   }
 
+  // 定向发送 —— 只发给某一个连接（dst != 0n）
+  //
+  //   t.sendTo(7n, 'hello');      // 只发给连接 id = 7 的那个连接
+  //   t.sendTo(null, 'hello');    // null → 广播（等价于 send）
+  //
+  // **服务端在 write_loop 里做过滤** —— 非目标连接的帧不会写进它的 socket，
+  // 所以定向消息的字节不会流到别的客户端（保密性有保证）。
+  sendTo(dst, payload) {
+    const d = dst === null || dst === undefined ? DST_BROADCAST : BigInt(dst);
+    return this.send(payload, d <= 0n ? DST_BROADCAST : d);
+  }
+
   // emit 风格别名 —— 跟 ruby's notify(:ch, payload) 对应
-  notify(channel, payload) {
-    return this.send(payload);
+  //
+  // dst 可选 —— 0n（默认）= 广播；其它值 = 定向给那一个连接
+  notify(channel, payload, dst = DST_BROADCAST) {
+    return this.send(payload, dst);
   }
 
   // 消息来源标识 —— BDR 里没有 "host:port" 这种 from，用连接 id
@@ -262,7 +305,14 @@ export class TcpNotify extends EventEmitter {
         continue;
       }
 
-      // 广播帧：[len][id 8 字节][payload]
+      // 下行帧：[len][src 8 字节][payload]
+      //
+      // ★ 下行帧**不带 dst** —— 服务端在 write_loop 里已经按 dst 过滤过了
+      //   （只接受 dst == 自己的 id 或 dst == 0），发到这里的一定是给自己的。
+      //   所以客户端**不需要**再判断目标是谁，收到就处理。
+      //
+      // ★ 握手确认帧（[len=8][id 8]）在连接建立时就读掉了，
+      //   所以这里只会看到下行帧。
       if (len < ID_LEN) {
         process.stderr.write(`[${this.name}] bad frame len ${len} (< ${ID_LEN})\n`);
         this.stop();
@@ -275,6 +325,7 @@ export class TcpNotify extends EventEmitter {
 
       const fromId = body.readBigUInt64BE(0);
       const payload = Buffer.from(body.subarray(ID_LEN));
+
       this._dispatch(fromId, payload);
     }
   }
@@ -283,8 +334,9 @@ export class TcpNotify extends EventEmitter {
   //
   // own = (帧里的 id == 本连接的 id)。
   //
-  // ★ 不能用 `id !== 0` 判断"帧里有没有 id" —— 连接 id 0 是**合法**的
-  //   （第一个连接就分到 0）。要区分"没有 id"得用 null/undefined。
+  // ★ 连接 id 从 1 开始（0 保留给 dst 的广播哨兵），但这里仍然用
+  //   null/undefined 判断「有没有 id」而不是 `id !== 0n` —— 语义更明确，
+  //   不依赖「id 不会是 0」这个前提。
   _dispatch(fromId, payload) {
     const key = this.channel || 'default';
     const list = [...(this.subs.get(key) ?? []), ...(this.subs.get('default') ?? [])];

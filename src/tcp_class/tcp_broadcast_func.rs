@@ -34,6 +34,17 @@ const CHANNEL_CAPACITY: usize = 1024;
 /// 定长的好处: 广播消息里的 id 不用带长度前缀，客户端按固定偏移就能切。
 const ID_LEN: usize = 8;
 
+/// 目标 id —— 定长 8 字节（u64 大端）
+///
+/// 0 = 广播给全频道；非 0 = 只给这一个连接。
+const DST_LEN: usize = 8;
+
+/// 广播哨兵 —— dst == 0 表示「广播给全频道」
+///
+/// ★ 连接 id **从 1 开始**（UID.fetch_add(1)），0 永远保留给这个哨兵。
+///   否则第一个连接就是 id 0，它将永远无法被定向寻址。
+const DST_BROADCAST: u64 = 0;
+
 /// 全局频道表: channel 名 -> Sender
 ///
 /// Sender 放在这里而不是每个连接各建一个，是因为 broadcast 只有一个 Sender
@@ -45,6 +56,8 @@ static CHANNELS: OnceLock<Channels> = OnceLock::new();
 /// 连接 id 分配器 —— 自增序号
 ///
 /// 用 u64 而不是 usize：id 会进线格式（定长 8 字节），不能随平台宽度变。
+///
+/// ★ 从 **1** 开始 —— 0 保留给「广播」哨兵（dst == 0）。
 static UID: AtomicU64 = AtomicU64::new(0);
 
 fn channels() -> &'static Channels {
@@ -85,15 +98,29 @@ pub async fn all_connections() -> Vec<TcpBroadcast> {
 ///   握手: `[0x89 'B' 'R' 'D' 0x0d 0x0a 0x1a 0x00]` (8 字节定长)
 ///         + `<channel_name>\n` (变长, \n 结尾)
 ///   服务端下发: `[len u32 BE][id 8 字节]` —— 客户端收到这条 = 通讯建立
-///   客户端发: `[len u32 BE][payload]`
-///   广播给订阅者: `[len u32 BE][id 8 字节][payload]`
-///                len = 8 + payload.len()，id 是发送者的连接 id
+///
+///   客户端 → 服务端: `[len u32 BE][dst 8 字节][payload]`
+///     dst = 目标连接 id，0 = 广播给全频道
+///
+///   内部广播帧（走 broadcast 通道）: `[len u32 BE][src 8 字节][dst 8 字节][payload]`
+///     src = 发送者的连接 id（服务端加的，客户端不管）
+///     dst = 原样保留客户端指定的目标
+///
+///   服务端 → 客户端: `[len u32 BE][src 8 字节][payload]`
+///     ★ **下行不带 dst** —— 服务端在 write_loop 里已经按 dst 过滤过了
+///       （只接受 dst == 自己的 id 或 dst == 0），发到这里的一定是给自己的。
+///     src = 原始发送者的 id（客户端据此知道消息是谁发的）
 ///
 /// 消息带长度前缀是为了让所有订阅者收到的**字节流完全一致** ——
 /// TCP 是字节流, 直接广播原始字节的话各客户端的切分点可能不同。
 ///
-/// 广播消息里的 id 定长 8 字节（u64 大端），所以客户端按固定偏移就能
-/// 把 id 和 payload 切开，不需要额外的长度前缀。
+/// ★ 定向消息（dst != 0）在 `write_loop` 里过滤 ——
+///   每个连接的写任务按自己的 uid 判断：不是发给自己的帧就**跳过不写**。
+///   所以定向消息的字节**不会进入非目标连接的 socket**（保密性有保证）。
+///
+///   注意：`tx.send()` 仍然把内部帧塞进每个订阅者的环形缓冲 ——
+///   「不写 socket」做到了，「不广播」没做到。
+///   真正的方案 B（服务端路由、只投递给目标）要改成 mpsc 定向投递。
 #[derive(Debug, Clone)]
 pub struct TcpBroadcast {
     /// 所在频道
@@ -166,7 +193,10 @@ impl TcpBroadcast {
         // ---- 2. 分配连接 id —— 连接的唯一身份 ----
         //
         // 后面所有日志、连接表、广播消息里的 id 都用它，不再另起一套编号。
-        let uid = UID.fetch_add(1, Ordering::Relaxed);
+        //
+        // ★ 从 1 开始 —— 0 保留给 dst 的「广播」哨兵。
+        //   fetch_add(1) 返回的是**自增前**的值，所以第一次拿到 1。
+        let uid = UID.fetch_add(1, Ordering::Relaxed) + 1;
 
         // ---- 3. 订阅频道 ----
         let tx = {
@@ -285,10 +315,12 @@ impl TcpBroadcast {
 
 /// 读任务：从 socket 读消息 -> 广播给频道
 ///
-/// 客户端发来的消息格式 `[len u32 BE][payload]`。
-/// 广播出去时前面加上发送者的 id（定长 8 字节）：
-///   `[len u32 BE][id 8 字节][payload]`，len = 8 + payload.len()
-/// 订阅者据此知道每条消息是谁发的。
+/// 客户端发来的消息格式 `[len u32 BE][dst 8 字节][payload]`。
+///
+/// 服务端加上 src（发送者 id）后，构成**内部广播帧**：
+///   `[len u32 BE][src 8 字节][dst 8 字节][payload]`
+/// len = 16 + payload.len()
+/// dst 原样保留 —— write_loop 靠它判断这条是不是发给自己的。
 ///
 /// **按固定大小分块读写**（用 env 里的 Req_Buffer_Size），不一次性按 len 分配大缓冲。
 async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uid: u64) {
@@ -318,14 +350,34 @@ async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uid: u64)
             );
             break;
         }
-        if len == 0 {
-            // 长度为 0 的消息：跳过，不广播（避免给订阅者塞空消息）
-            continue;
+        if len < DST_LEN as u32 {
+            // 连 dst 都装不下 —— 帧格式不对，断连（继续读只会错位）
+            error!(
+                "TcpBroadcast[{}] msg len {} < dst len {}, drop connection",
+                uid,
+                len,
+                DST_LEN
+            );
+            break;
         }
 
+        // ---- 读 dst（定长 8 字节）----
+        //
+        // dst = 0 → 广播给全频道；非 0 → 只给这一个连接。
+        //
+        // 这里**照样广播给全频道**（tx.send()），过滤发生在 write_loop ——
+        // 每个连接的写任务按自己的 uid 决定要不要写进 socket。
+        let mut dst_bytes = [0u8; DST_LEN];
+        if let Err(e) = read_full(&tcp, &mut dst_bytes).await {
+            debug!("TcpBroadcast[{}] read dst err {:?}", uid, e);
+            break;
+        }
+        let dst = u64::from_be_bytes(dst_bytes);
+
         // ---- 读 payload，分块累积 ----
-        let mut payload = Vec::with_capacity(len as usize);
-        let mut remaining = len as usize;
+        let payload_len = len as usize - DST_LEN;
+        let mut payload = Vec::with_capacity(payload_len);
+        let mut remaining = payload_len;
         while remaining > 0 {
             let want = remaining.min(buf.len());
             match read_full(&tcp, &mut buf[..want]).await {
@@ -334,7 +386,8 @@ async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uid: u64)
                     // 不完整的消息 —— 丢弃（连接断了，TCP 语义下这条消息不完整）
                     debug!(
                         "TcpBroadcast[{}] incomplete msg, dropped ({} bytes left)",
-                        uid, remaining
+                        uid,
+                        remaining
                     );
                     return;
                 }
@@ -347,23 +400,31 @@ async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uid: u64)
             remaining -= want;
         }
 
-        // ---- 广播 ----
-        // 带上发送者的 id（定长 8 字节）+ 长度前缀一起发，
-        // 订阅者拿到的就是能直接写的完整帧:
-        //   [len u32 BE][id 8 字节][payload]
-        // len = ID_LEN + payload.len()
-        let mut frame = Vec::with_capacity(LEN_PREFIX + ID_LEN + payload.len());
-        frame.extend_from_slice(&((ID_LEN + payload.len()) as u32).to_be_bytes());
+        // ---- 广播（内部帧）----
+        // 加上发送者的 src + 原样保留 dst + 长度前缀：
+        //   [len u32 BE][src 8 字节][dst 8 字节][payload]
+        // len = ID_LEN + DST_LEN + payload.len()
+        //
+        // dst 保留在帧里 —— write_loop 靠它判断这条是不是发给自己的，
+        // 以及重拼下行帧时要把这 8 字节去掉。
+        let mut frame = Vec::with_capacity(LEN_PREFIX + ID_LEN + DST_LEN + payload.len());
+        frame.extend_from_slice(&((ID_LEN + DST_LEN + payload.len()) as u32).to_be_bytes());
         frame.extend_from_slice(&uid.to_be_bytes());
+        frame.extend_from_slice(&dst.to_be_bytes());
         frame.extend_from_slice(&payload);
 
         match tx.send(Arc::new(frame)) {
             Ok(n) => {
                 debug!(
-                    "TcpBroadcast[{}] broadcast {} bytes to {} peers",
+                    "TcpBroadcast[{}] broadcast {} bytes to {} peers (dst={})",
                     uid,
                     payload.len(),
-                    n
+                    n,
+                    if dst == DST_BROADCAST {
+                        "all".to_string()
+                    } else {
+                        dst.to_string()
+                    }
                 );
             }
             Err(e) => {
@@ -375,18 +436,86 @@ async fn read_loop(tcp: Arc<Tcp>, tx: broadcast::Sender<Arc<Vec<u8>>>, uid: u64)
 }
 
 /// 写任务：从频道收消息 -> 写 socket
+///
+/// ★ **定向消息在这里过滤**（dst != 0 时只写给目标连接）。
+///
+/// 收到的**内部帧**布局: [len u32 BE][src 8B][dst 8B][payload]
+/// dst 在帧里的偏移 = LEN_PREFIX + ID_LEN = 12，长度 DST_LEN = 8。
+///
+/// 每一帧先看 dst：
+///   dst == 0    → 广播，全频道都写
+///   dst == uid  → 定向给本连接，写
+///   其它        → 不是给本连接的，**跳过不写**
+///
+/// ★ 这样定向消息的字节**不会进入非目标连接的 socket** —— 比客户端过滤强：
+///   客户端过滤的话，字节还是过了别人的 socket（对方只是丢弃）。
+///   在服务端过滤，保密性有保证。
+///
+/// ★ **下行帧不带 dst** —— 重拼成 `[len u32 BE][src 8B][payload]`：
+///   已经过滤过了，发到这里的一定是给自己的，dst 是多余信息。
+///   len 也要跟着减 8。
+///
+/// ⚠️ 注意：`tx.send()` 仍然把内部帧塞进了每个订阅者的环形缓冲 ——
+///   「不写 socket」做到了，「不广播」没做到。
+///   真正的方案 B（服务端路由）要改成 mpsc 定向投递。
 async fn write_loop(tcp: Arc<Tcp>, mut rx: broadcast::Receiver<Arc<Vec<u8>>>, uid: u64) {
     let buf_size = buffer_size(&tcp);
 
     loop {
         match rx.recv().await {
             Ok(frame) => {
+                // ---- 定向消息过滤 ----
+                //
+                // 帧太短（装不下 src + dst）→ 跳过，不写。
+                let need = LEN_PREFIX + ID_LEN + DST_LEN;
+                if frame.len() < need {
+                    debug!(
+                        "TcpBroadcast[{}] frame too short {} (need {}), skipped",
+                        uid,
+                        frame.len(),
+                        need
+                    );
+                    continue;
+                }
+                // dst 在帧里的偏移 = LEN_PREFIX + ID_LEN（跳过 len 和 src）
+                let dst = u64::from_be_bytes([
+                    frame[LEN_PREFIX + ID_LEN],
+                    frame[LEN_PREFIX + ID_LEN + 1],
+                    frame[LEN_PREFIX + ID_LEN + 2],
+                    frame[LEN_PREFIX + ID_LEN + 3],
+                    frame[LEN_PREFIX + ID_LEN + 4],
+                    frame[LEN_PREFIX + ID_LEN + 5],
+                    frame[LEN_PREFIX + ID_LEN + 6],
+                    frame[LEN_PREFIX + ID_LEN + 7],
+                ]);
+                if dst != DST_BROADCAST && dst != uid {
+                    // 不是发给本连接的 —— 跳过（不写 socket）
+                    debug!(
+                        "TcpBroadcast[{}] skip directed msg for dst={}",
+                        uid,
+                        dst
+                    );
+                    continue;
+                }
+
+                // ---- 重拼下行帧：去掉 dst ----
+                //
+                // 内部帧: [len 4B][src 8B][dst 8B][payload]   len = 16 + payload.len()
+                // 下行帧: [len 4B][src 8B][payload]            len = 8  + payload.len()
+                //
+                // len 也要改 —— 声明的长度必须等于实际写入的字节数。
+                let payload_len = frame.len() - need;
+                let mut out = Vec::with_capacity(LEN_PREFIX + ID_LEN + payload_len);
+                out.extend_from_slice(&((ID_LEN + payload_len) as u32).to_be_bytes());
+                out.extend_from_slice(&frame[LEN_PREFIX..LEN_PREFIX + ID_LEN]);
+                out.extend_from_slice(&frame[need..]);
+
                 // 按固定大小分块写
                 let mut off = 0usize;
                 let mut failed = false;
-                while off < frame.len() {
-                    let end = (off + buf_size).min(frame.len());
-                    match tcp.write(&frame[off..end]).await {
+                while off < out.len() {
+                    let end = (off + buf_size).min(out.len());
+                    match tcp.write(&out[off..end]).await {
                         Ok(n) if n > 0 => off += n,
                         Ok(_) => {
                             debug!("TcpBroadcast[{}] write zero", uid);

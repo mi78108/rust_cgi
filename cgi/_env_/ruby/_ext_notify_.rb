@@ -35,7 +35,7 @@
 #      调用方自己保证，框架不校验。
 #   6) TCP 读 socket 时 IO#read(n) 可能返回少于 n 字节（TCP 分段），
 #      必须循环读满 —— 一次 read 就当拿齐了会解析出垃圾帧。
-#   7) BDR 的连接 id 0 是**合法**的（第一个连接就分到 0）。
+#   7) BDR 的连接 id 从 **1** 开始 —— 0 保留给 dst 的「广播」哨兵。
 #      判断"帧里有没有 id"要用 nil，不能用 != 0。
 #
 # 协议：HEADER 行 + "\n" + PAYLOAD（ASCII-8BIT 原始字节）
@@ -50,6 +50,21 @@
 #   否则二进制 payload 里没法挖字段。
 #
 #   ★ TcpNotify 是例外 —— 它走 BDR 二进制帧协议，没有 HEADER 行。
+#
+# ★ BDR 帧格式（2026-10 加 dst）：
+#     客户端 → 服务端: [len u32 BE][dst 8 字节][payload]
+#                   dst = 目标连接 id，0 = 广播给全频道
+#     服务端 → 客户端: [len u32 BE][src 8 字节][payload]
+#                   ★ 下行**不带 dst** —— 服务端已经按 dst 过滤过了
+#                     （只接受 dst == 自己的 id 或 dst == 0），
+#                     发到客户端的一定是给自己的。
+#                   src = 原始发送者的连接 id
+#     握手确认帧:       [len=8][id 8 字节]        ← 不变
+#
+#   连接 id 从 1 开始，0 永远保留给「广播」哨兵。
+#
+#   ★ **定向过滤在服务端做**（write_loop 里按 dst 判断）——
+#     非目标连接的帧不会写进它的 socket，字节不会流到别的客户端。
 #
 # Message 字段:
 #   kind     — 'msg' | 'hb'
@@ -556,7 +571,14 @@ class TcpNotify < Notify
   MAGIC_LEN   = 8
   LEN_PREFIX  = 4          # 长度前缀字节数
   ID_LEN      = 8          # 连接 id 字节数（u64 大端）
+  DST_LEN     = 8          # 目标 id 字节数（u64 大端）—— 0 = 广播
   MAX_MSG_LEN = 16 * 1024 * 1024   # 单条消息上限, 跟 rust 侧一致
+
+  # 广播哨兵 —— dst == 0 表示「发给全频道」
+  #
+  # ★ 连接 id 从 **1** 开始（rust 侧 UID.fetch_add(1)），0 永远保留给这个哨兵。
+  #   所以「dst == 0」就是安全的广播判据，不会跟合法连接 id 撞。
+  DST_BROADCAST = 0
 
   DEFAULT_HOST = '127.0.0.1'
   DEFAULT_PORT = 3000
@@ -650,6 +672,21 @@ class TcpNotify < Notify
   # 消息来源标识 —— BDR 里没有 "host:port" 这种 from, 用连接 id
   def peer_id; @id; end
 
+  # 定向发送 —— 只发给某一个连接（dst != 0）
+  #
+  #   t.send_to(7, 'hello')       # 只发给连接 id = 7 的那个连接
+  #   t.send_to(nil, 'hello')     # nil → 广播（等价于 notify）
+  #
+  # **服务端在 write_loop 里做过滤** —— 非目标连接的帧不会写进它的 socket，
+  # 所以定向消息的字节不会流到别的客户端（保密性有保证）。
+  #
+  # @param dst 目标连接的 id（从对端的握手确认帧里拿到）
+  def send_to(dst, payload, channel: nil)
+    d = dst.to_i
+    d = DST_BROADCAST if d <= 0
+    send_msg(coerce(channel || @channel), payload, {}, dst: d)
+  end
+
   protected
 
   # TcpNotify 不走 HEADER 协议 —— BDR 是二进制帧, 没有 header 行。
@@ -661,11 +698,18 @@ class TcpNotify < Notify
   end
 
   # BDR 没有 "HEADER + payload" 这一层 —— 帧是纯二进制。
-  # 发送路径直接写 [len u32 BE][payload]。
-  def send_msg(channel, payload, meta = {})
+  # 发送路径直接写 [len u32 BE][dst 8 字节][payload]。
+  #
+  # @param dst 目标连接 id —— 0（默认）= 广播给全频道；
+  #              其它值 = 只发给那一个连接（服务端在 write_loop 里过滤）。
+  def send_msg(channel, payload, meta = {}, dst: DST_BROADCAST)
     body = payload_bytes(payload)
     return self if body.bytesize > MAX_MSG_LEN
-    frame = [body.bytesize].pack('N') + body
+    d = dst.to_i
+    d = DST_BROADCAST if d.negative?
+    frame = [DST_LEN + body.bytesize].pack('N') +
+            [d].pack('Q>') +
+            body
     @send_mutex.synchronize { do_send_packet(frame) }
     self
   end
@@ -681,8 +725,9 @@ class TcpNotify < Notify
   #
   # 这里的 own = (帧里的 id == 本连接的 id)。
   #
-  # ★ 不能用 `id != 0` 来判断"帧里有没有 id" —— 连接 id 0 是**合法**的
-  #   (第一个连接就分到 0)。要区分"没有 id"得用 nil。
+  # ★ 连接 id 从 1 开始（0 保留给 dst 的广播哨兵），但这里仍然用
+  #   nil 判断「有没有 id」而不是 `id != 0` —— 语义更明确，不依赖
+  #   「id 不会是 0」这个前提。
   def dispatch_msg(msg)
     subs = @notify_lock.synchronize { (@subs[msg.channel] || []) + (@subs[:default] || []) }
     from_id = msg.pid
@@ -726,10 +771,16 @@ class TcpNotify < Notify
     @running = false
   end
 
-  # 读一帧: [len u32 BE][id 8 字节][payload]
+  # 读一帧: [len u32 BE][src 8 字节][payload]
   #
-  # id 和 payload 一起广播 —— 客户端按固定偏移切。
-  # 握手确认帧是 [len][id] 没有 payload, 这里靠 len == ID_LEN 区分。
+  # ★ 下行帧**不带 dst** —— 服务端在 write_loop 里已经按 dst 过滤过了
+  #   （只接受 dst == 自己的 id 或 dst == 0），发到这里的一定是给自己的。
+  #   所以客户端**不需要**再判断目标是谁，收到就处理。
+  #
+  # src 是原始发送者的连接 id —— 客户端据此知道消息是谁发的。
+  #
+  # ★ 握手确认帧（[len=8][id 8]）在 connect! 里就读掉了，读线程起得更晚，
+  #   所以这里只会看到广播帧。
   def handle_read(io)
     head = read_exactly(LEN_PREFIX)
     return if head.nil?                     # EOF —— 对端关闭
