@@ -43,6 +43,7 @@ export class Sync extends EventTarget {
     this.onSeedAck = opts.onSeedAck || (() => {});
     this.onSeedError = opts.onSeedError || (() => {});
     this.onReplace = opts.onReplace || (() => {});
+    this.onDocMeta = opts.onDocMeta || (() => {});
 
     this.ws = null;
     this.connected = false;
@@ -177,7 +178,13 @@ export class Sync extends EventTarget {
           break;
         case 'replace':
           // ★ 文档被**整体替换**（打开本地文件）→ 重建 Doc
-          this.onReplace();
+          //   lang 一并带过来 —— 别的客户端要跟着切语言
+          this.onReplace(msg.lang, msg.filename);
+          break;
+        case 'doc-meta':
+          // ★ 服务端把 doc 的语言类型告诉**新加入**的客户端
+          //   （后加入的人不知道之前别人打开的是什么类型的文件）
+          this.onDocMeta(msg.lang, msg.filename);
           break;
         case 'seed-error':
           this.onSeedError(msg.error || 'seed failed');
@@ -269,11 +276,12 @@ export class Sync extends EventTarget {
    *
    *   服务端会覆盖当前 doc 的 op log，然后广播 `replace` 给所有客户端。
    *
-   * @param {string} filename  原始文件名（仅用于日志）
+   * @param {string} filename  原始文件名
    * @param {string} content   文件内容（UTF-8 文本）
+   * @param {string} lang      文件对应的语言 id（monaco language id，如 python）
    */
-  sendSeed(filename, content) {
-    this._send({ t: 'seed', filename, content });
+  sendSeed(filename, content, lang) {
+    this._send({ t: 'seed', filename, content, lang });
   }
 
   /** 请求清空文档（服务器会广播给所有客户端） */

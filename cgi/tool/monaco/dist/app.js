@@ -256,6 +256,19 @@ let seq = 0;              // CRDT 序号（每个 client 内单调递增）
 let localOpCount = 0;
 let globalOpCount = 0;
 
+/**
+ * ★ refresh 的**回执计数** —— 点一次 refresh 就 +1，
+ *   收到一次「全量 ops」响应就 -1 并弹 'refreshed'。
+ *
+ * 为什么用计数不用布尔：
+ *   连点两次 refresh 就有两个请求在飞，收到第一个响应就把布尔清掉，
+ *   第二个响应就没提示了。计数能一一对应。
+ *
+ * ★ 初始连接 / 重连 / onReplace 也会触发全量 ops 响应 ——
+ *   但它们不 +1，所以不会弹 'refreshed'（那三个场景各有自己的提示）。
+ */
+let refreshWaitCount = 0;
+
 const members = new Map();   // id -> {id, name, color, cursor}
 
 /** ★ 抑制远端 op 触发的 change 事件（否则会回环发 op） */
@@ -823,6 +836,13 @@ function connect() {
       //     收到全量时会在**已有内容**后面追加 → 文档变成两份内容。
       if (total !== undefined && total !== null) {
         applyFullOps(ops);
+        // ★ 全量响应 = refresh 的回执 —— 弹 'refreshed' 小提示。
+        //   初始连接 / 重连 / onReplace 也会收到全量，
+        //   但它们不 +1 计数，所以这里只有主动点的 refresh 才弹。
+        if (refreshWaitCount > 0) {
+          refreshWaitCount--;
+          showToast('refreshed');
+        }
       } else {
         applyRemoteOps(ops);
       }
@@ -847,7 +867,7 @@ function connect() {
       // 这里**不用跳转**（打开就是「在当前空间打开这个文件」）。
       showToast('opened');
     },
-    onReplace: () => {
+    onReplace: (lang, filename) => {
       // ★ 文档被**整体替换**（有人打开了本地文件）。
       //
       //   做法：重新 sync 拿全量 op，applyFullOps 会**替换**本地 Doc。
@@ -863,7 +883,17 @@ function connect() {
       //   ★ 还要清掉 pending —— 旧 Doc 的 pending op（anchor 指向旧节点）
       //     在新 Doc 里永远等不到 → 泄漏 + 可能污染。
       if (doc && doc.pending) doc.pending.clear();
+
+      // ★ 跟着切语言 —— 打开的人知道文件是什么类型，
+      //   其他客户端不知道，得靠这一步同步过来。
+      if (lang) setDocLang(lang);
+
       sync.requestSync();
+    },
+    onDocMeta: (lang, filename) => {
+      // ★ **新加入**的客户端拿到 doc 的语言类型。
+      //   （后加入的人不知道之前别人打开的是什么类型的文件）
+      if (lang) setDocLang(lang);
     },
     onSeedError: (err) => {
       pendingSeedFile = '';
@@ -1161,7 +1191,10 @@ async function handleLocalFile(file) {
   const guess = langFromFilename(file.name);
   if (guess) setDocLang(guess);
 
-  sync.sendSeed(file.name, content);
+  // ★ 把语言类型**一起发给服务端** —— 服务端会广播给所有客户端，
+  //   其他人打开同一个 doc 时自动切到相同的语言。
+  //   猜不到就发当前语言（不猜的话至少跟自己的视图一致）。
+  sync.sendSeed(file.name, content, guess || currentLang);
   showToast('opening...');
 }
 
@@ -1322,6 +1355,9 @@ async function main() {
   //   等重连后自动补发（不会丢）。
   $('btn-refresh').addEventListener('click', () => {
     if (!sync) return;
+    // ★ 先 +1 计数 —— 收到全量 ops 响应时会 -1 并弹 'refreshed'。
+    //   没连上时消息会进 pending，重连后补发，响应照样回来，提示不会丢。
+    refreshWaitCount++;
     sync.requestSync();
     showToast('refreshing');
   });

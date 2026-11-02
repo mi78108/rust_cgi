@@ -32,6 +32,16 @@ DEFAULT_DOC_ID = 'default'
 #   放开的话 `?doc=../../etc` 能目录穿越，`?doc=a/b` 能写进子目录。
 DOC_ID_RE = /\A[A-Za-z0-9_-]{1,64}\z/
 
+# doc 的**语言类型**（谁打开了什么类型的文件）—— 允许的字符。
+#
+# ★ lang 来自客户端，必须严格校验 ——
+#   它会存进 doc 目录的 meta.json，也会下发给所有客户端，
+#   前端拿它调 monaco.editor.setModelLanguage(model, lang)。
+#
+# monaco 的 language id 长这样：markdown / python / csharp / objective-c /
+# c++ / jade … 所以要允许字母数字和 + # . - _。
+DOC_LANG_RE = /\A[A-Za-z0-9_+#.-]{1,32}\z/
+
 MEMBER_TTL = 30          # 成员心跳间隔（秒）—— 超过没更新就认为掉线
 MAX_OP_BYTES = 64 * 1024 # 单条 op 最大字节（防呆）
 
@@ -123,6 +133,48 @@ def setup_doc(doc_id)
   $monaco_channel = "monaco-#{doc_id}"
   FileUtils.mkdir_p($mem_dir)
   $doc_id
+end
+
+# ── doc 元信息（语言类型）────────────────────────────────────
+#
+# ★ doc 的语言类型**不属于 CRDT** —— 它是「文档属性」而不是「文档内容」。
+#   放在 doc 目录下的 meta.json 里，所有客户端共享一份。
+#
+# 为什么单独存文件而不是塞进 op log：
+#   op log 是逐字符的 CRDT 操作流，塞元信息进去会污染内容；
+#   而且切语言**不应该**产生内容变更（不该广播给所有人重放）。
+#
+# meta.json 的格式：
+#   { "lang": "python", "filename": "hello.py", "ts": 1699999999 }
+
+DOC_META_FILE = 'meta.json'
+
+# 读 doc 的元信息 —— 文件不存在返回 nil
+def read_doc_meta
+  path = File.join($doc_dir, DOC_META_FILE)
+  return nil unless File.exist?(path)
+  JSON.parse(File.read(path))
+rescue JSON::ParserError, Errno::ENOENT
+  nil
+end
+
+# 写 doc 的元信息（原子替换）
+def write_doc_meta(meta)
+  path = File.join($doc_dir, DOC_META_FILE)
+  tmp  = path + '.tmp'
+  File.write(tmp, JSON.generate(meta))
+  File.rename(tmp, path)   # 原子替换
+rescue => e
+  Q.log "[monaco/ws] meta write failed: #{e.class}: #{e.message}"
+  nil
+end
+
+# 清掉 doc 的元信息（clear 时用 —— 文档空了，语言类型也不该留着）
+def clear_doc_meta
+  path = File.join($doc_dir, DOC_META_FILE)
+  File.unlink(path) if File.exist?(path)
+rescue => e
+  Q.log "[monaco/ws] meta clear failed: #{e.class}: #{e.message}"
 end
 
 # ── op log ──────────────────────────────────────────────────
@@ -362,6 +414,14 @@ Q.ws do |req, rsp|
         members = broadcast_members(mcast)
         rsp.ws_write(JSON.generate({ t: 'members', members: members }))
 
+        # ★ 把 doc 的元信息（语言类型）告诉**新来的**客户端 ——
+        #   后加入的人不知道之前别人打开的是什么类型的文件。
+        meta = read_doc_meta
+        if meta && meta['lang']
+          rsp.ws_write(JSON.generate({ t: 'doc-meta', lang: meta['lang'],
+                                       filename: meta['filename'] }))
+        end
+
       when 'sync'
         ops = read_ops
         rsp.ws_write(JSON.generate({ t: 'ops', ops: ops, total: ops.size }))
@@ -403,12 +463,32 @@ Q.ws do |req, rsp|
 
           Q.log "[monaco/ws] seed replaced doc=#{$doc_id} chars=#{content.length} ops=#{n} by #{cid}"
 
+          # ★ 记下 doc 的**语言类型**（谁打开的什么文件）——
+          #   这是文档属性，不是内容，所以单独存 meta.json。
+          #
+          #   lang 来自客户端，必须校验 —— 它会下发给所有客户端，
+          #   前端拿它调 setModelLanguage。
+          lang = msg['lang'].to_s
+          lang = nil unless lang =~ DOC_LANG_RE
+          filename = msg['filename'].to_s[0, 200]
+          if lang
+            write_doc_meta({ 'lang' => lang, 'filename' => filename,
+                             'ts' => Time.now.to_i })
+          else
+            # 没给或非法 → 清掉旧的语言类型（文档内容换了，类型也可能不匹配）
+            clear_doc_meta
+          end
+
           # ★ 广播给所有客户端（包括自己）—— 他们要重建 Doc。
           #   want_echo=false 会跳过发送者自己，所以自己单独发一份。
-          payload = JSON.generate({ t: 'replace', ops: nil, chars: content.length })
+          #
+          #   ★ lang 一并带上 —— 其它客户端要跟着切语言。
+          payload = JSON.generate({ t: 'replace', ops: nil, chars: content.length,
+                                    lang: lang, filename: filename })
           mcast.notify(CHANNEL, payload)
           rsp.ws_write(payload)
-          rsp.ws_write(JSON.generate({ t: 'seed-ack', doc: $doc_id, chars: content.length }))
+          rsp.ws_write(JSON.generate({ t: 'seed-ack', doc: $doc_id, chars: content.length,
+                                       lang: lang }))
         end
 
       when 'clear'
@@ -424,6 +504,8 @@ Q.ws do |req, rsp|
         end
         mcast.notify(CHANNEL, JSON.generate({ t: 'clear' }))
         rsp.ws_write(JSON.generate({ t: 'clear' }))
+        # ★ 文档清空了 → 语言类型也不该留着（文档内容没了，类型无意义）。
+        clear_doc_meta
         Q.log '[monaco/ws] document cleared'
 
       when 'op'
