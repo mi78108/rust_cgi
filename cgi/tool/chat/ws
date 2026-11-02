@@ -4,155 +4,383 @@
 #
 #   WS /tool/chat/ws
 #
-# 架构（单主机多进程，靠 SocketNotify UDP 组播跨 fork 的 CGI 子进程）:
+# 架构（单主机多进程，跨进程广播用 BDR / TcpNotify）：
 #   浏览器 A ──ws──> ruby 进程 A ─┐
-#                                 ├─ SocketNotify 组播 channel :chat-<room>
+#                                 ├─ BDR 频道 chat-<room>（TCP 长连接，由 spider 扇出）
 #   浏览器 B ──ws──> ruby 进程 B ─┘
 #
-# 每个连接一个 ruby 进程（fork-per-request），各自持有:
-#   @room    当前房间名（client 发 join 时定）
-#   @peer    {name:, color:}
-#   @peers   房内已知 peer 缓存（从别的进程的 join/up/down 广播累积）
+# ★ **服务端持有权威成员表**（跟 tool/pad / tool/monaco 同一套模式）：
+#   每个客户端一个文件 members/<cid>.json，
+#   「谁在线」= 目录里有哪些文件（心跳超时的不算）。
+#
+#   为什么必须这样 —— 旧版是「各自缓存 + 谁问谁答」：
+#     新人 join → 广播 who → 房内每人各自回应**自己缓存里的名单**
+#   每个人缓存的名单都不一样（而且随时在变），
+#   而前端对 peers 消息是**整个替换** ——
+#   于是新人的列表 = 「最后响应那个人的视角」，
+#   谁先响应顺序不定 → 列表每次刷新都不一样 = 「总不对」。
+#   而且切房间时缓存不清 → 上一间房的人还挂着。
+#
+#   改成服务端权威后：成员表只有一个来源（目录），
+#   任何时刻任何客户端拿到的都是同一份名单。
+#
+# 广播用 TcpNotify（TCP 长连接，BDR 协议），连的是 spider 自己的监听端口
+# （靠 magic 探测分流到 tcp_broadcast）。跨进程 —— 因为 spider 是
+# fork-per-request，每个 ws 连接一个 ruby 进程，进程间不共享内存。
+#
+# 为什么不用 SocketNotify（UDP 组播）：
+#   BDR 由**服务端**做扇出，语义更可控（有序、可靠、不丢包）。
+#   UDP 组播是"人人发人人收"，客户端多的时候会有 N² 的流量，而且
+#   组播不回环 —— 发送方要单独补发一份自己（代码里到处 rsp.ws_write），
+#   逻辑容易漏。
+#
+#   ★ BDR 的回环语义：spider 广播给频道里**所有**订阅者，**包括发送者自己**。
+#     所以这里 want_echo=false（跳过自己发的），自己那份仍然走 rsp.ws_write。
+#
+# 每个连接一个 ruby 进程，各自持有:
+#   $room    当前房间名（client 发 join 时定）
+#   cid      服务端分配的客户端 id（成员表身份）
+#   name/color  自己的显示名和颜色
 #
 # 协议 (JSON text):
 #   client → server
 #     {op:'join',  name, color, room}    切房间（会先 leave 旧房间）
 #     {op:'msg',   text}
 #     {op:'leave'}
+#     {op:'ping'}
 #   server → client
-#     {type:'init',  you, peers}        join 后回（自己的身份 + 已知 peer）
+#     {type:'init',  you, peers}        join 后回（自己的身份 + 房内成员全量）
 #     {type:'msg',   from, color, text, ts}
 #     {type:'join',  peer}              别人进来了
 #     {type:'leave', name}              别人走了
-#     {type:'peers', peers}             房内 peer 全量（refresh 回应）
+#     {type:'peers', peers}             房内成员全量（成员表更新时广播）
 #     {type:'error', msg}
 
 require_relative '../../_env_/ruby/_base_'
 require_relative '../../_env_/ruby/_ext_notify_'
+require 'json'
+require 'fileutils'
+require 'securerandom'
+
+# ── 配置 ────────────────────────────────────────────────────
+CHAT_ROOT = ENV.fetch('SPIDER_DATA', '').empty? ? '/tmp/chat' : ENV['SPIDER_DATA']
+
+DEFAULT_ROOM = 'default'
+
+# 房间名白名单 [A-Za-z0-9_-]{1,32} —— 跟前端清洗规则一致。
+#
+# ★ room 会拼进**文件路径**（$CHAT_ROOT/<room>/members/）和
+#   **BDR 频道名**（chat-<room>），所以必须严格限制 ——
+#   放开的话 `?room=../../etc` 能目录穿越。
+ROOM_MAX    = 32
+ROOM_RE     = /\A[A-Za-z0-9_-]{1,32}\z/
+
+# 成员心跳间隔：超过这个时间没更新就认为掉线了
+MEMBER_TTL  = 30
 
 # 单条消息长度上限（防止有人狂刷）
 MSG_MAX     = 4 * 1024
 NAME_MAX    = 32
-ROOM_MAX    = 32
-PEER_TTL    = 30   # 秒，refresh 超时
 
-Q.ws do |req, rsp|
-  myname   = nil
-  mycolor  = nil
-  room     = nil
-  chan     = nil
-  peers    = {}          # name => {name:, color:}
+# ── 每连接的状态 ────────────────────────────────────────────
+#
+# 每个 WS 连接 = 一个独立的 ruby 进程（spider fork-per-request），
+# 所以一个进程只服务一个客户端 —— 用全局变量存不会有并发问题。
+$room       = DEFAULT_ROOM
+$room_dir   = nil
+$mem_dir    = nil
+$chat_chan  = nil
 
-  mcast = SocketNotify.new("cgi-chat-#{Process.pid}")
+# 校验并规范化房间名 —— 非法就退回 default
+def normalize_room(raw)
+  r = raw.to_s.strip
+  return DEFAULT_ROOM if r.empty?
+  return DEFAULT_ROOM unless r =~ ROOM_RE
+  r
+end
 
-  # 收别的进程广播的房内消息
-  mcast.notify(:default) do |msg|
-    next if msg.pid.to_i == Process.pid
-    next if chan.nil?
-    next unless msg.channel == chan
+# 设定当前连接的房间（房间名 + 目录 + 频道）
+def setup_room(room)
+  $room      = room
+  $room_dir  = File.join(CHAT_ROOT, room)
+  $mem_dir   = File.join($room_dir, 'members')
+  # BDR 频道名 —— **每个房间一个频道**，否则不同房间的消息会互相串。
+  # 频道名在握手时就定死了，所以必须在 TcpNotify.new 之前算好。
+  $chat_chan = "chat-#{room}"
+  FileUtils.mkdir_p($mem_dir)
+  room
+end
 
-    val = JSON.parse(msg.data.force_encoding('UTF-8')) rescue nil
-    next unless val.is_a?(Hash)
+# ── 成员表 ──────────────────────────────────────────────────
+# 每个客户端一个文件，避免多进程互相覆盖。
+# 谁在线 = members/ 目录里有哪些文件（心跳超时的跳过）。
 
-    case val['op']
-    when 'msg'
-      rsp.ws_write({ type: 'msg', from: val['from'], color: val['color'],
-                     text: val['text'], ts: val['ts'] }.to_json)
-    when 'up'
-      p = val['peer']
-      if p.is_a?(Hash) && p['name'] != myname
-        peers[p['name']] = p
-        rsp.ws_write({ type: 'join', peer: p }.to_json)
-      end
-    when 'down'
-      n = val['name'].to_s
-      if peers.delete(n)
-        rsp.ws_write({ type: 'leave', name: n }.to_json)
-      end
-    when 'who'
-      # 有人问房内都有谁（新人加入时问一圈）→ 回一份全量
-      mcast.notify(chan, { op: 'peers', peers: peers.values }.to_json)
-    when 'peers'
-      # 别人回应了 who's询问
-      incoming = Array(val['peers']).select { |x| x.is_a?(Hash) && x['name'] != myname }
-      known = peers.keys
-      incoming.each do |p|
-        next if known.include?(p['name'])
-        peers[p['name']] = p
-        rsp.ws_write({ type: 'join', peer: p }.to_json)
-      end
+# 生成客户端 id —— 成员表身份。
+#
+# 格式: c{pid}_{8位随机十六进制}
+#   · 固定前缀 + 定长随机 → 字典序 = 数值序
+#   · pid 便于排查（日志里一眼看出是哪个 CGI 进程）
+#   · 随机后缀保证全局唯一 —— 单靠 pid 不够：
+#     多机部署时两台机器的 pid 可能撞 → 同 id → 成员表互相覆盖
+def new_client_id
+  "c#{Process.pid}_#{SecureRandom.hex(4)}"
+end
+
+def member_file(cid)
+  File.join($mem_dir, "#{cid}.json")
+end
+
+# ── 随机昵称（房内不重复）──────────────────────────────────
+#
+# ★ 前端本地没有缓存昵称时，会发一个**空名**过来。
+#   这时由服务端起名 —— 因为**只有服务端知道房里都有谁**
+#   （前端拿到的名单可能有延迟，也可能本地缓存是旧的）。
+#
+# 名字池：形容词 + 动物，两段拼接（跟前端原来的随机名同风格）。
+#   e.g. clever-lynx / swift-otter / calm-mole
+#
+# 不重复的实现：起名后拿房内已有的名字集合比对，撞了就换一个。
+#   名字池有 8 × 8 = 64 个组合 —— 全撞上的概率极低，
+#   真撞上了（>64 人同房）再补随机后缀兜底。
+#
+# ★ 名字会拼进**文件名**吗？不会 —— 成员表的**文件名**是 cid（c<pid>_<hex>），
+#   名字只是文件里的一个字段。所以名字里不用太严格的字符限制，
+#   但仍然过滤掉非 ASCII 字符（前端要显示，且要和前端清洗规则一致）。
+NAME_ADJ = %w[swift quiet bright lucky calm bold clever eager].freeze
+NAME_ANIMAL = %w[fox otter hawk lynx heron mole ibis shrew].freeze
+
+# 生成一个**房内不重复**的随机昵称
+#
+# @param taken  房内已占用的名字集合（大小写不敏感）
+# @return      [name, taken]  新名字 + 更新后的占用集合
+def unique_random_name(taken)
+  200.times do
+    n = "#{NAME_ADJ.sample}-#{NAME_ANIMAL.sample}"
+    next if taken.include?(n.downcase)
+    return [n, taken + [n.downcase]]
+  end
+  # 名字池撞光了（>64 人同房）→ 补随机后缀兜底
+  n = "#{NAME_ADJ.sample}-#{NAME_ANIMAL.sample}-#{SecureRandom.hex(2)}"
+  [n, taken + [n.downcase]]
+end
+
+def write_member(cid, info)
+  FileUtils.mkdir_p($mem_dir)
+  tmp = member_file(cid) + '.tmp'
+  File.write(tmp, JSON.generate(info))
+  File.rename(tmp, member_file(cid))   # 原子替换
+rescue => e
+  Q.log "[chat/ws] member write failed: #{e.class}: #{e.message}"
+end
+
+def remove_member(cid)
+  File.unlink(member_file(cid)) if File.exist?(member_file(cid))
+rescue => e
+  Q.log "[chat/ws] member remove failed: #{e.class}: #{e.message}"
+end
+
+# ★ 读房内成员全量 —— **唯一权威来源**。
+#
+#   这里返回的是「服务端看到的」名单，所有客户端拿到的都是这一份，
+#   不再有「谁问谁答、各答各的」的问题。
+def read_members
+  out = []
+  Dir.glob(File.join($mem_dir, '*.json')).each do |f|
+    begin
+      info = JSON.parse(File.read(f))
+      # 心跳超时的不算在线
+      next if info['ts'].to_i < Time.now.to_i - MEMBER_TTL
+      out << info
+    rescue JSON::ParserError, Errno::ENOENT
+      next
     end
   end
+  out
+end
 
-  Q.log('[chat/ws] + client')
+# 广播成员表 —— 所有客户端收到后整个替换。
+#
+# ★ 广播用 want_echo=false（跳过自己发的），所以请求者自己那份
+#   要直接 rsp.ws_write 一次（见调用处）。
+def broadcast_members(mcast)
+  members = read_members
+  payload = JSON.generate({ type: 'peers', peers: members })
+  mcast.notify($chat_chan, payload)
+  members
+end
+
+# ★ 广播**成员进出事件** —— 给前端的 event log 用。
+#
+#   跟 peers（全量名单）是**两条独立的通道**：
+#     · peers    负责「现在房里有谁」→ 前端整个替换成员列表
+#     · peer-in/peer-out 负责「谁刚进来了/出去了」→ 前端记进 event log
+#
+#   为什么不让前端自己 diff peers 得出进出：
+#     前端拿到的是**某个时刻**的全量快照，两次快照之间的差异
+#     可能包含「A 进、B 出」两件事，也可能只是顺序不同。
+#     服务端知道确切发生了什么，直接广播事件更准。
+#
+#   @param kind 'in' | 'out'
+#   @param who  名字（字符串）
+def broadcast_peer_event(mcast, kind, who)
+  # ★ 双引号 —— 单引号里 #{kind} 不会插值（会原样发出去）。
+  payload = JSON.generate({ type: "peer-#{kind}", name: who })
+  mcast.notify($chat_chan, payload)
+end
+
+# ── WS 端点 ────────────────────────────────────────────────
+Q.ws do |req, rsp|
+  # ★ 先定房间 —— 频道名和文件路径都跟它有关，必须在 TcpNotify.new 之前算好。
+  #
+  #   ★ 房间名**以 join 消息里的为准**，不是 URL query ——
+  #     前端的 WS 地址是常量（/tool/chat/ws），room 只在 join 消息里发。
+  #     所以 URL 上的 ?room= 拿不到（req.param('room') 永远是空）。
+  #
+  #   这里的初始值只是**占位** —— join 分支会按 msg['room'] 重新 setup。
+  #   （BDR 频道名在握手时定死，所以换房间必须重开连接，见 join 分支。）
+  room = setup_room(normalize_room(req.param('room')))
+  CHAN = $chat_chan
+
+  # BDR 连接 —— 连 spider 自己的端口
+  #
+  # host/port 不传 → 127.0.0.1 + $Cgi_Port（spider 注入的监听端口）
+  mcast = TcpNotify.new("cgi-chat-#{Process.pid}", channel: CHAN)
+
+  cid   = nil
+  name  = 'anon'
+  color = '#c4f542'
+
+  # 订阅广播：别的进程发来的消息
+  #
+  # want_echo=false —— 跳过自己发的（BDR 会把消息发给发送者自己）。
+  # 自己那份走 rsp.ws_write（见下面各分支）。
+  mcast.notify(CHAN, false) do |msg|
+    data = msg.data
+    next if data.nil? || data.empty?
+    rsp.ws_write(data)
+  end
+
+  Q.log "[chat/ws] + client room=#{room} channel=#{CHAN}"
 
   Q.on_close do
-    if chan && myname
-      mcast.notify(chan, { op: 'down', name: myname }.to_json)
+    # ★ 离线通知 —— 删完成员文件**必须广播一次**成员表。
+    #   顺序：先删文件 → 再广播（广播出去的就是"他已经不在了"的名单）
+    #         → 最后才 stop（notify 是同步写 socket，先发出去再关）
+    if cid
+      remove_member(cid)
+      broadcast_members(mcast)
+      # ★ 广播「我出去了」—— 别人那边 event log 要看得到。
+      #   （这里不能 rsp.ws_write —— 连接已经断了，发不出去）
+      broadcast_peer_event(mcast, 'out', name)
+      Q.log "[chat/ws] - client #{cid}"
     end
     mcast.stop
-    Q.log('[chat/ws] - client')
   end
 
   req.on_ws_data do |chunk|
     begin
-      msg = JSON.parse(chunk.force_encoding('UTF-8'))
+      msg = JSON.parse(chunk.to_s.force_encoding('UTF-8'))
       next nil unless msg.is_a?(Hash)
 
       case msg['op']
       when 'join'
-        new_room = msg['room'].to_s.strip.gsub(/[^A-Za-z0-9_-]/, '')[0, ROOM_MAX] || 'default'
-        new_room = 'default' if new_room.empty?
+        new_room = normalize_room(msg['room'])
         new_name = msg['name'].to_s.strip.gsub(/[^A-Za-z0-9_-]/, '')[0, NAME_MAX]
-        new_name = "anon-#{Process.pid % 10000}" if new_name.empty?
         new_color = msg['color'].to_s.gsub(/[^0-9A-Fa-f#]/, '')[0, 9]
         new_color = '#c4f542' if new_color.empty?
 
-        # 退旧房间
-        if chan && myname && chan != "chat-#{new_room}".to_sym
-          mcast.notify(chan, { op: 'down', name: myname }.to_json)
+        # ★ 换房间 —— 频道名变了，BDR 连接也要重开（频道在握手时定死）。
+        #
+        #   ★ 判断条件**不能带 cid** —— 第一次 join 时 cid 还是 nil，
+        #     带 cid 的话第一次 join 永远不会换房间 → 房间永远是 default。
+        #   ★ 也不能只比 room 字符串 —— 要比**频道名**（频道才是 BDR 的实际归属）。
+        #
+        #   换的时候：退旧房间（删成员文件 + 广播旧房的名单）
+        #            → 关旧 BDR 连接 → 按新房间重开 → 重新订阅。
+        if CHAN != "chat-#{new_room}"
+          if cid
+            old_name = name
+            remove_member(cid)
+            mcast.notify(CHAN, JSON.generate({ type: 'peers', peers: read_members }))
+            # ★ 旧房间广播「我出去了」
+            broadcast_peer_event(mcast, 'out', old_name)
+            rsp.ws_write(JSON.generate({ type: 'peer-out', name: old_name }))
+          end
+          mcast.stop
+          room = setup_room(new_room)
+          CHAN = $chat_chan
+          mcast = TcpNotify.new("cgi-chat-#{Process.pid}", channel: CHAN)
+          mcast.notify(CHAN, false) do |m|
+            d = m.data
+            next if d.nil? || d.empty?
+            rsp.ws_write(d)
+          end
+          # 换房间 = 新的身份（成员表里的 cid 也换）
+          cid = nil
         end
 
-        myname  = new_name
-        mycolor = new_color
-        room    = new_room
-        chan    = "chat-#{room}".to_sym
+        # ★ **名字为空 → 服务端起一个房内不重复的**。
+        #
+        #   只有服务端知道房里都有谁（权威成员表）——
+        #   前端拿到的名单可能还没同步，不能靠前端去重。
+        if new_name.empty?
+          taken = read_members.map { |m| m['name'].to_s.downcase }.reject(&:empty?)
+          new_name, = unique_random_name(taken)
+        end
 
-        # 把自己加进本地 peer 缓存
-        peers[myname] = { name: myname, color: mycolor }
+        cid   = new_client_id
+        name  = new_name
+        color = new_color
 
-        # 广播我来了
-        mcast.notify(chan, { op: 'up', peer: peers[myname] }.to_json)
+        # ★ 把自己写进成员表 —— 服务端持有权威名单。
+        write_member(cid, { 'id' => cid, 'name' => name, 'color' => color,
+                            'ts' => Time.now.to_i })
+        Q.log "[chat/ws] hello #{cid} #{name} room=#{room}"
 
-        # 回 init（你 + 当前已知 peer，稍后 who's 会补全）
-        rsp.ws_write({ type: 'init', you: { name: myname, color: mycolor }, peers: peers.values }.to_json)
-
-        # 问一圈房内都有谁（只发一次，避免回环风暴）
-        mcast.notify(chan, { op: 'who', from: myname }.to_json)
+        # ★ 广播成员表 —— 房内所有人（包括新人）都拿到同一份权威名单。
+        #   广播用 want_echo=false（跳过自己发的），自己那份直接 ws_write。
+        members = broadcast_members(mcast)
+        # ★ 广播「我进来了」事件 —— 给 event log 用。
+        #   自己也要看到（event log 是本地的诊断面板），
+        #   所以 want_echo=false 跳过的那份要自己补一次。
+        broadcast_peer_event(mcast, 'in', name)
+        rsp.ws_write(JSON.generate({ type: 'peer-in', name: name }))
+        # ★ init 里带上最终的 name —— 前端本地没缓存昵称时，
+        #   服务端起的名要回传过去让前端存进 localStorage（下次直接用）。
+        rsp.ws_write(JSON.generate({ type: 'init',
+                                     you: { id: cid, name: name, color: color },
+                                     peers: members }))
 
       when 'msg'
-        next nil unless chan && myname
+        next nil unless cid && name
         text = msg['text'].to_s.strip
         next nil if text.empty?
         text = text[0, MSG_MAX] if text.bytesize > MSG_MAX
         now = Time.now.to_i
-        mcast.notify(chan, { op: 'msg', from: myname, color: mycolor,
-                             text: text, ts: now }.to_json)
-        # 自己也要看到（SocketNotify 不回环）
-        rsp.ws_write({ type: 'msg', from: myname, color: mycolor,
-                       text: text, ts: now }.to_json)
+        payload = JSON.generate({ type: 'msg', from: name, color: color,
+                                  text: text, ts: now })
+        mcast.notify(CHAN, payload)
+        # 自己也要看到（BDR 用 want_echo=false 跳过了自己发的）
+        rsp.ws_write(payload)
 
       when 'leave'
-        if chan && myname
-          mcast.notify(chan, { op: 'down', name: myname }.to_json)
+        if cid
+          old_name = name
+          remove_member(cid)
+          cid = nil          # ★ 已经走了 —— on_close 不用再删一次
+          members = broadcast_members(mcast)
+          rsp.ws_write(JSON.generate({ type: 'peers', peers: members }))
+          # ★ 广播「我出去了」
+          broadcast_peer_event(mcast, 'out', old_name)
+          rsp.ws_write(JSON.generate({ type: 'peer-out', name: old_name }))
         end
 
       when 'ping'
-        rsp.ws_write({ type: 'error', msg: 'pong' }.to_json)
+        rsp.ws_write(JSON.generate({ type: 'error', msg: 'pong' }))
       end
 
     rescue => e
-      Q.log("[chat/ws] recv err: #{e.message}")
+      Q.log "[chat/ws] recv err: #{e.class}: #{e.message}"
     end
     nil
   end
