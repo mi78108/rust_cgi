@@ -10,7 +10,7 @@
 普通 `<script>` 标签（挂全局 `window.Utils`）：
 
 ```html
-<script src="/pub/js/utils/datetime.js"></script>
+<script src="/pub/js/utils/datetime/datetime.js"></script>
 <script src="/pub/js/utils/utils.js"></script>
 ```
 

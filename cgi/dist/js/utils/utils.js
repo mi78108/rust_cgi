@@ -4,7 +4,7 @@
  * 零依赖，纯前端。各子模块一个文件（datetime.js 等），共用 `window.Utils` 容器。
  *
  * 用法一（普通 script 标签 —— 跟 dialog.js / table.js / plugin.js 一致）：
- *   <script src="/pub/js/utils/datetime.js"></script>
+ *   <script src="/pub/js/utils/datetime/datetime.js"></script>
  *   <script src="/pub/js/utils/utils.js"></script>
  *   <script>
  *     Utils.datetime.formatDate(new Date());
@@ -82,7 +82,10 @@
       return Promise.reject(new Error('非法子模块名: ' + JSON.stringify(name)));
     }
 
-    var url = base + name + '.js';
+    /* ★ 子模块布局：<base>/<name>/<name>.js ——
+       跟 Plugin.load('utils.<name>') 找的是同一个文件。
+       （description.json 里的 entry 可以是别的名字，那种情况用 Plugin.load。） */
+    var url = base + name + '/' + name + '.js';
 
     /* 已经加载过了 —— 直接返回，不重复注入 */
     if (U[name]) return Promise.resolve(U[name]);

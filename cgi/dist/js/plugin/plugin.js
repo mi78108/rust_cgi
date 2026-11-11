@@ -57,6 +57,38 @@
   var MAX_SEGMENTS = 8;
 
   /**
+   * 校验插件根目录 base。
+   *
+   * ★ base 是页面作者设的（可信），但**仍然要挡 '..'** ——
+   *   base 里一个 '..' 就能让拼接出来的 URL 跳出 base 目录。
+   *   挡掉之后，「名字受控 → URL 受控」这条链才是闭合的：
+   *   名字每段合法 + base 无 '..' → 拼出来的路径里不可能有 '..'。
+   *
+   * @param {string} base
+   * @returns {string} 结尾带 '/'
+   */
+  function safeBase(base) {
+    var b = String(base == null ? '' : base);
+    if (!b) throw new Error('插件根目录 base 不能为空');
+    if (b.charAt(0) === '/') {
+      /* 绝对路径（相对 origin）—— 逐段查 '..' */
+      var segs = b.split('/');
+      for (var i = 0; i < segs.length; i++) {
+        if (segs[i] === '..') throw new Error('base 里不能含 ".." 段: ' + b);
+      }
+    } else {
+      /* 完整 URL —— 查路径部分 */
+      var m = b.match(/^([a-z][a-z0-9+.-]*:)?\/\/[^/]*(\/.*)?$/i);
+      var pathPart = (m && m[2]) || '/';
+      var ps = pathPart.split('/');
+      for (var j = 0; j < ps.length; j++) {
+        if (ps[j] === '..') throw new Error('base 里不能含 ".." 段: ' + b);
+      }
+    }
+    return b.charAt(b.length - 1) === '/' ? b : b + '/';
+  }
+
+  /**
    * 插件名 → 路径段数组。非法返回 null。
    * @param {string} name
    * @returns {string[]|null}
@@ -119,7 +151,8 @@
   var registry = new Map();
 
   function joinBase(base) {
-    return base.charAt(base.length - 1) === '/' ? base : base + '/';
+    /* ★ 走 safeBase —— base 里的 '..' 也要挡（见 safeBase 的注释） */
+    return safeBase(base);
   }
 
   /* 绝对 URL（/xxx 或 http://xxx）—— 显式指定，覆盖 base */

@@ -1,7 +1,7 @@
 {
   "name": "utils",
   "version": "0.1.0",
-  "description": "通用工具集 —— 零依赖纯前端，按子模块组织（utils/<name>.js），共用 window.Utils 容器。当前含 datetime 子模块",
+  "description": "通用工具集 —— 零依赖纯前端，按子模块组织（utils/<name>/ 独立插件目录），共用 window.Utils 容器。当前含 datetime 子模块",
   "entry": "utils.js",
   "global": "Utils",
   "type": "script",
@@ -11,9 +11,10 @@
   "tags": ["utils", "datetime", "date", "time", "helper"],
   "structure": {
     "container": "window.Utils —— utils.js 建立，子模块往上挂",
-    "submodule_file": "utils/<name>.js —— 每个子模块一个文件",
+    "submodule_dir": "utils/<name>/ —— 每个子模块一个独立插件目录（含自己的 description.json）",
+    "submodule_file": "utils/<name>/<name>.js —— 实现文件",
     "load_order": "谁先加载都行 —— 子模块只往 window.Utils 上挂，不依赖 utils.js 已执行",
-    "plugin_loader": "Plugin.load('utils') 只会拉 utils.js（entry），子模块要自己 <script> 引或用 Utils.loadSub(name) 拉"
+    "plugin_loader": "子模块可以单独当插件加载：Plugin.load('utils.datetime') —— 名字用点号分段（见 plugin.js）"
   },
   "api": {
     "statics": [
@@ -42,8 +43,10 @@
     ],
     "submodules": {
       "datetime": {
-        "entry": "datetime.js",
+        "entry": "datetime/datetime.js",
         "global": "Datetime",
+        "plugin_name": "utils.datetime",
+        "plugin_dir": "utils/datetime/",
         "desc": "日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳。入参吃 Date、时间戳、日期字符串，认不出来返回 null",
         "methods": [
           { "name": "toDate", "signature": "Datetime.toDate(v)", "returns": "Date|null", "desc": "各种入参统一成 Date。认不出来返回 null" },
@@ -104,8 +107,9 @@
   ],
   "notes": [
     "子模块是独立的 .js 文件 —— utils.js 不自动加载它们",
-    "页面要直接用 datetime 就 <script src=\"/pub/js/utils/datetime.js\">；或者用 Utils.loadSub('datetime')",
+    "页面要直接用 datetime 就 <script src=\"/pub/js/utils/datetime/datetime.js\">；或者用 Utils.loadSub('datetime')",
     "Plugin.load('utils') 只会拉 entry（utils.js），拿到的是容器不是子模块",
+    "子模块可单独当插件加载：Plugin.load('utils.datetime') —— 名字用点号分段",
     "loadSub 的 base 缺省从 Plugin.base 推导 —— 写死路径的话页面换源就加载不到",
     "README.md 不能通过 /pub/ 访问 —— cgi/pub 的 MIME 表没有 .md"
   ]
