@@ -55,6 +55,11 @@ Q.get %r{^/(?<file>(?!.*\.\.)[A-Za-z0-9._/-]{1,128})$} do |req, rsp|
     return reject(rsp, "invalid path: #{path}")
   end
   full = File.join(PUB_ROOT, path)
+  if File.directory?(full)
+    if File.file?(File.join(full, 'index.html'))
+        full = File.join(full, 'index.html')
+    end
+  end
   unless File.file?(full)
     return reject(rsp, "#{full} not a file")
   end
