@@ -111,6 +111,11 @@ def rsp_snapshot
   out['redirect_301'] = [rd2.code, rd2.status]
   hr = Q::Rsp.new; hr.header_field('X-A', 'a'); hr.header_remove('Content-Type')
   out['header_ops'] = hr.header
+  # 合并语义: rsp.header(hash) 按 key 覆盖 + 大小写不敏感
+  hm = Q::Rsp.new; hm.header('X-A' => 'a', 'Cache-Control' => 'no-store')
+  out['header_merge'] = hm.header
+  hc = Q::Rsp.new; hc.header('content-type' => 'application/json')
+  out['header_ci'] = hc.header
   out['respond_chunk'] = Q::Rsp.new.respond_to?(:chunk)
   out['respond_stream'] = Q::Rsp.new.respond_to?(:stream)
   out['sent_init'] = Q::Rsp.new.sent

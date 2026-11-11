@@ -37,6 +37,10 @@ Q.route '/*', method: :GET do |_req, rsp|
        .header_field('X-B', 'bbb')
        .header_remove('Content-Type')
        .ok_json({ h: 1 }).finish
+  when 'headermerge'
+    # 合并语义: 一次设多个 + 大小写不敏感 + 不多写重复头
+    rsp.header('X-A' => 'aaa', 'content-type' => 'application/json')
+       .ok_json({ h: 1 }).finish
   when 'file'
     rsp.send_file(File.join(__dir__, '..', 'page.html'), mime: 'text/plain').finish
   when 'empty'   then rsp.ok_json(nil).finish
