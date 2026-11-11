@@ -4,32 +4,37 @@
  * 零依赖，纯前端。整个组件自己注入样式（<style> 标签），不依赖宿主页面的 CSS。
  * 颜色用 CSS 变量：宿主页面定义了 :root 变量就跟随宿主主题，没定义就用回退值。
  *
+ * ★ 架构：**基于原生 <dialog> 元素**。
+ *   模态机制（Esc 关闭 / 焦点陷阱 / 焦点归还 / 背景 inert / top layer）
+ *   全部由浏览器提供 —— 不用自己实现那 180 行。
+ *
+ * ★ 核心就一个 API —— Dialog.create()：
+ *   造一个 <dialog>，塞进内容，返回 Promise<返回值>。
+ *   所有弹层形态都是它的一层薄封装。
+ *
  * 用法一（普通 script 标签 —— 跟 plugin/plugin.js 一致，全局命名空间）：
  *   <script src="/pub/js/dialog/dialog.js"></script>
  *   <script>
  *     if (await Dialog.confirm('清空文档？', { danger: true })) { ... }
  *   </script>
  *
- * 用法二（ES module）：
- *   import { Dialog, confirm, alert } from '/pub/js/dialog/dialog.js';
- *
  * ★ 危险操作（danger: true）的默认焦点在「取消」上 —— 回车不会误触发。
  * ★ Esc / 点遮罩空白处 = 取消；回车 = 确定（焦点在按钮上时除外，避免触发两次）。
  *
- * 用法三（输入框）：
+ * 用法二（输入框）：
  *   const name = await Dialog.prompt('请输入名字');
  *   if (name === null) return;              // 用户取消了
  *   const pw = await Dialog.prompt('密码', { inputType: 'password' });
  *
- * 用法四（轻提示 —— 底部居中，默认 5 秒后自动消失）：
+ * 用法三（轻提示 —— 底部居中，默认 5 秒后自动消失）：
  *   Dialog.tips('已保存');
  *   Dialog.tips('出错了', { type: 'error' });
  *
- * 用法五（加载遮罩 —— 居中转圈，挡住下面的交互）：
+ * 用法四（加载遮罩 —— 居中转圈，挡住下面的交互）：
  *   const l = Dialog.loading('加载中…');
  *   try { await doWork(); } finally { l.close(); }
  *
- * 用法六（进度框 —— 四种样式）：
+ * 用法五（进度框 —— 四种样式）：
  *   const p = Dialog.progress('上传中…', { type: 'bar' });
  *   p.set(45);                 // 45%
  *   p.set(45, '已传 4.5MB');    // 顺带换文案
@@ -40,55 +45,74 @@
 
   var STYLE_ID = 'dlg-component-style';
 
-  /* ★ 面板底色三件套 —— 弹窗 / 加载框 / 进度框共用一套，配色只改这里
-   *   （含换行，保证拼出来的 CSS 跟以前逐字节一致） */
-  var PANEL_BG = '  background:var(--bg-2,#1e2027);color:var(--ink,#e6e6e6);\n' +
-                 '  border:1px solid var(--rule,#33363f);';
-  /* 控件底色三件套 —— 输入框 / 提示 / 按钮共用一套 */
-  var CTRL_BG = '  background:var(--bg-3,#262931);color:var(--ink,#e6e6e6);\n' +
-                '  border:1px solid var(--rule,#33363f);';
+  var PANEL_BG = '  background:var(--bg-2,#1e2027);color:var(--ink,#e6e6e6);\n'
+    + '  border:1px solid var(--rule,#33363f);\n';
+
+  var CTRL_BG = '  background:var(--bg-3,#262931);color:var(--ink,#e6e6e6);\n'
+    + '  border:1px solid var(--rule,#33363f);\n';
 
   var CSS = [
-    '.dlg-mask{',
-    '  position:fixed;inset:0;z-index:1000;',
-    '  background:rgba(0,0,0,.55);',
-    '  display:flex;align-items:center;justify-content:center;',
-    '  padding:16px;',
-    '}',
-    '/* [hidden] 要能压过上面的 display:flex */',
-    '.dlg-mask[hidden]{display:none}',
-    '.dlg{',
-    '  width:320px;max-width:100%;',
+    /* ── 模态对话框 ── */
+    /* ★ 用原生 <dialog> —— 遮罩由 ::backdrop 提供（不用自己造 .dlg-mask 那层 div） */
+    'dialog.dlg{',
+    '  width:320px;max-width:calc(100vw - 32px);',
     PANEL_BG,
     '  box-shadow:0 12px 40px rgba(0,0,0,.6);',
     '  padding:18px 18px 14px;',
+    '  border-radius:0;',
+    /* ★ 覆盖 <dialog> 的 UA 默认样式 ——
+       UA 给的 max-height 会截断内容 —— 放开，改用自身滚动。
+       （背景/边框/文字色已由 PANEL_BG 提供，不重复写。） */
+    '  max-height:calc(100vh - 32px);',
+    '  overflow:auto;',
     '}',
+    /* ★ 遮罩 —— 原生 dialog 的 ::backdrop 天然在最上层，不用 z-index */
+    'dialog.dlg::backdrop{background:rgba(0,0,0,.55)}',
+    /* 窄版 —— 纯确认类弹窗（没有输入框） */
+    '.dlg-narrow{width:280px}',
     '.dlg-title{',
     '  font-size:13px;font-weight:600;letter-spacing:.04em;',
     '  color:var(--ink,#e6e6e6);margin-bottom:14px;',
     '}',
-    '/* 窄版 —— 纯确认类弹窗（没有输入框） */',
-    '.dlg-narrow{width:280px}',
     '.dlg-msg{',
     '  font-size:12px;line-height:1.6;color:var(--muted,#8a8a94);',
     '  margin:-4px 0 16px;',
     '}',
-    '/* 输入框（prompt 用） */',
+    /* 输入框（prompt 用） */
     '.dlg-input{',
     '  width:100%;box-sizing:border-box;',
     CTRL_BG,
+    /* ★ 盖掉 UA 的原生外观（灰底 + 内阴影） */
+    '  appearance:none;-webkit-appearance:none;',
+    '  border-radius:0;',
     '  padding:6px 8px;font:inherit;font-size:13px;',
     '  margin:0 0 14px;',
     '}',
     '/* 消息紧挨着输入框 —— 收紧消息的下边距 */',
     '.dlg-msg + .dlg-input{margin-top:-10px}',
     '.dlg-input:focus{outline:none;border-color:var(--lime,#c4f542)}',
-    '/* 校验错误提示 */',
+    /* 校验错误提示 */
     '.dlg-err{',
     '  font-size:11px;color:var(--red,#ff4d4d);',
     '  margin:-8px 0 12px;',
     '}',
-    '/* 轻提示（tips）—— 底部居中，自动消失 */',
+    '.dlg-actions{display:flex;justify-content:flex-end;gap:8px}',
+    /* ★ DOM 顺序是「确定、取消」（回车要触发确定 —— 浏览器触发第一个 submit 按钮），
+       但视觉上「确定」在右边 —— 用 order 翻转，不用改 DOM 顺序。 */
+    '.dlg-actions .dlg-btn:is(.primary,.danger){order:2}',
+    '.dlg-actions .dlg-btn:not(:is(.primary,.danger)){order:1}',
+    '.dlg-btn{',
+    CTRL_BG,
+    '  padding:5px 14px;font:inherit;font-size:13px;cursor:pointer;',
+    '}',
+    '.dlg-btn:hover{border-color:var(--muted,#8a8a94)}',
+    '.dlg-btn.primary{background:var(--lime,#c4f542);color:#0f0f12;border-color:var(--lime,#c4f542)}',
+    '.dlg-btn.primary:hover{filter:brightness(1.08)}',
+    /* 危险操作 —— 红色 */
+    '.dlg-btn.danger{background:var(--red,#ff4d4d);color:#fff;border-color:var(--red,#ff4d4d)}',
+    '.dlg-btn.danger:hover{filter:brightness(1.12)}',
+
+    /* ── 轻提示（tips）── 底部居中，自动消失 */
     '.dlg-tips{',
     '  position:fixed;left:50%;bottom:28px;transform:translateX(-50%);',
     '  display:flex;flex-direction:column;align-items:center;gap:8px;',
@@ -105,7 +129,9 @@
     '.dlg-tip.show{opacity:1;transform:translateY(0)}',
     '.dlg-tip.success{border-color:var(--lime,#c4f542)}',
     '.dlg-tip.error{border-color:var(--red,#ff4d4d)}',
-    '/* 遮罩层（loading / progress 共用）*/',
+
+    /* ── 加载遮罩 / 进度框 ── */
+    /* ★ 这两个不是模态（不抢焦点、不进栈），自己造遮罩 div */
     '.dlg-overlay-mask{',
     '  position:fixed;inset:0;z-index:1300;',
     '  display:flex;align-items:center;justify-content:center;',
@@ -122,9 +148,7 @@
     '  animation:dlg-spin .7s linear infinite;',
     '}',
     '@keyframes dlg-spin{to{transform:rotate(360deg)}}',
-    '/* 减少动态效果时停掉转圈 */',
     '@media (prefers-reduced-motion:reduce){.dlg-spinner{animation:none}}',
-    '/* 进度框（progress）*/',
     '.dlg-progress{',
     '  display:flex;flex-direction:column;gap:10px;',
     '  min-width:220px;max-width:min(420px,80vw);',
@@ -133,112 +157,46 @@
     '}',
     '.dlg-progress-msg{font-size:13px;line-height:1.5;color:var(--ink,#e6e6e6)}',
     '.dlg-progress-pct{font-size:11px;color:var(--muted,#8a8a94);text-align:right}',
-    '/* 条形 —— 跟 share 工具的 .pbar 一个路子 */',
     '.dlg-progress-bar{height:6px;background:var(--bg-3,#262931);border:1px solid var(--rule,#33363f);overflow:hidden}',
     '.dlg-progress-bar-fill{height:100%;width:0;background:var(--lime,#c4f542);transition:width .15s linear}',
-    '/* 环形 */',
     '.dlg-progress-circle{width:64px;height:64px;display:block;margin:0 auto}',
     '.dlg-progress-circle circle{fill:none;stroke-width:3}',
     '.dlg-progress-circle .track{stroke:var(--bg-3,#262931)}',
     '.dlg-progress-circle .fill{stroke:var(--lime,#c4f542);stroke-linecap:round;transition:stroke-dasharray .15s linear;transform:rotate(-90deg);transform-origin:50% 50%}',
     '.dlg-progress-circle text{fill:var(--ink,#e6e6e6);font-size:12px;text-anchor:middle;dominant-baseline:central}',
-    '/* 三点（不确定进度）*/',
     '.dlg-progress-dots{display:flex;gap:5px;justify-content:center}',
     '.dlg-progress-dot{width:7px;height:7px;border-radius:50%;background:var(--lime,#c4f542);animation:dlg-bounce 1s ease-in-out infinite}',
     '@keyframes dlg-bounce{0%,80%,100%{transform:scale(.5);opacity:.45}40%{transform:scale(1);opacity:1}}',
-    '/* 步骤段 */',
     '.dlg-progress-steps{display:flex;gap:4px}',
     '.dlg-progress-step{flex:1;height:4px;background:var(--bg-3,#262931);border:1px solid var(--rule,#33363f)}',
     '.dlg-progress-step.on{background:var(--lime,#c4f542);border-color:var(--lime,#c4f542)}',
     '@media (prefers-reduced-motion:reduce){.dlg-progress-dot{animation:none}}',
-    '.dlg-actions{display:flex;justify-content:flex-end;gap:8px}',
-    '.dlg-btn{',
-    CTRL_BG,
-    '  padding:5px 14px;font:inherit;font-size:13px;cursor:pointer;',
-    '}',
-    '.dlg-btn:hover{border-color:var(--muted,#8a8a94)}',
-    '.dlg-btn.primary{background:var(--lime,#c4f542);color:#0f0f12;border-color:var(--lime,#c4f542)}',
-    '.dlg-btn.primary:hover{filter:brightness(1.08)}',
-    '/* 危险操作 —— 红色 */',
-    '.dlg-btn.danger{background:var(--red,#ff4d4d);color:#fff;border-color:var(--red,#ff4d4d)}',
-    '.dlg-btn.danger:hover{filter:brightness(1.12)}',
   ].join('\n');
 
   var styleReady = false;
 
   function ensureStyle() {
-    if (styleReady || typeof document === 'undefined') return;
+    if (styleReady) return;
     styleReady = true;
-    if (document.getElementById(STYLE_ID)) return;
-    /* ★ 局部变量别叫 el —— 会遮蔽同名的 el() 辅助函数 */
-    var styleEl = document.createElement('style');
-    styleEl.id = STYLE_ID;
-    styleEl.textContent = CSS;
-    document.head.appendChild(styleEl);
+    var st = document.createElement('style');
+    st.id = STYLE_ID;
+    st.textContent = CSS;
+    document.head.appendChild(st);
   }
 
-  /* 打开中的弹窗栈 —— 只有最上面那个响应 Esc / 遮罩点击 */
+  /* 打开中的模态弹窗 —— 只有最上面那个能响应 Esc */
   var stack = [];
 
-  /**
-   * 建元素。三个参数都可省。
-   *
-   * ★ 到处 `document.createElement` + `className` + `textContent` 三行写一遍
-   *   太啰嗦 —— 统一走这里。
-   *
-   * @param {string} tag
-   * @param {string} [cls]     className
-   * @param {string} [text]    textContent（走 textContent —— 不当 HTML 解析）
-   * @returns {HTMLElement}
-   */
+  /* OK 按钮的内部哨兵值 —— 用来区分「确定」和「取消」。
+     ★ 不能直接用 okValue —— 用户可能传 okValue:'' ，那就跟取消分不出来了。 */
+  var OK_TOKEN = 'ok';
+
+  /** 建元素。三个参数都可省。 */
   function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text !== undefined && text !== null) e.textContent = String(text);
-    return e;
-  }
-
-  /**
-   * 造一个**幂等**的 close 函数 —— 摘掉节点，摘一次就作废。
-   *
-   * ★ tips / loading / progress 三处的「关掉」都归它管 ——
-   *   否则同一个「幂等守卫 + 摘节点」要抄三遍。
-   *
-   * @param {HTMLElement} node      要摘掉的节点
-   * @param {Object} [opts]
-   * @param {number}  [opts.fade]   摘掉前等多久（毫秒）—— 淡出动画
-   * @param {Function}[opts.before] 摘掉之前做的事（比如清计时器）
-   * @returns {Function}
-   */
-  function closer(node, opts) {
-    opts = opts || {};
-    var closed = false;
-    return function close() {
-      if (closed) return;      /* ★ 幂等 —— 调多次只关一次 */
-      closed = true;
-      if (opts.before) opts.before();
-      if (opts.fade) {
-        /* ★ 淡出走完再摘 —— 直接摘会丢掉动画 */
-        setTimeout(function () {
-          if (node.parentNode) node.parentNode.removeChild(node);
-        }, opts.fade);
-      } else if (node.parentNode) {
-        node.parentNode.removeChild(node);
-      }
-    };
-  }
-
-  /**
-   * 合并快捷方法的选项 —— 复制一份（不污染调用方传进来的对象）+ 填 message。
-   *
-   * @param {string} message
-   * @param {Object} [opts]
-   * @returns {Object}
-   */
-  function optsWith(message, opts) {
-    var o = Object.assign({}, opts || {});
-    if (message !== undefined && message !== null) o.message = message;
-    return o;
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
   }
 
   /**
@@ -266,39 +224,206 @@
     };
   }
 
-  var FOCUSABLE = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([disabled])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(',');
+  /**
+   * ★ 核心 —— 造一个原生 <dialog> 挂上去，返回控制器。
+   *
+   * ★ 模态机制全部由浏览器提供，不用自己实现：
+   *   Esc 关闭       → close 事件，returnValue = ''
+   *   焦点陷阱       → 浏览器把焦点锁在 dialog 里
+   *   焦点归还       → 关闭后焦点自动回到打开前的元素
+   *   背景 inert     → 底层元素不可聚焦、不可点击
+   *   top layer      → 永远在最上面（z-index 无效）
+   *
+   * ★ 内部函数 —— 公开入口是 Dialog.create()，options 清单见那里。
+   *
+   * @param {Object} opts
+   * @returns {{ input: ?HTMLInputElement, errEl: ?HTMLElement,
+   *             promise: Promise<string>, close: Function }}
+   */
+  function openDialog(opts) {
+    opts = opts || {};
 
-  function focusableIn(root) {
-    var all = root.querySelectorAll(FOCUSABLE);
-    var out = [];
-    for (var i = 0; i < all.length; i++) {
-      /* offsetParent 为 null = 隐藏（display:none） */
-      if (all[i].offsetParent !== null) out.push(all[i]);
+    ensureStyle();
+
+    var dlg = el('dialog', 'dlg');
+    if (opts.maskClass) dlg.classList.add(opts.maskClass);
+    if (opts.narrow) dlg.classList.add('dlg-narrow');
+
+    /* ★ 内容用 <form method="dialog"> 包起来 ——
+       浏览器会把点到的按钮的 value 写进 dialog.returnValue，然后自动 close。
+       这就是「返回值」不用自己传的原因。 */
+    var form = el('form', 'dlg-form');
+    form.method = 'dialog';
+
+    if (opts.title) form.appendChild(el('div', 'dlg-title', opts.title));
+
+    if (opts.content) {
+      var body = el('div', 'dlg-msg');
+      if (typeof opts.content === 'string') {
+        body.innerHTML = opts.content;   /* 故意用 innerHTML —— 调用方自己保证可信 */
+      } else {
+        body.appendChild(opts.content);
+      }
+      form.appendChild(body);
+    } else if (opts.message) {
+      form.appendChild(el('div', 'dlg-msg', opts.message));
     }
-    return out;
+
+    /* 输入框 + 错误提示容器 */
+    var input = null;
+    var errEl = null;
+
+    if (opts.inputCfg) {
+      input = opts.inputCfg.multiline ? el('textarea', 'dlg-input') : el('input', 'dlg-input');
+      if (!opts.inputCfg.multiline) input.type = opts.inputCfg.type;
+      if (opts.inputCfg.placeholder) input.placeholder = opts.inputCfg.placeholder;
+      if (opts.inputCfg.multiline) input.rows = 3;
+      input.value = opts.inputCfg.value;
+
+      /* ★ 单行输入框里回车 = 提交。
+         不靠浏览器默认行为 —— 实测默认触发的是**第一个** submit 按钮，
+         而按钮顺序是「确定在前」，所以浏览器默认行为正好就是提交。
+         但 textarea 里回车是换行 —— 多行时提交靠 Ctrl/Cmd+Enter。 */
+      if (!opts.inputCfg.multiline) {
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); submitForm(); }
+        });
+      } else {
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitForm(); }
+        });
+      }
+      form.appendChild(input);
+
+      errEl = el('div', 'dlg-err');
+      errEl.hidden = true;
+      form.appendChild(errEl);
+    }
+
+    /* 按钮 */
+    var buttons = opts.buttons || [];
+    var btnEls = [];
+    if (buttons.length) {
+      var actions = el('div', 'dlg-actions');
+      buttons.forEach(function (b) {
+        var btn = el('button', 'dlg-btn' + (b.cls ? ' ' + b.cls : ''), b.text);
+        btn.type = 'submit';
+        btn.value = b.value === undefined ? '' : String(b.value);
+        if (b.autofocus) btn.setAttribute('autofocus', '');
+        actions.appendChild(btn);
+        btnEls.push(btn);
+      });
+      form.appendChild(actions);
+    }
+
+    /* ★ extra —— 插在正文和按钮之间的额外内容（勾选框、自定义控件…） */
+    if (opts.extra) form.appendChild(opts.extra);
+
+    dlg.appendChild(form);
+
+    /* ★ 提交 —— 必须**指定具体按钮**。
+       requestSubmit() 不带参数 = 没有 submitter → returnValue 保持 ''，
+       而且 method=dialog 的 dialog 根本不会关（实测）。
+       带上按钮，浏览器才会把它的 value 写进 returnValue 并关掉 dialog。 */
+    function submitForm() {
+      var btn = btnEls[opts.submitIndex || 0];
+      if (!btn) return;
+      if (typeof form.requestSubmit === 'function') form.requestSubmit(btn);
+      else btn.click();
+    }
+
+    var settled = false;
+    var promise = new Promise(function (resolve) {
+      dlg.addEventListener('close', function () {
+        if (settled) return;
+        settled = true;
+        var i = stack.indexOf(dlg);
+        if (i >= 0) stack.splice(i, 1);
+        if (dlg.parentNode) dlg.parentNode.removeChild(dlg);
+        resolve(dlg.returnValue);
+      });
+
+      /* ★ Esc 只会关最上面那个 ——
+         原生行为是「一次 Esc 把所有叠着的 dialog 全关掉」。
+         自己拦一层：preventDefault 掉原生关闭，然后只关自己。
+         ★ 用 keydown 而不是 cancel 事件 —— 实测 cancel 事件不可取消
+           （cancelable=false），preventDefault 拦不住。 */
+      dlg.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        if (stack.length && stack[stack.length - 1] === dlg) dlg.close('');
+      });
+
+      /* ★ 点遮罩空白处 = 取消 ——
+         原生 dialog 点 backdrop 不会关闭，得自己判：
+         e.target === dlg 说明点在 dialog 元素本身（而不是里面的内容）。 */
+      dlg.addEventListener('click', function (e) {
+        if (e.target !== dlg) return;
+        if (opts.dismissOnMask === false) return;
+        dlg.close('');
+      });
+
+      /* ★ onSubmit 钩子 —— 返回 false 就不关（校验失败时用） */
+      if (opts.onSubmit) {
+        form.addEventListener('submit', function (e) {
+          if (opts.onSubmit(dlg, e) === false) e.preventDefault();
+        });
+      }
+    });
+
+    document.body.appendChild(dlg);
+    stack.push(dlg);
+    dlg.showModal();
+
+    /* ★ 焦点：autofocus 的按钮优先（浏览器原生行为），
+       有输入框时落在输入框上（否则得先按 Tab 才能打字）。 */
+    var focusTarget = dlg.querySelector('[autofocus]');
+    if (focusTarget) focusTarget.focus();
+
+    if (input) {
+      input.focus();
+      /* 有预填值时全选 —— 直接打字就能覆盖掉 */
+      if (input.value) {
+        try { input.select(); } catch (e) { /* 某些浏览器不支持 —— 忽略 */ }
+      }
+    }
+
+    return {
+      input: input,
+      errEl: errEl,
+      promise: promise,
+      close: function (value) {
+        if (settled) return;
+        dlg.close(value === undefined || value === null ? '' : String(value));
+      },
+    };
   }
+
+  /* ── Dialog 类 ───────────────────────────────────────────────
+   *
+   * ★ 模态对话框（确认框 / 提示框 / 输入框）的可编程形态：
+   *
+   *   new Dialog({ title, message, okText, cancelText, danger })
+   *     .open()   → Promise<okValue | null>
+   *     .close(v)
+   *     .showError(msg)
+   *
+   * ★ 快捷方法（confirm / alert / prompt）都是它的薄封装。
+   *   轻提示 / 加载遮罩 / 进度框不是模态 —— 不走这个类（见下）。
+   */
 
   /**
    * @param {Object} [opts]
-   * @param {string}  [opts.title]      标题
-   * @param {string}  [opts.message]    正文（纯文本，走 textContent）
-   * @param {Node|string} [opts.content] 自定义正文（HTML 字符串会被当成 HTML —— 只放可信内容）
+   * @param {string}  [opts.title='']
+   * @param {string}  [opts.message='']
+   * @param {Node|string} [opts.content] 自定义正文，优先于 message
    * @param {string}  [opts.okText='确定']
    * @param {string}  [opts.cancelText='取消']
-   * @param {boolean} [opts.danger=false]    危险操作：主按钮变红，默认焦点在「取消」
-   * @param {boolean} [opts.hideCancel=false] 隐藏取消按钮（只有一个按钮时用）
-   * @param {boolean|Object} [opts.input] 输入框：true 或 {type,value,placeholder,multiline}
-   *        有输入框时确定时 resolve 的是**输入框的值**（不是 okValue）
-   * @param {*}      [opts.okValue='ok']     确定时 resolve 的值
-   * @param {string}  [opts.maskClass='dlg-mask']
-   * @param {Function} [opts.onOk]     确定前的钩子 —— 返回 false 则不关闭
+   * @param {boolean} [opts.danger=false]    危险操作 —— 主按钮变红，焦点落在「取消」上
+   * @param {boolean} [opts.hideCancel=false] 隐藏取消按钮
+   * @param {*}       [opts.okValue='ok']     确定时 resolve 的值
+   * @param {boolean|Object} [opts.input]     输入框。true 或 {type,value,placeholder,multiline}
+   * @param {Function} [opts.onOk]    确定前的钩子，返回 false 则不关闭
    * @param {Function} [opts.onCancel] 取消时的钩子
    */
   function Dialog(opts) {
@@ -312,250 +437,123 @@
     this.danger = !!opts.danger;
     this.hideCancel = !!opts.hideCancel;
     this.okValue = opts.okValue === undefined ? 'ok' : opts.okValue;
-    this.maskClass = opts.maskClass || 'dlg-mask';
     this.onOk = opts.onOk || null;
     this.onCancel = opts.onCancel || null;
-
-    /* 输入框配置 —— null 表示不显示输入框 */
     this.inputCfg = normalizeInput(opts.input);
-    /* 输入框 DOM（_build 后才有） */
-    this.input = null;
+    this.maskClass = opts.maskClass || '';
 
-    this._resolve = null;
-    this._promise = null;
-    this._prevFocus = null;
-    this._built = false;
-
-    /* 绑定成实例属性 —— 关闭时要用**同一个引用** removeEventListener。
-       ★ 这两行必须有：open() 里 addEventListener(this._onKeyDown) 用的是它们，
-         漏掉的话 addEventListener 收到 undefined，会静默注册一个空监听器 ——
-         Esc 和点遮罩就都不响应了（按钮点击走 .bind(this) 另算，所以只有键盘失效）。 */
-    this._onKeyDown = this._handleKeyDown.bind(this);
-    this._onMaskClick = this._handleMaskClick.bind(this);
+    this._ctl = null;   /* 打开后的控制器 */
   }
-
-  Dialog.prototype._build = function () {
-    if (this._built) return;
-    ensureStyle();
-
-    var mask = el('div', this.maskClass);
-    mask.hidden = true;
-
-    var box = el('div', 'dlg');
-
-    if (this.title) {
-      /* textContent —— 不当 HTML 解析 */
-      box.appendChild(el('div', 'dlg-title', this.title));
-    }
-
-    if (this.content) {
-      var body = el('div', 'dlg-msg');
-      if (typeof this.content === 'string') {
-        body.innerHTML = this.content;   /* 故意用 innerHTML —— 调用方自己保证可信 */
-      } else {
-        body.appendChild(this.content);
-      }
-      box.appendChild(body);
-    } else if (this.message) {
-      box.appendChild(el('div', 'dlg-msg', this.message));
-    }
-
-    if (this.inputCfg) {
-      var self = this;
-      var inp = this.inputCfg.multiline
-        ? el('textarea', 'dlg-input')
-        : el('input', 'dlg-input');
-      if (!this.inputCfg.multiline) inp.type = this.inputCfg.type;
-      if (this.inputCfg.placeholder) inp.placeholder = this.inputCfg.placeholder;
-      if (this.inputCfg.multiline) inp.rows = 3;
-      inp.value = this.inputCfg.value;
-      /* ★ 单行输入框里回车 = 提交（不走全局 keydown —— 全局那个会拦掉 textarea 的换行） */
-      if (!this.inputCfg.multiline) {
-        inp.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter') { e.preventDefault(); self._doOk(); }
-        });
-      }
-      box.appendChild(inp);
-      this.input = inp;
-
-      /* 错误提示容器（validate 失败时填内容） */
-      var err = el('div', 'dlg-err');
-      err.hidden = true;
-      box.appendChild(err);
-      this.errEl = err;
-    }
-
-    var actions = el('div', 'dlg-actions');
-
-    if (!this.hideCancel) {
-      this.cancelBtn = el('button', 'dlg-btn', this.cancelText);
-      this.cancelBtn.type = 'button';
-      this.cancelBtn.addEventListener('click', this._doCancel.bind(this));
-      actions.appendChild(this.cancelBtn);
-    }
-
-    this.okBtn = el('button', 'dlg-btn ' + (this.danger ? 'danger' : 'primary'), this.okText);
-    this.okBtn.type = 'button';
-    this.okBtn.addEventListener('click', this._doOk.bind(this));
-    actions.appendChild(this.okBtn);
-
-    box.appendChild(actions);
-    mask.appendChild(box);
-
-    this.mask = mask;
-    this.box = box;
-    this._built = true;
-  };
 
   /**
    * 打开弹窗。返回 Promise —— 确定时 resolve(okValue)，取消时 resolve(null)。
+   * @returns {Promise}
    */
   Dialog.prototype.open = function () {
-    if (this._promise) return this._promise;
-
     var self = this;
-    this._promise = new Promise(function (resolve) {
-      self._resolve = resolve;
+
+    var buttons = [];
+    /* ★ 按钮 DOM 顺序：确定在前、取消在后 ——
+       实测输入框里回车触发的是**第一个** submit 按钮，
+       确定必须排在前面，回车才是「确定」。 */
+    buttons.push({
+      text: this.okText,
+      value: OK_TOKEN,
+      cls: this.danger ? 'danger' : 'primary',
+    });
+    if (!this.hideCancel) {
+      /* ★ danger 时 autofocus「取消」—— 回车不会误触发危险动作。
+         原生 dialog 默认聚焦第一个可聚焦元素（确定），所以这里必须显式指定。 */
+      buttons.push({ text: this.cancelText, value: 'cancel', autofocus: this.danger });
+    }
+
+    this._ctl = openDialog({
+      title: this.title,
+      message: this.message,
+      content: this.content,
+      inputCfg: this.inputCfg,
+      maskClass: this.maskClass,
+      buttons: buttons,
+      onSubmit: function (dlgEl, e) {
+        /* ★ 传给钩子的是 **Dialog 实例**（不是原始 <dialog> 元素）——
+           钩子要能拿到 dlg._ctl.input / dlg.showError() 这些。 */
+        if (self.onOk && self.onOk(self, e) === false) return false;   /* 钩子可以否决 */
+        return true;
+      },
     });
 
-    this._build();
-    this._prevFocus = document.activeElement;
+    var ctl = this._ctl;
 
-    this.mask.hidden = false;
-    document.body.appendChild(this.mask);
-    stack.push(this);
-
-    document.addEventListener('keydown', this._onKeyDown, true);
-    this.mask.addEventListener('click', this._onMaskClick);
-
-    /* ★ 有输入框时焦点落在输入框上（否则得先按 Tab 才能打字）。
-       危险操作默认焦点在「取消」上 —— 回车不会误触发危险动作。 */
-    var focusTarget = this.input ? this.input : (this.danger ? this.cancelBtn : this.okBtn);
-    if (focusTarget) focusTarget.focus();
-    /* 有预填值时全选 —— 直接打字就能覆盖掉 */
-    if (this.input && this.inputCfg.value) {
-      try { this.input.select(); } catch (e) { /* 某些浏览器不支持 —— 忽略 */ }
-    }
-
-    return this._promise;
-  };
-
-  /** 关闭弹窗。value 会 resolve 给 open() 返回的 Promise。 */
-  Dialog.prototype.close = function (value) {
-    if (!this._promise) return;
-
-    var idx = stack.indexOf(this);
-    if (idx >= 0) stack.splice(idx, 1);
-
-    document.removeEventListener('keydown', this._onKeyDown, true);
-    this.mask.removeEventListener('click', this._onMaskClick);
-
-    if (this.mask.parentNode) this.mask.parentNode.removeChild(this.mask);
-
-    /* 焦点还给打开之前的位置 */
-    if (this._prevFocus && document.contains(this._prevFocus)) {
-      try {
-        this._prevFocus.focus();
-      } catch (e) {
-        /* 元素已经不可聚焦 —— 忽略 */
+    return ctl.promise.then(function (v) {
+      /* 取消（cancel / Esc）→ onCancel 钩子 + resolve(null) */
+      if (v !== OK_TOKEN) {
+        if (self.onCancel) self.onCancel(ctl);
+        return null;
       }
-    }
-    this._prevFocus = null;
-
-    var resolve = this._resolve;
-    this._resolve = null;
-    this._promise = null;
-
-    if (resolve) resolve(value === undefined ? null : value);
-  };
-
-  Dialog.prototype._doOk = function () {
-    if (this.onOk && this.onOk(this) === false) return;   /* 钩子可以否决 */
-    /* ★ 有输入框时 resolve **输入框的值**（不是 okValue）—— prompt 就靠这个 */
-    this.close(this.input ? this.input.value : this.okValue);
-  };
-
-  Dialog.prototype._doCancel = function () {
-    if (this.onCancel) this.onCancel(this);
-    this.close(null);
+      /* ★ 有输入框时 resolve **输入框的值**（不是 okValue）—— prompt 就靠这个 */
+      if (ctl.input) return ctl.input.value;
+      return self.okValue;
+    });
   };
 
   /**
-   * 显示校验错误（validate 钩子用）。传 null/空串清除。
+   * 关闭弹窗。value 会 resolve 给 open() 返回的 Promise。
+   * @param {*} [value]
+   */
+  Dialog.prototype.close = function (value) {
+    if (!this._ctl) return;
+    this._ctl.close(value);
+  };
+
+  /**
+   * 显示校验错误提示（validate 钩子用）。传 null/空串清除。
    * @param {string|null} msg
    */
   Dialog.prototype.showError = function (msg) {
-    if (!this.errEl) return;
+    if (!this._ctl || !this._ctl.errEl) return;
     var text = msg ? String(msg) : '';
-    this.errEl.textContent = text;
-    this.errEl.hidden = !text;
+    this._ctl.errEl.textContent = text;
+    this._ctl.errEl.hidden = !text;
     /* 报错后焦点回输入框 —— 方便直接改 */
-    if (text && this.input) {
-      try { this.input.focus(); } catch (e) { /* 忽略 */ }
+    if (text && this._ctl.input) {
+      try { this._ctl.input.focus(); } catch (e) { /* 忽略 */ }
     }
-  };
-
-  Dialog.prototype._isTop = function () {
-    return stack.length > 0 && stack[stack.length - 1] === this;
-  };
-
-  Dialog.prototype._handleKeyDown = function (e) {
-    if (!this._isTop()) return;   /* 叠层时只有最上面那个响应 */
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      this._doCancel();
-      return;
-    }
-
-    if (e.key === 'Enter') {
-      var tag = e.target && e.target.tagName;
-      /* 焦点在按钮上时让浏览器自己处理（否则会触发两次） */
-      if (tag === 'BUTTON') return;
-      /* 单行输入框自己绑了 keydown —— 这里必须放行，否则会提交两次 */
-      if (tag === 'INPUT') return;
-      /* 多行输入框：普通回车是换行，Ctrl/Cmd+Enter 才提交 */
-      if (tag === 'TEXTAREA') {
-        if (e.ctrlKey || e.metaKey) { e.preventDefault(); this._doOk(); }
-        return;
-      }
-      e.preventDefault();
-      this._doOk();
-      return;
-    }
-
-    if (e.key === 'Tab') this._trapFocus(e);
-  };
-
-  /** 焦点锁在弹窗内 —— Tab 到底回到开头，Shift+Tab 反向 */
-  Dialog.prototype._trapFocus = function (e) {
-    var items = focusableIn(this.box);
-    if (!items.length) return;
-
-    var first = items[0];
-    var last = items[items.length - 1];
-    var active = document.activeElement;
-
-    if (!this.box.contains(active)) {
-      e.preventDefault();
-      first.focus();
-      return;
-    }
-    if (e.shiftKey && active === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
-
-  Dialog.prototype._handleMaskClick = function (e) {
-    /* 点到遮罩本身才关 —— 点弹窗内容不关 */
-    if (e.target === this.mask) this._doCancel();
   };
 
   /* ── 快捷方法 ───────────────────────────────────────────── */
+
+  /**
+   * ★ 核心 API —— 弹一个对话框，返回 Promise<返回值>。
+   *
+   * 所有弹层形态都是它的一层薄封装；想加新形态就调它。
+   *
+   * 用法：
+   *   const v = await Dialog.create({
+   *     title: '标题',
+   *     content: '<b>正文</b>',
+   *     buttons: [
+   *       { text: '取消', value: 'cancel' },
+   *       { text: '确定', value: 'ok', cls: 'primary' },
+   *     ],
+   *   });
+   *   if (v === 'ok') { ... }
+   *
+   * @param {Object} opts
+   * @param {string}   [opts.title='']      标题（textContent，不解析 HTML）
+   * @param {string}   [opts.message='']    正文（textContent）
+   * @param {Node|string} [opts.content]     自定义正文，优先于 message
+   * @param {Node}     [opts.extra]         额外内容，插在正文和按钮之间
+   * @param {Array}    [opts.buttons]        [{ text, value, cls, autofocus }]
+   * @param {Function} [opts.onSubmit]       提交前钩子 —— 返回 false 则不关闭
+   * @param {string}   [opts.maskClass='']   追加到 <dialog> 上的 class
+   * @param {boolean}  [opts.narrow=false]   窄版（280px）
+   * @param {boolean}  [opts.dismissOnMask=true] 点遮罩空白处是否关闭
+   * @param {number}   [opts.submitIndex=0]  回车提交时用第几个按钮
+   * @returns {Promise<string>} 按钮的 value（Esc 关闭 → ''）
+   */
+  Dialog.create = function (opts) {
+    return openDialog(opts).promise;
+  };
 
   /**
    * 确认框。返回 Promise<boolean>。
@@ -563,10 +561,21 @@
    * @param {Object} [opts] 同构造函数
    */
   Dialog.confirm = function (message, opts) {
-    var dlg = new Dialog(optsWith(message, opts));
+    /* ★ message / hideCancel 是显式参数 —— 压过 opts 里的同名字段 */
+    var dlg = new Dialog(Object.assign({}, opts, { message: message }));
     return dlg.open().then(function (v) {
       return v !== null && v !== undefined && v !== false;
     });
+  };
+
+  /**
+   * 提示框（只有一个按钮）。返回 Promise<void>。
+   * @param {string} message
+   * @param {Object} [opts] 同构造函数
+   */
+  Dialog.alert = function (message, opts) {
+    var dlg = new Dialog(Object.assign({}, opts, { message: message, hideCancel: true }));
+    return dlg.open().then(function () {});
   };
 
   /**
@@ -586,33 +595,35 @@
    * @returns {Promise<string|null>}
    */
   Dialog.prompt = function (message, opts) {
-    opts = optsWith(message, opts);
+    opts = opts || {};
 
-    var input = {
-      type: opts.inputType || 'text',
-      value: opts.value === undefined || opts.value === null ? '' : String(opts.value),
-      placeholder: opts.placeholder || '',
-      multiline: !!opts.multiline,
-    };
-    opts.input = input;
+    var dlg = new Dialog(Object.assign({}, opts, {
+      message: message,
+      input: {
+        type: opts.inputType || 'text',
+        value: opts.value === undefined || opts.value === null ? '' : String(opts.value),
+        placeholder: opts.placeholder || '',
+        multiline: !!opts.multiline,
+      },
+    }));
 
     /* ★ validate 钩子：返回错误文案就不关闭 —— 用 onOk 钩子实现（它返回 false 可否决） */
     var validate = opts.validate;
     if (validate) {
-      var userOnOk = opts.onOk;
-      opts.onOk = function (dlg) {
-        if (userOnOk && userOnOk(dlg) === false) return false;
-        var err = validate(dlg.input ? dlg.input.value : '', dlg);
+      var userOnOk = dlg.onOk;
+      dlg.onOk = function (d, e) {
+        if (userOnOk && userOnOk(d, e) === false) return false;
+        var err = validate(d._ctl.input ? d._ctl.input.value : '', d);
         if (err) {
-          dlg.showError(err);
+          d.showError(err);
           return false;   /* 钩子返回 false → 不关闭 */
         }
         return true;
       };
     }
 
-    return new Dialog(opts).open().then(function (v) {
-      return v === null || v === undefined ? null : String(v);
+    return dlg.open().then(function (v) {
+      return v === null ? null : String(v);
     });
   };
 
@@ -649,7 +660,7 @@
    * @returns {{ close: Function }} 手动关闭的句柄
    */
   Dialog.tips = function (message, opts) {
-    opts = optsWith(null, opts);
+    opts = opts || {};
 
     var timeout = opts.timeout === undefined ? 5000 : Number(opts.timeout);
     if (!isFinite(timeout) || timeout < 0) timeout = 0;
@@ -665,13 +676,18 @@
     box.appendChild(tip);
 
     var timer = 0;
-    var close = closer(tip, {
-      fade: 200,   /* ★ 淡出 180ms 后再摘掉 —— 直接摘会丢掉动画 */
-      before: function () {
-        if (timer) { clearTimeout(timer); timer = 0; }
-        tip.classList.remove('show');
-      },
-    });
+    var closed = false;
+
+    function close() {
+      if (closed) return;      /* ★ 幂等 —— 调多次只关一次 */
+      closed = true;
+      if (timer) { clearTimeout(timer); timer = 0; }
+      tip.classList.remove('show');
+      /* ★ 淡出 200ms 后再摘掉 —— 直接摘会丢掉动画 */
+      setTimeout(function () {
+        if (tip.parentNode) tip.parentNode.removeChild(tip);
+      }, 200);
+    }
 
     /* 点提示本身 → 提前关掉 */
     tip.addEventListener('click', close);
@@ -721,9 +737,13 @@
     (document.body || document.documentElement).appendChild(mask);
     overlayEl = mask;
 
-    var close = closer(mask, {
-      before: function () { if (overlayEl === mask) overlayEl = null; },
-    });
+    var closed = false;
+    function close() {
+      if (closed) return;      /* ★ 幂等 —— 调多次只关一次 */
+      closed = true;
+      if (overlayEl === mask) overlayEl = null;
+      if (mask.parentNode) mask.parentNode.removeChild(mask);
+    }
 
     return { mask: mask, box: box, close: close };
   }
@@ -748,7 +768,7 @@
    * @returns {{ close: Function }}  关闭句柄
    */
   Dialog.loading = function (message, opts) {
-    opts = optsWith(null, opts);
+    opts = opts || {};
 
     ensureStyle();
 
@@ -792,7 +812,7 @@
    * @returns {{ set: Function, close: Function }}  句柄
    */
   Dialog.progress = function (message, opts) {
-    opts = optsWith(null, opts);
+    opts = opts || {};
 
     var type = PROGRESS_TYPES.indexOf(opts.type) >= 0 ? opts.type : 'bar';
 
@@ -910,17 +930,6 @@
     set(opts.value === undefined ? 0 : opts.value);
 
     return { set: set, close: ov.close };
-  };
-
-  /**
-   * 提示框（只有一个按钮）。返回 Promise<void>。
-   * @param {string} message
-   * @param {Object} [opts]
-   */
-  Dialog.alert = function (message, opts) {
-    var o = optsWith(message, opts);
-    o.hideCancel = true;
-    return new Dialog(o).open().then(function () {});
   };
 
   /* 暴露到全局 —— 跟 plugin/plugin.js 的风格一致 */

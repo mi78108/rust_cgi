@@ -1,7 +1,7 @@
 {
   "name": "dialog",
   "version": "0.1.0",
-  "description": "通用弹窗组件 —— 零依赖纯前端 modal dialog，自己注入样式，颜色走 CSS 变量跟随宿主主题",
+  "description": "通用弹窗组件 —— 基于原生 <dialog> 元素，零依赖纯前端。自己注入样式，颜色走 CSS 变量跟随宿主主题。Esc 关闭 / 焦点陷阱 / 焦点归还 / 背景 inert / top layer 全部由浏览器提供。",
   "entry": "dialog.js",
   "global": "Dialog",
   "type": "script",
@@ -66,8 +66,8 @@
         },
         "maskClass": {
           "type": "string",
-          "default": "dlg-mask",
-          "desc": "遮罩层 class"
+          "default": "",
+          "desc": "追加到 <dialog> 元素上的 class。遮罩由原生 ::backdrop 提供，没有独立的遮罩层"
         },
         "onOk": {
           "type": "Function",
@@ -102,6 +102,44 @@
       }
     ],
     "statics": [
+      {
+        "name": "Dialog.create",
+        "signature": "Dialog.create(options)",
+        "returns": "Promise<string>",
+        "desc": "★ 核心 API —— 弹一个对话框，返回 Promise<返回值>。所有弹层形态都是它的薄封装；想加新形态就调它。",
+        "options": {
+          "title": {
+            "type": "string",
+            "default": "",
+            "desc": "标题（textContent，不解析 HTML）"
+          },
+          "message": {
+            "type": "string",
+            "default": "",
+            "desc": "正文（textContent）"
+          },
+          "content": {
+            "type": "Node|string",
+            "default": null,
+            "desc": "自定义正文，优先于 message；字符串按 HTML 解析，只放可信内容"
+          },
+          "extra": {
+            "type": "Node",
+            "default": null,
+            "desc": "额外内容，插在正文和按钮之间"
+          },
+          "buttons": {
+            "type": "Array",
+            "default": "[]",
+            "desc": "按钮数组 [{ text, value, cls, autofocus }]。★ DOM 顺序决定回车触发哪个 —— 第一个 submit 按钮就是回车触发对象"
+          },
+          "onSubmit": {
+            "type": "Function",
+            "default": null,
+            "desc": "提交前钩子 —— 返回 false 则不关闭（校验失败时用）"
+          }
+        }
+      },
       {
         "name": "Dialog.confirm",
         "signature": "Dialog.confirm(message, options?)",
@@ -213,16 +251,18 @@
     "cancel": "resolve(null)",
     "escape": "resolve(null)",
     "click_mask": "resolve(null)",
-    "enter": "等同确定（焦点在 button/textarea 上时除外，避免重复触发）",
-    "tab": "焦点锁在弹窗内循环",
-    "focus_restore": "关闭后焦点回到打开前的元素",
-    "stacking": "可叠层，只有最上面的弹窗响应 Esc 和遮罩点击"
+    "enter": "等同确定（★ 浏览器触发第一个 submit 按钮 —— 所以 DOM 顺序是「确定、取消」）",
+    "tab": "焦点锁在弹窗内循环（浏览器原生）",
+    "focus_restore": "关闭后焦点自动回到打开前的元素（浏览器原生）",
+    "stacking": "可叠层，一次 Esc 只关最上面那个（自己拦 keydown —— 原生会一次关掉全部）",
+    "background": "模态期间底层页面 inert —— 不可聚焦、不可点击（浏览器原生）",
+    "z_index": "原生 <dialog> 在 top layer —— 永远最上层，z-index 无效"
   },
   "css": {
     "injected": true,
     "style_id": "dlg-component-style",
     "classes": [
-      "dlg-mask",
+      "dlg-form",
       "dlg",
       "dlg-title",
       "dlg-msg",
@@ -261,7 +301,10 @@
       "--red": "#ff4d4d"
     },
     "notes": [
-      "dlg-input —— 输入框（prompt 用），聚焦时边框变 --lime"
+      "dialog.dlg —— <dialog> 元素本身（遮罩由 dialog.dlg::backdrop 提供，没有独立的遮罩层）",
+      "dlg-form —— 内部 <form method=\"dialog\">，按钮 value 直接写进 dialog.returnValue",
+      "dlg-input —— 输入框（prompt 用），聚焦时边框变 --lime",
+      "dlg-actions .dlg-btn.primary/.danger —— order:2；确定在 DOM 里排第一（回车触发它），视觉上用 order 翻到右边"
     ]
   },
   "examples": [
@@ -272,6 +315,10 @@
     {
       "title": "提示框",
       "code": "await Dialog.alert('已保存。');"
+    },
+    {
+      "title": "核心 API（自定义形态）",
+      "code": "const v = await Dialog.create({\n  title: '标题',\n  content: '<b>正文</b>',\n  buttons: [\n    { text: '确定', value: 'ok', cls: 'primary' },\n    { text: '取消', value: 'cancel' },\n  ],\n});\nif (v === 'ok') { ... }"
     },
     {
       "title": "完整用法",
@@ -295,15 +342,22 @@
     }
   ],
   "notes": [
+    "★ 基于原生 <dialog> 元素 —— Esc 关闭 / 焦点陷阱 / 焦点归还 / 背景 inert / top layer 全部由浏览器提供",
+    "★ Dialog.create(options) 是核心 API —— 返回 Promise<返回值>；所有弹层形态都是它的薄封装",
+    "★ 按钮 DOM 顺序决定回车触发谁：浏览器触发第一个 submit 按钮，所以「确定」必须排在前面",
+    "★ 视觉顺序用 CSS order 翻转 —— 确定在右边，取消在左边（跟原来的观感一致）",
+    "★ 一次 Esc 只关最上面那个 —— 原生行为是「一次关掉所有叠着的 dialog」，自己拦 keydown + preventDefault 只关自己",
+    "★ Esc 用 keydown 拦截而不是 cancel 事件 —— 实测 cancel 事件不可取消（cancelable=false）",
+    "★ 点遮罩关闭靠 e.target === dialog 判断 —— 原生点 backdrop 不会关闭",
     "Dialog.progress 四种样式：bar（条）/ circle（环）/ dots（三点，不确定进度）/ steps（分段）",
     "progress 跟 loading 共用一个遮罩槽 —— 后开的会换掉先开的（不叠加）",
     "Dialog.loading 同时只允许一个 —— 再调一次会换掉上一个（不叠加）；close() 幂等",
-    "加载遮罩期间 Esc / 点遮罩都不会关掉它 —— 只能用 close() 关",
+    "加载遮罩期间 Esc / 点遮罩都不会关掉它 —— 只能用 close() 关（它不是 <dialog>，是自己造的遮罩）",
     "Dialog.tips 默认 5 秒后自动消失（timeout: 5000）—— timeout: 0 表示不自动消失",
     "多条 tips 竖着叠（新的在下面），每条各自计时；点提示本身也能提前关掉",
     "Dialog.prompt 返回 Promise<string|null> —— null 表示用户取消（Esc / 点遮罩 / 取消按钮）",
     "危险操作默认焦点在「取消」上 —— 打开时回车不会误触发危险动作",
-    "回车在 <button> 上时不重复触发（否则会触发两次）",
+    "多行输入框（multiline）里回车是换行，Ctrl/Cmd+Enter 才提交",
     "样式自己注入，宿主页面只需定义 CSS 变量就能跟随主题",
     "README.md 不能通过 /pub/ 访问 —— cgi/pub 的 MIME 表没有 .md"
   ]

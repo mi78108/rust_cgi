@@ -3,6 +3,20 @@
 零依赖的纯前端弹窗（modal dialog）。自己注入样式，不依赖宿主页面的 CSS；
 颜色走 CSS 变量，宿主页面定义了 `:root` 变量就跟随宿主主题。
 
+★ **基于原生 `<dialog>` 元素** —— 下面这些模态机制全部由浏览器提供，不用自己实现：
+
+| 机制 | 谁负责 |
+|---|---|
+| Esc 关闭 | 浏览器（`close` 事件 + `returnValue`） |
+| 焦点陷阱（Tab 循环） | 浏览器 |
+| 焦点归还（关闭后回到原处） | 浏览器 |
+| 背景 inert（底层不可点/不可聚焦） | 浏览器 |
+| top layer（永远最上层） | 浏览器 |
+
+★ **核心只有一个函数** —— `Dialog.create(options)`，返回 `Promise<返回值>`。
+所有弹层形态（确认框 / 提示框 / 输入框 / 轻提示 / 加载 / 进度）都是它的薄封装。
+想加新形态就调它，不用改内部。
+
 ## 引入
 
 普通 `<script>` 标签（挂全局 `window.Dialog`）：
@@ -23,6 +37,25 @@ import { Dialog } from '/pub/js/dialog/dialog.js';
 ## 快捷方法
 
 三个返回 Promise 的静态方法 + 轻提示 + 加载遮罩 + 进度框。
+
+### 核心 API
+
+`Dialog.create(options)` 是所有形态的底座 —— 返回 `Promise<按钮的 value>`：
+
+```js
+const v = await Dialog.create({
+  title: '标题',
+  content: '<b>正文</b>',
+  buttons: [
+    { text: '确定', value: 'ok', cls: 'primary' },
+    { text: '取消', value: 'cancel' },
+  ],
+});
+if (v === 'ok') { ... }   // Esc 关闭 → ''
+```
+
+★ 按钮的 **DOM 顺序决定回车触发谁** —— 浏览器触发的是第一个 submit 按钮。
+所以「确定」要排在前面（视觉顺序用 CSS `order` 翻到右边）。
 
 ```js
 // 确认框 → Promise<boolean>
@@ -181,20 +214,21 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 | `hideCancel` | boolean | `false` | 隐藏取消按钮（只剩一个按钮时用） |
 | `okValue` | any | `'ok'` | 确定时 resolve 的值 |
 | `input` | boolean \| Object | `false` | 输入框。`true` 或 `{type,value,placeholder,multiline}`。有输入框时确定时 resolve 的是**输入框的值**（不是 `okValue`） |
-| `maskClass` | string | `'dlg-mask'` | 遮罩层的 class |
+| `maskClass` | string | `''` | 追加到 `<dialog>` 元素上的 class。遮罩由原生 `::backdrop` 提供，**没有独立的遮罩层** |
 | `onOk` | Function | `null` | 确定前的钩子，**返回 `false` 则不关闭** |
 | `onCancel` | Function | `null` | 取消时的钩子 |
 
 ## 行为
 
-| 操作 | 结果 |
-|---|---|
-| 点「确定」 | resolve(`okValue`) |
-| 点「取消」 | resolve(`null`) |
-| Esc | resolve(`null`) |
-| 点遮罩空白处 | resolve(`null`) |
-| 回车 | 等同「确定」（焦点在输入框里时 = 提交输入框） |
-| Tab / Shift+Tab | 焦点锁在弹窗内循环 |
+| 操作 | 结果 | 谁实现 |
+|---|---|---|
+| 点「确定」 | resolve(`okValue`) | 浏览器（`form method=dialog`） |
+| 点「取消」 | resolve(`null`) | 浏览器 |
+| Esc | resolve(`null`) | 自己拦（只关最上面那个） |
+| 点遮罩空白处 | resolve(`null`) | 自己判（`e.target === dialog`） |
+| 回车 | 等同「确定」（焦点在输入框里时 = 提交输入框） | 浏览器触发第一个 submit 按钮 |
+| Tab / Shift+Tab | 焦点锁在弹窗内循环 | 浏览器 |
+| 关闭后焦点 | 自动回到打开前的元素 | 浏览器 |
 
 ★ **输入框里回车 = 提交**；多行（textarea）里普通回车是换行，**Ctrl/Cmd+Enter** 才提交。
 ★ **焦点在输入框上**（有输入框时）—— 打开就能直接打字。
@@ -210,13 +244,18 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 
 ★ **可以叠层** —— 只有最上面那个弹窗响应 Esc 和遮罩点击。
 
+> 原生行为是「一次 Esc 把所有叠着的 `dialog` 全关掉」，
+> 所以这里自己拦了一层 `keydown` + `preventDefault`，只关最上面那个。
+> （用 `keydown` 而不是 `cancel` 事件 —— 实测 `cancel` 不可取消，`cancelable=false`。）
+
 ## 样式
 
 组件自己注入 `<style id="dlg-component-style">`，用的 class：
 
 ```
-.dlg-mask      遮罩层（fixed, 全屏, 半透明黑）
-.dlg           弹窗本体
+dialog.dlg     弹窗本体（就是 <dialog> 元素本身）
+dialog.dlg::backdrop   遮罩（原生提供，不用自己造遮罩 div）
+.dlg-form      内部 <form method="dialog">
 .dlg-title     标题
 .dlg-msg       正文
 .dlg-input      输入框（prompt 用）
