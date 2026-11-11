@@ -201,6 +201,41 @@ def g_rsp():
     r7.header_field('X-A', 'a')
     check('header_field 写入', 'a', r7.header.get('X-A'))
 
+    # --- rsp.set_header(hash) 合并 ---
+    r8 = Rsp()
+    check('rsp.header 无参返回 dict', 'dict', type(r8.header).__name__)
+    check('rsp.header 无参返回内部 header', 'close', r8.header.get('Connection'))
+
+    r8.set_header({'X-A': 'a', 'Cache-Control': 'no-store'})
+    check('set_header(dict) 写入多个', ['a', 'no-store'],
+          [r8.header.get('X-A'), r8.header.get('Cache-Control')])
+    check('set_header(dict) 不冲掉其它 header', 'text/html; charset=utf-8',
+          r8.header.get('Content-Type'))
+    check('set_header(dict) 返回 self(可链式)', True, r8.set_header({}) is r8)
+
+    r8.set_header({'X-A': 'a2'})
+    check('set_header(dict) 同 key 覆盖', 'a2', r8.header.get('X-A'))
+
+    r9 = Rsp()
+    before = dict(r9.header)
+    r9.set_header({})
+    check('set_header(空 dict) 不改变任何东西', before, dict(r9.header))
+
+    r10 = Rsp()
+    r10.set_header({'content-type': 'application/json'})
+    check('header 名大小写不敏感(改的是同一个字段)', 'application/json',
+          r10.header.get('Content-Type'))
+    check('header 大小写不敏感时不会多出一条', 1,
+          len([k for k in r10.header if k.lower() == 'content-type']))
+
+    r11 = Rsp()
+    raised = None
+    try:
+        r11.set_header('not-a-dict')
+    except TypeError as e:
+        raised = str(e)
+    check('set_header(非 Mapping) 抛 TypeError', True, raised is not None)
+
     check('Rsp 没有 chunk 方法', False, hasattr(Rsp(), 'chunk'))
     check('Rsp 有 stream 方法', True, hasattr(Rsp(), 'stream'))
     check('Rsp#finish 幂等标记 sent 初始 False', False, Rsp().sent)

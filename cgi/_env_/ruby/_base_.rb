@@ -428,7 +428,7 @@ class Q
       'Content-Type' => 'text/html; charset=utf-8',
     }.freeze
 
-    attr_reader :header, :sent
+    attr_reader :sent
 
     # chainable setter + getter（then 风格 sentinel）。
     # 用唯一 Object 实例作为哨兵，避免和任何用户传值冲突。
@@ -474,6 +474,35 @@ class Q
     #   self
     # end
 
+    # header —— 读 / 写 二合一（then 风格 sentinel）
+    #
+    #   rsp.header                # 读，返回内部 header Hash（和以前 attr_reader 一样）
+    #   rsp.header(hash)          # 写，把 hash **合并**进 header，返回 self（链式）
+    #   rsp.header(hash).finish   # 链式
+    #
+    #   rsp.header('X-A' => 'a', 'Cache-Control' => 'no-store')
+    #
+    # ★ 合并是**按 key 覆盖**（同 key 新值盖旧值），不是整块替换 ——
+    #   所以 rsp.header('X-A' => 'a') 不会把 Content-Type 冲掉。
+    # ★ 空 hash 不改变任何东西。
+    # ★ 返回 self 而不是 header —— 和 header_field/header_remove 一致，能链式。
+    #
+    # ★ header 名**大小写不敏感**（HTTP 规范）—— 'content-type' 和
+    #   'Content-Type' 是同一个字段。合并时按小写匹配已有 key，
+    #   命中就改那个 key 的值（保留原 key 的写法），不命中才新增。
+    #   不这么做的话 rsp.header('content-type' => 'x') 会写出**两条**
+    #   Content-Type —— 之前 header_field 就是这个毛病。
+    def header(v = RSP_READ)
+      return @header if v.equal?(RSP_READ)
+
+      unless v.is_a?(Hash)
+        raise ArgumentError, "rsp.header 需要 Hash，收到 #{v.class}"
+      end
+
+      v.each { |name, value| header_field(name, value) }
+      self
+    end
+
     def initialize
       @code = 200
       @status = 'OK'
@@ -485,7 +514,7 @@ class Q
 
     # --- Content-Type 快捷 ---
     def type(v)
-      ; @header['Content-Type'] = v; self;
+      ; header_field('Content-Type', v); self;
     end
 
     def type_json
@@ -524,13 +553,21 @@ class Q
     end
 
     # --- 自定义 header ---
+    #
+    # ★ header 名大小写不敏感（HTTP 规范）—— 'content-type' 与 'Content-Type'
+    #   是同一个字段。写入时按小写找已有 key：命中就改那个 key 的值
+    #   （保留原 key 的写法），不命中才新增。
+    #   不然 rsp.header_field('content-type', 'x') 会写出**两条** Content-Type，
+    #   而浏览器只认第一条 —— 设的值静默失效。
     def header_field(name, value)
-      @header[name] = value
+      key = @header.keys.find { |k| k.downcase == name.to_s.downcase }
+      @header[key || name.to_s] = value
       self
     end
 
     def header_remove(name)
-      @header.delete(name)
+      key = @header.keys.find { |k| k.downcase == name.to_s.downcase }
+      @header.delete(key) if key
       self
     end
 
@@ -542,8 +579,11 @@ class Q
       parts << 'Secure' if secure
       parts << "SameSite=#{samesite}" if samesite
       cookie_field = parts.join('; ')
-      existing = @header['Set-Cookie']
-      @header['Set-Cookie'] = existing ? "#{existing}\r\nSet-Cookie: #{cookie_field}" : cookie_field
+      # key 也要按大小写不敏感找 —— 否则先 header('set-cookie' => ...) 再
+      # cookie_set 会写出两条 Set-Cookie
+      key = @header.keys.find { |k| k.downcase == 'set-cookie' } || 'Set-Cookie'
+      existing = @header[key]
+      @header[key] = existing ? "#{existing}\r\nSet-Cookie: #{cookie_field}" : cookie_field
       self
     end
 
@@ -602,7 +642,7 @@ class Q
     # 重定向（默认 302）
     def redirect_to(loc, code: 302, body: '')
       self.code(code).status(code == 301 ? 'Moved Permanently' : 'Found').type_html
-      @header['Location'] = loc
+      header_field('Location', loc)
       @body = Q::Body::TextBody.new(body)
       self
     end
@@ -633,8 +673,8 @@ class Q
       return self if @chunking
 
       # 切 chunked 模式：发 headers + 标记 streaming
-      @header.delete('Content-Length')
-      @header['Transfer-Encoding'] = 'chunked'
+      header_remove('Content-Length')
+      header_field('Transfer-Encoding', 'chunked')
       Q.write_headers(@header, transfer_encoding: 'chunked', code: @code, status: @status)
       @chunking = true
       unless block

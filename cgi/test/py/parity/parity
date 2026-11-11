@@ -150,6 +150,13 @@ def g_rsp():
     hr.header_field('X-A', 'a')
     hr.header_remove('Content-Type')
     out['header_ops'] = dict(hr.header)
+    # 合并语义: set_header(dict) 按 key 覆盖 + 大小写不敏感
+    hm = Rsp()
+    hm.set_header({'X-A': 'a', 'Cache-Control': 'no-store'})
+    out['header_merge'] = dict(hm.header)
+    hc = Rsp()
+    hc.set_header({'content-type': 'application/json'})
+    out['header_ci'] = dict(hc.header)
     out['respond_chunk'] = hasattr(Rsp(), 'chunk')
     out['respond_stream'] = hasattr(Rsp(), 'stream')
     out['sent_init'] = Rsp().sent

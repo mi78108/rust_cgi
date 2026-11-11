@@ -636,31 +636,59 @@ class Rsp {
   //   用数组存, 不把 '\r\nKey: v' 塞进 Map 的 value 里。
   //   （之前那样写: get('Set-Cookie') 拿回来的字符串里嵌着完整 header 行,
   //    调用方没法用; writeHeaders 也要靠字符串拼接还原。）
-  set(k, v) { this.headers.set(k, String(v)); return this; }
+  //
+  // ★ header 名**大小写不敏感**（HTTP 规范）—— 'content-type' 与
+  //   'Content-Type' 是同一个字段。写入时按小写找已有 key：命中就改那个
+  //   key 的值（保留原 key 的写法），不命中才新增。
+  //   不然 set('content-type', 'x') 会写出**两条** Content-Type，
+  //   而浏览器只认第一条 —— 设的值静默失效。
+  _headerKey(k) {
+    const want = String(k).toLowerCase();
+    for (const key of this.headers.keys()) {
+      if (key.toLowerCase() === want) return key;
+    }
+    return String(k);
+  }
+
+  set(k, v) { this.headers.set(this._headerKey(k), String(v)); return this; }
+
+  // 批量设 header —— 合并对象: setAll({ 'X-A': 'a', 'X-B': 'b' })
+  //
+  // 按 key 覆盖(同 key 新值盖旧值), 不是整块替换 —— 所以不会把
+  // Content-Type 冲掉。空对象不改变任何东西。
+  setAll(obj) {
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+      throw new TypeError(
+        `setAll() 需要对象, 收到 ${obj === null ? 'null' : typeof obj}`);
+    }
+    for (const [k, v] of Object.entries(obj)) this.set(k, v);
+    return this;
+  }
 
   append(k, v) {
-    const cur = this.headers.get(k);
-    if (cur === undefined) this.headers.set(k, String(v));
+    const key = this._headerKey(k);
+    const cur = this.headers.get(key);
+    if (cur === undefined) this.headers.set(key, String(v));
     else if (Array.isArray(cur)) cur.push(String(v));
-    else this.headers.set(k, [cur, String(v)]);
+    else this.headers.set(key, [cur, String(v)]);
     return this;
   }
 
   // 取 header —— 多值时返回**第一个**（跟 HTTP 语义一致）
   get(k) {
-    const v = this.headers.get(k);
+    const v = this.headers.get(this._headerKey(k));
     if (v === undefined) return null;
     return Array.isArray(v) ? (v[0] ?? null) : v;
   }
 
   // 取全部值 —— 多值 header 用
   all(k) {
-    const v = this.headers.get(k);
+    const v = this.headers.get(this._headerKey(k));
     if (v === undefined) return [];
     return Array.isArray(v) ? v : [v];
   }
 
-  del(k) { this.headers.delete(k); return this; }
+  del(k) { this.headers.delete(this._headerKey(k)); return this; }
 
   type(mime) { return this.set('Content-Type', mime); }
 

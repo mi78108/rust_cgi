@@ -51,6 +51,10 @@ def _case(req, rsp):
             .header_field('X-B', 'bbb')
             .header_remove('Content-Type')
             .ok_json({'h': 1}).finish())
+    elif NAME == 'headermerge':
+        # 合并语义: 一次设多个 + 大小写不敏感 + 不多写重复头
+        (rsp.set_header({'X-A': 'aaa', 'content-type': 'application/json'})
+            .ok_json({'h': 1}).finish())
     elif NAME == 'file':
         here = os.path.dirname(os.path.abspath(__file__))
         rsp.send_file(os.path.join(here, '..', 'page.html'),

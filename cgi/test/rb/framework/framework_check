@@ -205,6 +205,42 @@ group 'rsp' do
   r7.header_field('X-A', 'a')
   check('header_field 写入', 'a', r7.header['X-A'])
 
+  # --- rsp.header(hash) 合并 ---
+  r8 = Q::Rsp.new
+  check('rsp.header 无参返回 Hash', 'Hash', r8.header.class.name)
+  check('rsp.header 无参返回内部 header', 'close', r8.header['Connection'])
+
+  r8.header('X-A' => 'a', 'Cache-Control' => 'no-store')
+  check('rsp.header(hash) 写入多个', ['a', 'no-store'],
+        [r8.header['X-A'], r8.header['Cache-Control']])
+  check('rsp.header(hash) 不冲掉其它 header', 'text/html; charset=utf-8',
+        r8.header['Content-Type'])
+  check('rsp.header(hash) 返回 self(可链式)', true, r8.header({}) == r8)
+
+  r8.header('X-A' => 'a2')
+  check('rsp.header(hash) 同 key 覆盖', 'a2', r8.header['X-A'])
+
+  r9 = Q::Rsp.new
+  before = r9.header.dup
+  r9.header({})
+  check('rsp.header(空 hash) 不改变任何东西', before, r9.header)
+
+  r10 = Q::Rsp.new
+  r10.header('content-type' => 'application/json')
+  check('header 名大小写不敏感(改的是同一个字段)', 'application/json',
+        r10.header['Content-Type'])
+  check('header 大小写不敏感时不会多出一条', 1,
+        r10.header.keys.count { |k| k.downcase == 'content-type' })
+
+  r11 = Q::Rsp.new
+  raised = begin
+    r11.header('not-a-hash')
+    nil
+  rescue ArgumentError => e
+    e.message
+  end
+  check('rsp.header(非 Hash) 抛 ArgumentError', true, !raised.nil?)
+
   check('Rsp 没有 chunk 方法(已从框架删除, 老 demo 仍在调)', false,
         Q::Rsp.new.respond_to?(:chunk))
   check('Rsp 有 stream 方法', true, Q::Rsp.new.respond_to?(:stream))

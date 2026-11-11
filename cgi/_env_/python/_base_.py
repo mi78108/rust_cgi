@@ -616,7 +616,7 @@ class Rsp:
 
     # ── Content-Type 快捷 ──────────────────────────────────────────────────
     def type(self, v: str) -> 'Rsp':
-        self._header['Content-Type'] = v
+        self._header[self._header_key('Content-Type')] = v
         return self
 
     def type_json(self) -> 'Rsp':
@@ -635,12 +635,42 @@ class Rsp:
         return self.type(mime)
 
     # ── 自定义 header ──────────────────────────────────────────────────────
+    #
+    # ★ header 名大小写不敏感（HTTP 规范）—— 'content-type' 与 'Content-Type'
+    #   是同一个字段。写入时按小写找已有 key：命中就改那个 key 的值
+    #   （保留原 key 的写法），不命中才新增。
+    #   不然 header_field('content-type', 'x') 会写出**两条** Content-Type，
+    #   而浏览器只认第一条 —— 设的值静默失效。
+    def _header_key(self, name: str) -> str:
+        """按大小写不敏感找已有 key；找不到返回原名。"""
+        want = str(name).lower()
+        for k in self._header:
+            if k.lower() == want:
+                return k
+        return str(name)
+
     def header_field(self, name: str, value: str) -> 'Rsp':
-        self._header[name] = value
+        self._header[self._header_key(name)] = value
         return self
 
     def header_remove(self, name: str) -> 'Rsp':
-        self._header.pop(name, None)
+        self._header.pop(self._header_key(name), None)
+        return self
+
+    def set_header(self, headers: Mapping[str, str]) -> 'Rsp':
+        """链式合并 header: set_header({'X-A': 'a', 'Cache-Control': 'no-store'}).
+
+        按 key 覆盖(同 key 新值盖旧值), 不是整块替换 —— 所以不会把
+        Content-Type 冲掉。空 dict 不改变任何东西。
+
+        ★ 'header' 是 property(读), 名字被占用, 所以用这个方法
+          (跟 set_body 一个道理)。
+        """
+        if not isinstance(headers, Mapping):
+            raise TypeError(
+                f'set_header() 需要 Mapping, 收到 {type(headers).__name__}')
+        for name, value in headers.items():
+            self.header_field(name, value)
         return self
 
     def type_file(self, path: str, mime: str | None = None,
@@ -651,7 +681,7 @@ class Rsp:
             return self
         if mime:
             self.type(mime)
-        self._header['Content-Disposition'] = (
+        self._header[self._header_key('Content-Disposition')] = (
             f'attachment; filename="{download_as}"' if download_as else 'inline')
         return self
 
@@ -668,8 +698,11 @@ class Rsp:
         if samesite:
             parts.append(f'SameSite={samesite}')
         field = '; '.join(parts)
-        existing = self._header.get('Set-Cookie')
-        self._header['Set-Cookie'] = (
+        # key 也要按大小写不敏感找 —— 否则先 set_header({'set-cookie': ...})
+        # 再 cookie_set 会写出两条 Set-Cookie
+        key = self._header_key('Set-Cookie')
+        existing = self._header.get(key)
+        self._header[key] = (
             f'{existing}\r\nSet-Cookie: {field}' if existing else field)
         return self
 
@@ -724,7 +757,7 @@ class Rsp:
         self._code = code
         self._status = 'Moved Permanently' if code == 301 else 'Found'
         self.type_html()
-        self._header['Location'] = loc
+        self._header[self._header_key('Location')] = loc
         self._body = TextBody(body)
         return self
 
@@ -747,8 +780,8 @@ class Rsp:
         if self._chunking:
             return self
         size = self._body.size() if chunk_size is None else chunk_size
-        self._header.pop('Content-Length', None)
-        self._header['Transfer-Encoding'] = 'chunked'
+        self._header.pop(self._header_key('Content-Length'), None)
+        self._header[self._header_key('Transfer-Encoding')] = 'chunked'
         write_headers(self._header, transfer_encoding='chunked',
                       code=str(self._code), status=str(self._status))
         self._chunking = True
