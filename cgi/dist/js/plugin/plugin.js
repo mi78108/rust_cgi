@@ -9,15 +9,19 @@
  *   Dialog.confirm('确定？');
  *
  * ★ 加载流程：
+ *   0. 先加载 description.json 的 `dependencies`（如果有）—— 依赖先行
  *   1. fetch `<base>/<name>/description.json`  —— 元信息（entry/global/type）
  *   2. 按 `type` 加载实现文件：
  *        type === 'module' → 动态 import()
  *        否则               → 注入 <script> 标签
  *   3. type 不是 module 时，从 `global` 指定的全局变量上取导出的 API
  *
+ * ★ 插件名用**点号**分段（'utils.datetime' → 目录 utils/datetime）：
+ *        每个段只允许 [A-Za-z0-9_-]，所以 '..' 构造不出来（详见 parseName）。
+ *
  * ★ 实现文件的最终位置（resolveUrl）：
- *        没写 url          → <base>/<name>/<entry>
- *        url 是相对路径     → <base>/<name>/<url>    ← 跟随 base
+ *        没写 url          → <base>/<path>/<entry>
+ *        url 是相对路径     → <base>/<path>/<url>    ← 跟随 base
  *        url 是绝对 URL     → 直接用                   ← 显式覆盖 base
  *   ★ 相对路径跟随 base 很重要 —— 写死绝对路径会让 base/base 覆盖**失效**。
  *
@@ -29,18 +33,73 @@
  * ★ get/has/clear 按**插件名**索引，与 base 无关 —— load 时用了别的 base
  *   也查得到（同名在多个 base 下都 load 过时，get 返回最后加载的那份）。
  *
+ * ★ 插件根目录（base）**自举**：
+ *   plugin.js 从哪加载，插件就从哪找 —— base 默认从 plugin.js 自己的 URL 反推
+ *   （plugin.js 住在 <base>/plugin/plugin.js，base = 它的上上级目录）。
+ *   所以页面在别的 origin、或者从 CDN 引 plugin.js，都不用手动设 Plugin.base。
+ *   推导不出来时（plugin.js 被当 module 引入 / 打进 bundle）才退回 '/pub/js/'。
+ *   ★ 页面仍然可以随时覆盖：`Plugin.base = '...'` 或 `load(name, { base })`。
+ *
  * 元信息字段（见 description.json）：
- *   name    插件名（也是目录名）
+ *   name    插件名（也是目录名）。点号分段，如 'utils.datetime' → utils/datetime/
  *   entry   实现文件名，相对插件目录，如 "dialog.js"
  *   global  导出到 window 上的全局变量名，如 "Dialog"（type=module 时不用）
  *   type    "script"（默认）或 "module"
  *   url     实现文件路径。相对路径跟随 base；绝对 URL 覆盖 base（可选）
+ *   dependencies 依赖的插件名数组 —— 加载本插件**之前**先加载它们
+ *                （点号分段，如 ["utils.datetime"]；基准同为 base）
  */
 (function () {
   'use strict';
 
-  /* 插件根目录 —— 静态服务器入口。页面在别处时用 Plugin.base 改。 */
-  var DEFAULT_BASE = '/pub/js/';
+  /* 兜底的插件根目录 —— 推导不出来时用它（origin 相对，指向页面自己的 origin）。 */
+  var FALLBACK_BASE = '/pub/js/';
+
+  /**
+   * 自举 base —— 从 plugin.js **自己的 URL** 反推插件根目录。
+   *
+   * ★ 为什么需要：
+   *   '/pub/js/' 是**相对 origin** 的路径，浏览器拿它跟**页面自己**的 origin 解析 ——
+   *   页面在 :8899 而 plugin.js 从 :3000 加载时，插件就跑到 :8899 去找（404）。
+   *   从 plugin.js 自己的 URL 反推，就不受页面 origin 影响了。
+   *
+   * ★ 规则：plugin.js 住在 <base>/plugin/plugin.js，所以 base 是它的上上级 ——
+   *   new URL('../', src) 一步就是（相对解析按「文件所在目录」算，
+   *   '../' 恰好剥掉文件名 + plugin/ 这一层）。
+   *
+   * ★ 只能在**脚本同步执行期间**读 document.currentScript —— 出了这个窗口
+   *   它永远是 null。所以必须在 IIFE 顶层取，不能等到 load() 时再取。
+   *
+   * @returns {string|null} 推不出来返回 null
+   */
+  function detectBase() {
+    var el = (typeof document !== 'undefined') ? document.currentScript : null;
+    var src = (el && el.src) ? el.src : '';
+    /* ★ currentScript 拿不到（module 脚本 / 被 bundle 进来）→ 退而求其次，
+       扫页面上的 script 标签找自己 —— 元素在执行时已经在 DOM 里了。 */
+    if (!src && typeof document !== 'undefined' && document.querySelectorAll) {
+      var tags = document.querySelectorAll('script[src]');
+      for (var i = 0; i < tags.length; i++) {
+        var s = tags[i].getAttribute('src') || '';
+        if (/\/plugin\/plugin\.js(\?|#|$)/.test(s)) { src = tags[i].src; break; }
+      }
+    }
+    if (!src) return null;
+    try {
+      var u = new URL(src);
+      /* 只认 http(s) —— file: / blob: 之类推出来的 base 没意义 */
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      return new URL('../', u.href).href;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* ★ 推导出来的 base —— null 表示推不出来（页面得自己设 Plugin.base） */
+  var DETECTED_BASE = detectBase();
+
+  /* 插件根目录 —— 默认用推导值，推不出来才用兜底。页面在别处时用 Plugin.base 改。 */
+  var DEFAULT_BASE = DETECTED_BASE || FALLBACK_BASE;
 
   /* ★ 插件名 → 路径段
    *
@@ -228,8 +287,14 @@
   }
 
   class Plugin {
-    /** 插件根目录（默认 '/pub/js/'） */
+    /** 插件根目录 —— 默认是**从 plugin.js 自己的 URL 推导**出来的；
+     *  推导失败（module 引入 / 被 bundle）才退回 '/pub/js/'。
+     *  页面随时可以改：`Plugin.base = '...'`，或单次 `load(name, { base })`。 */
     static base = DEFAULT_BASE;
+
+    /** 自举推导出来的 base —— null 表示推导失败（此时 base 是兜底的 '/pub/js/'）。
+     *  只读参考，用来确认「插件到底是从哪儿找的」。 */
+    static detectedBase = DETECTED_BASE;
 
     /**
      * 按名称加载插件。
@@ -245,10 +310,21 @@
         throw new Error('非法插件名: ' + JSON.stringify(name) + '（点号分段，每段只允许字母/数字/下划线/连字符）');
       }
 
+      return Plugin._loadCached(name, base, [name]);
+    }
+
+    /**
+     * 加载并缓存。chain 是**祖先链** —— 用来检测循环依赖。
+     * @param {string} name
+     * @param {string} base
+     * @param {string[]} chain 祖先链（含 name 自己）
+     * @returns {Promise<*>}
+     */
+    static async _loadCached(name, base, chain) {
       var key = base + name;
       if (cache.has(key)) return cache.get(key);
 
-      var p = Plugin._load(name, base);
+      var p = Plugin._load(name, base, chain);
       cache.set(key, p);
       addKey(name, key);
 
@@ -267,8 +343,30 @@
       }
     }
 
-    static async _load(name, base) {
+    static async _load(name, base, chain) {
       var desc = await Plugin.describe(name, { base: base });
+
+      /* ★ 依赖先行 —— description.json 的 dependencies 列出的插件先加载。
+         依赖名跟 load() 一样用点号分段，基准同为 base（相对插件根）。
+         链上已有的名字 = 循环依赖，直接报错 —— 不能等它，
+         否则 A→B→A 会互相 await，死锁。 */
+      var deps = desc.dependencies;
+      if (deps !== undefined && deps !== null) {
+        if (!Array.isArray(deps)) {
+          throw new Error('description.json 的 dependencies 必须是数组: ' + name);
+        }
+        for (var i = 0; i < deps.length; i++) {
+          var dep = deps[i];
+          if (!parseName(dep)) {
+            throw new Error('非法依赖名: ' + JSON.stringify(dep) +
+                            '（来自 ' + name + ' 的 dependencies）');
+          }
+          if (chain.indexOf(dep) >= 0) {
+            throw new Error('循环依赖: ' + chain.concat([dep]).join(' -> '));
+          }
+          await Plugin._loadCached(dep, base, chain.concat([dep]));
+        }
+      }
 
       var path = nameToPath(name);
     if (!path) throw new Error('非法插件名: ' + JSON.stringify(name));

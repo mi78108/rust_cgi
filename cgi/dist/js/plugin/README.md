@@ -20,6 +20,61 @@ Dialog.confirm('确定？');
    - 否则 → 注入 `<script>` 标签
 3. `type` 不是 `module` 时，从 `global` 指定的全局变量上取导出的 API
 
+## 嵌套插件（点号分段）
+
+插件名用**点号**分段，`Plugin.load('utils.datetime')` 对应目录 `utils/datetime/`：
+
+```js
+const dt = await Plugin.load('utils.datetime');
+dt.formatDate(new Date());
+```
+
+★ **每段只允许 `[A-Za-z0-9_-]`** —— 这正是防路径穿透的关键：
+
+| 名字 | 结果 |
+|---|---|
+| `utils.datetime` | ✅ 两段都合法 |
+| `..` | ❌ 点号拆开是空段 |
+| `utils..datetime` | ❌ 中间空段 |
+| `.utils` / `utils.` | ❌ 首尾空段 |
+| `a/b` | ❌ 段里含斜杠 |
+| `a%2e%2e` | ❌ 段里含百分号 |
+
+★ 用点号而不是斜杠，是因为**点号分段后，任何一段里都不可能出现点号** ——
+于是 `..` 这种段根本构造不出来。斜杠分段的话 `..` 是完整的一段，
+得靠额外黑名单挡，少一层就漏。
+
+★ `base` 里也不允许 `..` 段 —— 否则拼出来的 URL 会跳出 base 目录。
+
+## 依赖（dependencies）
+
+`description.json` 的 `dependencies` 列依赖的插件名 —— **加载本插件之前先加载它们**。
+
+```json
+{
+  "name": "utils",
+  "entry": "utils.js",
+  "global": "Utils",
+  "dependencies": ["utils.datetime"]
+}
+```
+
+```js
+const U = await Plugin.load('utils');
+U.datetime.formatDate(new Date());   // deps 已经加载并挂上了
+```
+
+★ 工具集类模块（`utils`）靠它把子模块全挂上 —— 容器本身不用实现任何功能。
+
+| 规则 | 说明 |
+|---|---|
+| 依赖名 | 跟 `load()` 一样用点号分段，**基准同为 base**（相对插件根，不是相对当前插件） |
+| 加载顺序 | 依赖先加载，容器后加载 —— 所以子模块挂上来的东西不会被覆盖 |
+| 递归 | 依赖自己也有 `dependencies` → 递归加载 |
+| 循环依赖 | A→B→A 直接抛「循环依赖」错误，**不会死锁** |
+| 非法依赖名 | 跟非法插件名一样被拒（点号分段校验） |
+| 去重 | 同一个依赖只加载一次 |
+
 ## API
 
 ### `Plugin.load(name, options?)` → `Promise<*>`
@@ -28,7 +83,7 @@ Dialog.confirm('确定？');
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `name` | string | 插件名（= 目录名） |
+| `name` | string | 插件名（= 目录名）。点号分段，如 `utils.datetime` → `utils/datetime/` |
 | `options.base` | string | 插件根目录，默认 `Plugin.base` |
 
 ★ `base` 决定**两样东西**：`description.json` 从哪儿取，以及实现文件从哪儿取。

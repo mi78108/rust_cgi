@@ -1,14 +1,18 @@
 {
   "name": "plugin",
   "version": "0.1.0",
-  "description": "插件加载器 —— 按名称加载 cgi/dist/js/<name>/ 下的插件，元信息来自同目录的 description.json",
+  "description": "插件加载器 —— 按名称加载 cgi/dist/js/<name>/ 下的插件，名字支持点号分段（utils.datetime → utils/datetime/），可声明 dependencies 先加载依赖，元信息来自同目录的 description.json。插件根目录从 plugin.js 自己的 URL 自举推导",
   "entry": "plugin.js",
   "global": "Plugin",
   "type": "script",
   "dependencies": [],
   "url": "plugin.js",
   "readme": "README.md",
-  "tags": ["loader", "plugin", "registry"],
+  "tags": [
+    "loader",
+    "plugin",
+    "registry"
+  ],
   "api": {
     "statics": [
       {
@@ -18,7 +22,11 @@
         "async": true,
         "desc": "按名称加载插件，返回该插件导出的 API。同名并发只加载一次；失败不缓存，可重试",
         "options": {
-          "base": { "type": "string", "default": "Plugin.base", "desc": "插件根目录，覆盖 Plugin.base" }
+          "base": {
+            "type": "string",
+            "default": "Plugin.base",
+            "desc": "插件根目录，覆盖 Plugin.base"
+          }
         }
       },
       {
@@ -51,14 +59,21 @@
       {
         "name": "Plugin.base",
         "type": "string",
-        "default": "/pub/js/",
-        "desc": "插件根目录。页面在别处时可以改"
+        "default": "自举推导值（plugin.js 所在 origin + <base> 目录）；推导失败才退回 '/pub/js/'",
+        "desc": "插件根目录。默认从 plugin.js 自己的 URL 反推 —— plugin.js 从哪加载，插件就从哪找。页面随时可改"
+      },
+      {
+        "name": "Plugin.detectedBase",
+        "type": "string|null",
+        "default": "null",
+        "desc": "自举推导出来的 base（只读参考）。null 表示推导失败（plugin.js 被当 module 引入 / 打进 bundle）"
       }
     ]
   },
   "loading": {
     "steps": [
-      "fetch <base>/<name>/description.json —— 元信息（entry/global/type）",
+      "fetch <base>/<path>/description.json —— 元信息（entry/global/type/dependencies）",
+      "★ 先加载 dependencies 里的插件（点号分段，基准同为 base）—— 依赖先行",
       "type === 'module' → 动态 import()；否则注入 <script> 标签",
       "type 不是 module 时从 global 指定的全局变量上取导出的 API"
     ],
@@ -66,7 +81,9 @@
     "dedup": "同名并发 load 共享同一个 Promise，只真正加载一次",
     "retry": "加载失败会清掉缓存，下次 load 可以重试",
     "reuse": "type 不是 module 且页面上已有 global 时直接复用，不重复执行脚本",
-    "url_resolution": "优先用 description.json 的 url；没有则用 <base>/<name>/<entry>"
+    "url_resolution": "优先用 description.json 的 url；没有则用 <base>/<name>/<entry>",
+    "dependencies": "description.json 的 dependencies 数组 —— 加载本插件前先加载它们。工具集类模块（utils）用它把子模块全挂上",
+    "dependency_cycle": "循环依赖（A→B→A）直接抛「循环依赖」错误 —— 不能等它，否则互相 await 死锁"
   },
   "contract": {
     "description_json_fields": {
@@ -74,7 +91,8 @@
       "entry": "实现文件名，相对插件目录，如 dialog.js",
       "global": "导出到 window 上的全局变量名，如 Dialog（type=module 时不用）",
       "type": "script（默认）或 module",
-      "url": "实现文件的路径。相对路径（dialog.js）跟随 base 解析；绝对 URL（/pub/js/x/x.js 或 https://…）直接使用并覆盖 base"
+      "url": "实现文件的路径。相对路径（dialog.js）跟随 base 解析；绝对 URL（/pub/js/x/x.js 或 https://…）直接使用并覆盖 base",
+      "dependencies": "依赖的插件名数组。点号分段，如 ['utils.datetime']。基准是 base（相对插件根），不是相对当前插件"
     }
   },
   "examples": [
@@ -89,10 +107,19 @@
     {
       "title": "换根目录",
       "code": "Plugin.base = '/pub/js/';\nconst D = await Plugin.load('dialog', { base: '/pub/js/' });"
+    },
+    {
+      "title": "工具集（deps 自动加载）",
+      "code": "// utils/description.json 里写 \"dependencies\": [\"utils.datetime\"]\nconst U = await Plugin.load('utils');\nU.datetime.formatDate(new Date());  // deps 已经挂上了"
     }
   ],
   "notes": [
-    "插件名严格白名单校验 —— 它会拼进 URL 和文件路径",
+    "base 自举：plugin.js 住在 <base>/plugin/plugin.js，base = 它的上上级目录 —— 从 plugin.js 自己的 URL 反推，plugin.js 从哪加载插件就从哪找，不用手动设 Plugin.base",
+    "页面仍可覆盖：Plugin.base = '...' 或 load(name, { base })；Plugin.detectedBase 能看出自举出来的值",
+    "插件名按点号分段，每段只允许字母/数字/下划线/连字符 —— '..' 构造不出来",
+    "base 里也不能有 '..' 段",
+    "dependencies 会先加载 —— 工具集类模块靠它把子模块全挂上",
+    "循环依赖直接报错，不死锁",
     "加载失败不写缓存，可以重试",
     "页面已用 <script> 引过插件时不会重复执行（按 global 判断）",
     "Plugin.get 是同步的：返回已 resolve 的值（另存了一份），不是 Promise"
