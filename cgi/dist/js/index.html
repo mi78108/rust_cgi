@@ -118,8 +118,8 @@ li{margin:3px 0}
     <h3><a href="/pub/js/utils/">utils</a></h3>
     <span class="path">/pub/js/utils/</span>
   </div>
-  <p>通用工具集。零依赖，按子模块组织（<code>utils/&lt;name&gt;.js</code>），
-     共用 <code>window.Utils</code> 容器。当前含 <code>datetime</code> 子模块。</p>
+  <p>通用工具集。零依赖，<code>utils.js</code> 只是容器，功能在独立子模块目录里。
+     <code>Plugin.load('utils')</code> 会先加载全部 deps。</p>
   <div class="demo">
     <button data-demo="utils-datetime" class="primary">datetime</button>
   </div>
@@ -136,6 +136,8 @@ li{margin:3px 0}
 <li>工具的详细页放自己的目录里 —— 本页只做列表和简单演示，
 点工具名跳过去。</li>
 <li><code>description.json</code> 描述 name / version / entry / api / behavior / css 等字段。</li>
+<li><code>dependencies</code> 列依赖的插件名 —— <code>Plugin.load()</code> 会<b>先加载它们</b>。
+工具集类模块（如 <code>utils</code>）用它把子模块全挂上。</li>
 </ul>
 
 </div>
@@ -143,7 +145,6 @@ li{margin:3px 0}
 <script src="/pub/js/dialog/dialog.js"></script>
 <script src="/pub/js/plugin/plugin.js"></script>
 <script src="/pub/js/table/table.js"></script>
-<script src="/pub/js/utils/datetime/datetime.js"></script>
 <script src="/pub/js/utils/utils.js"></script>
 <script>
 const out = document.getElementById('out');
@@ -192,10 +193,13 @@ const DEMOS = {
          '，confirm → ' + yes);
   },
   'utils-datetime': async () => {
-    /* ★ utils 是多个子模块来的容器——每个子模块一个文件，共用 window.Utils 容器 */
-    const dt = Utils.datetime;
+    /* ★ utils 的子模块清单在 description.json 的 dependencies 里 ——
+       Plugin.load('utils') 会先把它们全加载上，再加载容器。 */
+    const U = await Plugin.load('utils');
+    const dt = U.datetime;
     const now = new Date();
-    show('submodules() -> ' + JSON.stringify(Utils.submodules()) +
+    show('load("utils") -> version ' + U.version +
+         '\ndeps 已自动加载，Utils.datetime 存在: ' + (!!dt) +
          '\nformatDate(now) -> ' + dt.formatDate(now) +
          '\nformatDateTime(now) -> ' + dt.formatDateTime(now) +
          '\nformatRelative(now - 3min) -> ' + dt.formatRelative(now.getTime() - 3 * 60000) +
