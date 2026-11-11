@@ -32,7 +32,7 @@ unless Object.const_defined?(:PUB_ROOT)
 end
 
 def serve_file(rsp, real_path, mime)
-  rsp.type(mime).body(real_path).finish
+  rsp.header_field('Access-Control-Allow-Origin','*').type(mime).body(real_path).finish
 end
 
 def reject(rsp, msg)
