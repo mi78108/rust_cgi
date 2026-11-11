@@ -1,0 +1,112 @@
+{
+  "name": "utils",
+  "version": "0.1.0",
+  "description": "通用工具集 —— 零依赖纯前端，按子模块组织（utils/<name>.js），共用 window.Utils 容器。当前含 datetime 子模块",
+  "entry": "utils.js",
+  "global": "Utils",
+  "type": "script",
+  "dependencies": [],
+  "url": "utils.js",
+  "readme": "README.md",
+  "tags": ["utils", "datetime", "date", "time", "helper"],
+  "structure": {
+    "container": "window.Utils —— utils.js 建立，子模块往上挂",
+    "submodule_file": "utils/<name>.js —— 每个子模块一个文件",
+    "load_order": "谁先加载都行 —— 子模块只往 window.Utils 上挂，不依赖 utils.js 已执行",
+    "plugin_loader": "Plugin.load('utils') 只会拉 utils.js（entry），子模块要自己 <script> 引或用 Utils.loadSub(name) 拉"
+  },
+  "api": {
+    "statics": [
+      {
+        "name": "Utils.version",
+        "type": "string",
+        "default": "0.1.0",
+        "desc": "版本号，跟本文件的 version 字段保持一致"
+      },
+      {
+        "name": "Utils.submodules",
+        "signature": "Utils.submodules()",
+        "returns": "string[]",
+        "desc": "列出已注册的子模块名（已排序）。子模块挂上来就能看见"
+      },
+      {
+        "name": "Utils.loadSub",
+        "signature": "Utils.loadSub(name, options?)",
+        "returns": "Promise<Object>",
+        "async": true,
+        "desc": "按名拉取子模块（动态注入 <script>）。已经加载过的直接返回，不重复注入",
+        "options": {
+          "base": { "type": "string", "default": "Plugin.base + 'utils/'", "desc": "子模块所在目录。缺省从 Plugin.base 推导（页面指到哪就从哪找），没有 Plugin 时退回 /pub/js/utils/" }
+        }
+      }
+    ],
+    "submodules": {
+      "datetime": {
+        "entry": "datetime.js",
+        "global": "Datetime",
+        "desc": "日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳。入参吃 Date、时间戳、日期字符串，认不出来返回 null",
+        "methods": [
+          { "name": "toDate", "signature": "Datetime.toDate(v)", "returns": "Date|null", "desc": "各种入参统一成 Date。认不出来返回 null" },
+          { "name": "year", "signature": "Datetime.year(v)", "returns": "number|null", "desc": "年" },
+          { "name": "month", "signature": "Datetime.month(v)", "returns": "number|null", "desc": "月，1~12" },
+          { "name": "day", "signature": "Datetime.day(v)", "returns": "number|null", "desc": "日" },
+          { "name": "hour", "signature": "Datetime.hour(v)", "returns": "number|null", "desc": "时，0~23" },
+          { "name": "minute", "signature": "Datetime.minute(v)", "returns": "number|null", "desc": "分" },
+          { "name": "second", "signature": "Datetime.second(v)", "returns": "number|null", "desc": "秒" },
+          { "name": "weekday", "signature": "Datetime.weekday(v)", "returns": "number|null", "desc": "星期几，0=周日" },
+          { "name": "dayOfYear", "signature": "Datetime.dayOfYear(v)", "returns": "number|null", "desc": "一年里的第几天，1~366" },
+          { "name": "daysInMonth", "signature": "Datetime.daysInMonth(y, m)", "returns": "number|null", "desc": "某年某月的天数，m 是 1~12" },
+          { "name": "isLeapYear", "signature": "Datetime.isLeapYear(y)", "returns": "boolean", "desc": "闰年判定（整百年不算、整千年算）" },
+          { "name": "format", "signature": "Datetime.format(v, pattern?)", "returns": "string", "desc": "按模板格式化。占位符 YYYY YY MM DD HH mm ss SSS，默认 'YYYY-MM-DD HH:mm:ss'" },
+          { "name": "formatDate", "signature": "Datetime.formatDate(v)", "returns": "string", "desc": "只到天，'2026-11-11'" },
+          { "name": "formatTime", "signature": "Datetime.formatTime(v)", "returns": "string", "desc": "只到分，'14:30'" },
+          { "name": "formatDateTime", "signature": "Datetime.formatDateTime(v)", "returns": "string", "desc": "完整时间，'2026-11-11 14:30:00'" },
+          { "name": "formatRelative", "signature": "Datetime.formatRelative(v, now?)", "returns": "string", "desc": "相对时间，'刚刚' / '3 分钟前' / '2 小时后'" },
+          { "name": "diffDays", "signature": "Datetime.diffDays(a, b)", "returns": "number|null", "desc": "相差几天，按自然日算（b - a）" },
+          { "name": "diffMs", "signature": "Datetime.diffMs(a, b)", "returns": "number|null", "desc": "相差多少毫秒（b - a）" },
+          { "name": "add", "signature": "Datetime.add(v, delta?)", "returns": "Date|null", "desc": "加减时间，delta 支持 years months days hours minutes seconds ms" },
+          { "name": "addDays", "signature": "Datetime.addDays(v, n)", "returns": "Date|null", "desc": "加减天数的快捷方式，n 可为负" },
+          { "name": "startOfDay", "signature": "Datetime.startOfDay(v)", "returns": "Date|null", "desc": "一天的开始，00:00:00.000" },
+          { "name": "endOfDay", "signature": "Datetime.endOfDay(v)", "returns": "Date|null", "desc": "一天的结束，23:59:59.999" },
+          { "name": "startOfWeek", "signature": "Datetime.startOfWeek(v, firstDay?)", "returns": "Date|null", "desc": "一周的开始，默认周一；firstDay 传 0 则从周日开始" },
+          { "name": "startOfMonth", "signature": "Datetime.startOfMonth(v)", "returns": "Date|null", "desc": "一月的开始" },
+          { "name": "endOfMonth", "signature": "Datetime.endOfMonth(v)", "returns": "Date|null", "desc": "一月的结束，最后一秒" },
+          { "name": "toTimestamp", "signature": "Datetime.toTimestamp(v)", "returns": "number|null", "desc": "Unix 时间戳（秒）" },
+          { "name": "fromTimestamp", "signature": "Datetime.fromTimestamp(ts)", "returns": "Date|null", "desc": "Unix 时间戳（秒）→ Date" }
+        ]
+      }
+    }
+  },
+  "behavior": {
+    "invalid_input": "所有方法入参不合法都返回 null（格式化类返回空串），不抛异常",
+    "date_parsing": "认 'YYYY-MM-DD' / 'YYYY/MM/DD' / 可带 ' HH:mm[:ss]'；ISO 8601 带 Z 或时区偏移走原生解析；不存在的日期（2 月 31 日）判为 null",
+    "diff_days": "diffDays 按自然日算 —— 抹掉时分秒再相减，所以「今天 9:00 → 明天 8:00」是 1 天不是 0",
+    "month_base": "month() 返回 1~12；weekday() 返回 0~6（0=周日，跟 Date.getDay 一致）",
+    "dst_safety": "add() 的月/年用 setMonth / setFullYear —— setDate 会被夏令时吃掉一天"
+  },
+  "examples": [
+    {
+      "title": "格式化",
+      "code": "Utils.datetime.formatDate(new Date());        // '2026-11-11'\nUtils.datetime.format(new Date(), 'YYYY/MM/DD HH:mm');  // '2026/11/11 14:30'"
+    },
+    {
+      "title": "相对时间",
+      "code": "Utils.datetime.formatRelative(Date.now() - 3 * 60000);  // '3 分钟前'"
+    },
+    {
+      "title": "差值",
+      "code": "Utils.datetime.diffDays('2026-11-01', '2026-11-11');  // 10"
+    },
+    {
+      "title": "拉子模块",
+      "code": "const dt = await Utils.loadSub('datetime');\ndt.formatDate(new Date());"
+    }
+  ],
+  "notes": [
+    "子模块是独立的 .js 文件 —— utils.js 不自动加载它们",
+    "页面要直接用 datetime 就 <script src=\"/pub/js/utils/datetime.js\">；或者用 Utils.loadSub('datetime')",
+    "Plugin.load('utils') 只会拉 entry（utils.js），拿到的是容器不是子模块",
+    "loadSub 的 base 缺省从 Plugin.base 推导 —— 写死路径的话页面换源就加载不到",
+    "README.md 不能通过 /pub/ 访问 —— cgi/pub 的 MIME 表没有 .md"
+  ]
+}

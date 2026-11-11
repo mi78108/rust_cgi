@@ -1,0 +1,206 @@
+{
+  "name": "datetime",
+  "version": "0.1.0",
+  "description": "日期时间工具 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳。零依赖纯前端",
+  "entry": "datetime.js",
+  "global": "Datetime",
+  "type": "script",
+  "dependencies": [],
+  "url": "datetime.js",
+  "readme": "README.md",
+  "tags": [
+    "utils",
+    "datetime",
+    "date",
+    "time"
+  ],
+  "api": {
+    "submodule_of": "utils",
+    "note": "挂在 window.Utils.datetime 上；也可以独立用 Plugin.load('utils.datetime') 加载",
+    "methods": [
+      {
+        "name": "toDate",
+        "signature": "Datetime.toDate(v)",
+        "returns": "Date|null",
+        "desc": "各种入参统一成 Date。认不出来返回 null"
+      },
+      {
+        "name": "year",
+        "signature": "Datetime.year(v)",
+        "returns": "number|null",
+        "desc": "年"
+      },
+      {
+        "name": "month",
+        "signature": "Datetime.month(v)",
+        "returns": "number|null",
+        "desc": "月，1~12"
+      },
+      {
+        "name": "day",
+        "signature": "Datetime.day(v)",
+        "returns": "number|null",
+        "desc": "日"
+      },
+      {
+        "name": "hour",
+        "signature": "Datetime.hour(v)",
+        "returns": "number|null",
+        "desc": "时，0~23"
+      },
+      {
+        "name": "minute",
+        "signature": "Datetime.minute(v)",
+        "returns": "number|null",
+        "desc": "分"
+      },
+      {
+        "name": "second",
+        "signature": "Datetime.second(v)",
+        "returns": "number|null",
+        "desc": "秒"
+      },
+      {
+        "name": "weekday",
+        "signature": "Datetime.weekday(v)",
+        "returns": "number|null",
+        "desc": "星期几，0=周日"
+      },
+      {
+        "name": "dayOfYear",
+        "signature": "Datetime.dayOfYear(v)",
+        "returns": "number|null",
+        "desc": "一年里的第几天，1~366"
+      },
+      {
+        "name": "daysInMonth",
+        "signature": "Datetime.daysInMonth(y, m)",
+        "returns": "number|null",
+        "desc": "某年某月的天数，m 是 1~12"
+      },
+      {
+        "name": "isLeapYear",
+        "signature": "Datetime.isLeapYear(y)",
+        "returns": "boolean",
+        "desc": "闰年判定"
+      },
+      {
+        "name": "format",
+        "signature": "Datetime.format(v, pattern?)",
+        "returns": "string",
+        "desc": "按模板格式化。占位符 YYYY YY MM DD HH mm ss SSS"
+      },
+      {
+        "name": "formatDate",
+        "signature": "Datetime.formatDate(v)",
+        "returns": "string",
+        "desc": "只到天，'2026-11-11'"
+      },
+      {
+        "name": "formatTime",
+        "signature": "Datetime.formatTime(v)",
+        "returns": "string",
+        "desc": "只到分，'14:30'"
+      },
+      {
+        "name": "formatDateTime",
+        "signature": "Datetime.formatDateTime(v)",
+        "returns": "string",
+        "desc": "完整时间，'2026-11-11 14:30:00'"
+      },
+      {
+        "name": "formatRelative",
+        "signature": "Datetime.formatRelative(v, now?)",
+        "returns": "string",
+        "desc": "相对时间，'刚刚' / '3 分钟前'"
+      },
+      {
+        "name": "diffDays",
+        "signature": "Datetime.diffDays(a, b)",
+        "returns": "number|null",
+        "desc": "相差几天，按自然日算"
+      },
+      {
+        "name": "diffMs",
+        "signature": "Datetime.diffMs(a, b)",
+        "returns": "number|null",
+        "desc": "相差多少毫秒"
+      },
+      {
+        "name": "add",
+        "signature": "Datetime.add(v, delta?)",
+        "returns": "Date|null",
+        "desc": "加减时间，delta 支持 years months days hours minutes seconds ms"
+      },
+      {
+        "name": "addDays",
+        "signature": "Datetime.addDays(v, n)",
+        "returns": "Date|null",
+        "desc": "加减天数的快捷方式"
+      },
+      {
+        "name": "startOfDay",
+        "signature": "Datetime.startOfDay(v)",
+        "returns": "Date|null",
+        "desc": "一天的开始"
+      },
+      {
+        "name": "endOfDay",
+        "signature": "Datetime.endOfDay(v)",
+        "returns": "Date|null",
+        "desc": "一天的结束"
+      },
+      {
+        "name": "startOfWeek",
+        "signature": "Datetime.startOfWeek(v, firstDay?)",
+        "returns": "Date|null",
+        "desc": "一周的开始，默认周一"
+      },
+      {
+        "name": "startOfMonth",
+        "signature": "Datetime.startOfMonth(v)",
+        "returns": "Date|null",
+        "desc": "一月的开始"
+      },
+      {
+        "name": "endOfMonth",
+        "signature": "Datetime.endOfMonth(v)",
+        "returns": "Date|null",
+        "desc": "一月的结束"
+      },
+      {
+        "name": "toTimestamp",
+        "signature": "Datetime.toTimestamp(v)",
+        "returns": "number|null",
+        "desc": "Unix 时间戳（秒）"
+      },
+      {
+        "name": "fromTimestamp",
+        "signature": "Datetime.fromTimestamp(ts)",
+        "returns": "Date|null",
+        "desc": "Unix 时间戳（秒）→ Date"
+      }
+    ]
+  },
+  "behavior": {
+    "invalid_input": "所有方法入参不合法都返回 null（格式化类返回空串），不抛异常",
+    "date_parsing": "认 'YYYY-MM-DD' / 'YYYY/MM/DD' / 可带 ' HH:mm[:ss]'；ISO 8601 带 Z 或时区偏移走原生解析；不存在的日期判为 null",
+    "diff_days": "diffDays 按自然日算",
+    "month_base": "month() 返回 1~12；weekday() 返回 0~6（0=周日）"
+  },
+  "examples": [
+    {
+      "title": "格式化",
+      "code": "Datetime.formatDate(new Date());  // '2026-11-11'"
+    },
+    {
+      "title": "相对时间",
+      "code": "Datetime.formatRelative(Date.now() - 3 * 60000);  // '3 分钟前'"
+    }
+  ],
+  "notes": [
+    "可以用 Plugin.load('utils.datetime') 加载（点号分段）",
+    "也可以直接 <script src=\"/pub/js/utils/datetime/datetime.js\">",
+    "加载后同时挂在 window.Datetime 和 window.Utils.datetime 上"
+  ]
+}

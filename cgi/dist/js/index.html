@@ -113,6 +113,19 @@ li{margin:3px 0}
   <a class="more" href="/pub/js/plugin/">详细说明与 API →</a>
 </div>
 
+<div class="tool">
+  <div class="tool-head">
+    <h3><a href="/pub/js/utils/">utils</a></h3>
+    <span class="path">/pub/js/utils/</span>
+  </div>
+  <p>通用工具集。零依赖，按子模块组织（<code>utils/&lt;name&gt;.js</code>），
+     共用 <code>window.Utils</code> 容器。当前含 <code>datetime</code> 子模块。</p>
+  <div class="demo">
+    <button data-demo="utils-datetime" class="primary">datetime</button>
+  </div>
+  <a class="more" href="/pub/js/utils/">详细说明与 API →</a>
+</div>
+
 <div id="out">（点上面的按钮，结果显示在这里）</div>
 
 <h2>约定</h2>
@@ -130,6 +143,8 @@ li{margin:3px 0}
 <script src="/pub/js/dialog/dialog.js"></script>
 <script src="/pub/js/plugin/plugin.js"></script>
 <script src="/pub/js/table/table.js"></script>
+<script src="/pub/js/utils/datetime.js"></script>
+<script src="/pub/js/utils/utils.js"></script>
 <script>
 const out = document.getElementById('out');
 const show = (msg) => { out.textContent = msg; };
@@ -175,6 +190,16 @@ const DEMOS = {
     show('load("dialog") → ' + (typeof D) +
          '，与 window.Dialog 同一个对象: ' + same +
          '，confirm → ' + yes);
+  },
+  'utils-datetime': async () => {
+    /* ★ utils 是多个子模块来的容器——每个子模块一个文件，共用 window.Utils 容器 */
+    const dt = Utils.datetime;
+    const now = new Date();
+    show('submodules() -> ' + JSON.stringify(Utils.submodules()) +
+         '\nformatDate(now) -> ' + dt.formatDate(now) +
+         '\nformatDateTime(now) -> ' + dt.formatDateTime(now) +
+         '\nformatRelative(now - 3min) -> ' + dt.formatRelative(now.getTime() - 3 * 60000) +
+         '\ndiffDays(11-01, 11-11) -> ' + dt.diffDays('2026-11-01', '2026-11-11'));
   },
 };
 

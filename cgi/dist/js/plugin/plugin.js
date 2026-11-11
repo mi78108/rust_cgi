@@ -42,9 +42,71 @@
   /* 插件根目录 —— 静态服务器入口。页面在别处时用 Plugin.base 改。 */
   var DEFAULT_BASE = '/pub/js/';
 
-  /* 插件名白名单 —— 它会拼进 URL 和文件路径，必须严格限制。
-     放开的话 load('../../etc/passwd') 能拿到目录外的文件。 */
-  var NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  /* ★ 插件名 → 路径段
+   *
+   * 用**点号**分段（'utils.datetime' → ['utils','datetime']），不用斜杠。
+   *
+   * ★ 为什么点号比斜杠更安全 —— 这是防路径穿透的关键：
+   *   点号分段后，**任何一段里都不可能出现点号**，于是 '..' 这种段
+   *   根本构造不出来：'..'.split('.') → ['', ''] → 空段 → 直接拒。
+   *   斜杠分段的话 '..' 是完整的一段，得靠额外黑名单挡 —— 少一层就漏。
+   *
+   *   段内只允许 [A-Za-z0-9_-] —— 空段、含点、含斜杠全拒。
+   */
+  var SEG_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  var MAX_SEGMENTS = 8;
+
+  /**
+   * 插件名 → 路径段数组。非法返回 null。
+   * @param {string} name
+   * @returns {string[]|null}
+   */
+  function parseName(name) {
+    if (typeof name !== 'string') return null;
+    if (!name || name.length > 128) return null;
+    var segs = name.split('.');
+    if (segs.length > MAX_SEGMENTS) return null;
+    for (var i = 0; i < segs.length; i++) {
+      if (!SEG_RE.test(segs[i])) return null;
+    }
+    return segs;
+  }
+
+  /**
+   * 插件名 → URL 里的相对路径。'utils.datetime' → 'utils/datetime'
+   * @param {string} name
+   * @returns {string|null}
+   */
+  function nameToPath(name) {
+    var segs = parseName(name);
+    return segs ? segs.join('/') : null;
+  }
+
+  /**
+   * 路径最后一段 —— 用来比 description.json 的 name。
+   * @param {string} path
+   * @returns {string}
+   */
+  function lastSegment(path) {
+    return path.slice(path.lastIndexOf('/') + 1);
+  }
+
+  /**
+   * 校验**相对路径**（description.json 的 entry / url）。
+   * 它会拼进 URL，所以拒掉：绝对路径、空段、'.'、'..'、百分号编码。
+   * @param {string} p
+   * @returns {string|null} 合法返回原串，非法返回 null
+   */
+  function safeRelPath(p) {
+    if (typeof p !== 'string' || !p) return null;
+    if (p.charAt(0) === '/' || p.indexOf('%') >= 0) return null;
+    var segs = p.split('/');
+    for (var i = 0; i < segs.length; i++) {
+      var s = segs[i];
+      if (!s || s === '.' || s === '..') return null;
+    }
+    return p;
+  }
 
   /* key(base+name) -> Promise<api>（并发去重用的） */
   var cache = new Map();
@@ -70,12 +132,18 @@
        2. url 是相对路径          → <base>/<name>/<url>   （跟随 base）
        3. url 是绝对 URL          → 直接用（显式覆盖 base）
      相对路径跟随 base 是关键 —— 否则 base 改了实现文件却还从旧路径加载。 */
-  function resolveUrl(base, name, desc) {
-    var entry = desc.entry || (name + '.js');
+  function resolveUrl(base, path, desc) {
+    /* entry 缺省 = 末段 + '.js' —— 'utils.datetime' → 'datetime.js' */
+    var entry = desc.entry || (lastSegment(path) + '.js');
     if (desc.url) {
-      return isAbsolute(desc.url) ? desc.url : (base + name + '/' + desc.url);
+      if (isAbsolute(desc.url)) return desc.url;
+      var rel = safeRelPath(desc.url);
+      if (!rel) throw new Error('description.json 的 url 非法: ' + desc.url);
+      return base + path + '/' + rel;
     }
-    return base + name + '/' + entry;
+    var e = safeRelPath(entry);
+    if (!e) throw new Error('description.json 的 entry 非法: ' + entry);
+    return base + path + '/' + e;
   }
 
   function addKey(name, key) {
@@ -140,8 +208,8 @@
     static async load(name, opts) {
       var base = joinBase((opts && opts.base) || Plugin.base);
 
-      if (!NAME_RE.test(name)) {
-        throw new Error('非法插件名: ' + JSON.stringify(name));
+      if (!parseName(name)) {
+        throw new Error('非法插件名: ' + JSON.stringify(name) + '（点号分段，每段只允许字母/数字/下划线/连字符）');
       }
 
       var key = base + name;
@@ -169,7 +237,9 @@
     static async _load(name, base) {
       var desc = await Plugin.describe(name, { base: base });
 
-      var url = resolveUrl(base, name, desc);
+      var path = nameToPath(name);
+    if (!path) throw new Error('非法插件名: ' + JSON.stringify(name));
+    var url = resolveUrl(base, path, desc);
 
       var api;
       if (desc.type === 'module') {
@@ -193,7 +263,7 @@
       }
 
       /* 自检：描述里的名字和请求的名字对不上 → 目录放错了 */
-      if (desc.name && desc.name !== name) {
+      if (desc.name && desc.name !== lastSegment(path)) {
         console.warn('[plugin] description.json 的 name 是 "' + desc.name +
                      '"，但加载的是 "' + name + '"');
       }
@@ -210,11 +280,13 @@
     static async describe(name, opts) {
       var base = joinBase((opts && opts.base) || Plugin.base);
 
-      if (!NAME_RE.test(name)) {
+      if (!parseName(name)) {
         throw new Error('非法插件名: ' + JSON.stringify(name));
       }
 
-      var res = await fetch(base + name + '/description.json', { cache: 'no-cache' });
+      var path = nameToPath(name);
+      if (!path) throw new Error('非法插件名: ' + JSON.stringify(name));
+      var res = await fetch(base + path + '/description.json', { cache: 'no-cache' });
       if (!res.ok) {
         throw new Error('插件不存在或缺少 description.json: ' + name +
                         ' (HTTP ' + res.status + ')');
