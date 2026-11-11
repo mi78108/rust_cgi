@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>table · 表格组件</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:920px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+h3{font-size:14px;margin:18px 0 8px}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+pre{background:var(--bg-2);border:1px solid var(--rule);padding:12px 14px;overflow:auto;font-size:12.5px;line-height:1.55}
+pre code{background:none;padding:0}
+table.doc{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+table.doc th,table.doc td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+table.doc th{background:var(--bg-2);font-weight:600}
+ul,ol{padding-left:20px}
+li{margin:3px 0}
+a{color:var(--cyan)}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:12px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
+.demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:3em;white-space:pre-wrap;
+}
+.table-host{margin-top:12px;overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>table</h1>
+  <span class="meta">表格渲染组件 · 把对象数组渲染成 &lt;table&gt; · 支持格式化、排序、空状态</span>
+</header>
+
+<h2>快速使用</h2>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">引入</span>
+    <span>引入即用，全局变量 <code>Table</code></span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>&lt;script src="/pub/js/table/table.js"&gt;&lt;/script&gt;</code></pre>
+</div>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">用法</span>
+    <span>渲染表格</span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>const t = new Table({
+  sortable: true,
+  columns: [
+    { key: 'name', label: '名称' },
+    { key: 'size', label: '大小', align: 'right', render: fmtBytes },
+  ],
+  rows: data,
+});
+document.body.appendChild(t.element);</code></pre>
+</div>
+
+<h2>演示</h2>
+
+<div class="demo">
+  <h3>基本表格 + 点表头排序</h3>
+  <p>数据里故意混了 <code>null</code> 和字符串数字 —— 注意空值<b>永远排最后</b>，
+     字符串数字按数值比（<code>'10' &gt; '9'</code>）。</p>
+  <div class="btns">
+    <button id="t-basic">渲染表格</button>
+    <button id="t-reset">重置排序</button>
+  </div>
+  <div class="table-host" id="host-basic"></div>
+  <div id="out-basic"></div>
+</div>
+
+<div class="demo">
+  <h3>空数据</h3>
+  <p>没有行时渲染一行提示</p>
+  <div class="btns">
+    <button id="t-empty">渲染空表</button>
+  </div>
+  <div class="table-host" id="host-empty"></div>
+</div>
+
+<div class="demo">
+  <h3>列格式化 + 点行回调</h3>
+  <p><code>render</code> 格式化单元格，<code>renderNode</code> 返回 DOM 节点，
+     <code>onRowClick</code> 响应点行。</p>
+  <div class="btns">
+    <button id="t-fmt">渲染格式化表格</button>
+  </div>
+  <div class="table-host" id="host-fmt"></div>
+  <div id="out-fmt"></div>
+</div>
+
+<div class="demo">
+  <h3>换数据</h3>
+  <p><code>setRows()</code> 换数据并重绘（排序状态保留）</p>
+  <div class="btns">
+    <button id="t-setrows">setRows(新数据)</button>
+    <button id="t-setcols">setColumns(新列)</button>
+  </div>
+  <div class="table-host" id="host-mut"></div>
+</div>
+
+<h2>使用说明</h2>
+
+<h3>最简用法</h3>
+<pre><code>const t = new Table({
+  columns: [
+    { key: 'name', label: '名称' },
+    { key: 'size', label: '大小', align: 'right' },
+  ],
+  rows: [{ name: 'a.txt', size: 1024 }],
+});
+container.replaceChildren(t.element);</code></pre>
+<p>快捷方式：</p>
+<pre><code>container.replaceChildren(Table.render(rows, columns, { sortable: true }));</code></pre>
+
+<h3>列定义</h3>
+<table class="doc">
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td>key</td><td>string</td><td>对应行对象的字段名，<b>必需</b></td></tr>
+<tr><td>label</td><td>string</td><td>表头文字，缺省用 key</td></tr>
+<tr><td>align</td><td>string</td><td>left / right / center（right 会加 .num 类）</td></tr>
+<tr><td>render</td><td>Function</td><td><code>(value, row, index) =&gt; string|number|null</code></td></tr>
+<tr><td>renderNode</td><td>Function</td><td><code>(value, row, index) =&gt; Node</code>，优先于 render</td></tr>
+<tr><td>sortValue</td><td>Function</td><td><code>(row) =&gt; 值</code>，排序取值，缺省用 row[key]</td></tr>
+<tr><td>sortable</td><td>boolean</td><td>false = 这一列不可排序（需先开 opts.sortable）</td></tr>
+<tr><td>className</td><td>string</td><td>该列单元格额外的 class</td></tr>
+<tr><td>width</td><td>string</td><td>列宽，如 '120px'</td></tr>
+</table>
+
+<h3>选项</h3>
+<table class="doc">
+<tr><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
+<tr><td>columns</td><td>Array</td><td>[]</td><td>列定义</td></tr>
+<tr><td>rows</td><td>Array</td><td>[]</td><td>行数据（对象数组）</td></tr>
+<tr><td>caption</td><td>string</td><td>''</td><td>表标题（&lt;caption&gt;）</td></tr>
+<tr><td>emptyText</td><td>string</td><td>'没有数据'</td><td>空数据时的提示</td></tr>
+<tr><td>sortable</td><td>boolean</td><td>false</td><td>表头是否可点击排序</td></tr>
+<tr><td>sortKey</td><td>string</td><td>null</td><td>初始排序列的 key</td></tr>
+<tr><td>sortDir</td><td>string</td><td>'asc'</td><td>初始排序方向</td></tr>
+<tr><td>onRowClick</td><td>Function</td><td>null</td><td>点行回调 <code>(row, index)</code></td></tr>
+<tr><td>className</td><td>string</td><td>''</td><td>表格额外的 class</td></tr>
+</table>
+
+<h3>方法</h3>
+<table class="doc">
+<tr><th>方法</th><th>说明</th></tr>
+<tr><td><code>t.render()</code></td><td>重新渲染</td></tr>
+<tr><td><code>t.setRows(rows)</code></td><td>换数据并重绘</td></tr>
+<tr><td><code>t.setColumns(columns)</code></td><td>换列并重绘（表头重建）</td></tr>
+<tr><td><code>t.sortBy(key, dir?)</code></td><td>按指定列排序并重绘</td></tr>
+<tr><td><code>t.getSortKey()</code> / <code>t.getSortDir()</code></td><td>当前排序状态</td></tr>
+<tr><td><code>t.destroy()</code></td><td>从 DOM 摘掉</td></tr>
+</table>
+
+<h3>行为</h3>
+<ul>
+<li><b>默认用 textContent 填单元格</b> —— 数据不会被当 HTML 解析。
+要 HTML 得显式写 <code>html: true</code>（自己确保数据可信），要 DOM 节点用 <code>renderNode</code>。</li>
+<li><b>空值永远排最后</b> —— 升序降序都一样。排序是让人快速找数据，不是把 null 顶到最上面。</li>
+<li><b>点表头排序</b> —— 同一列再点一次反向，换列从升序开始。</li>
+<li><b>数字按数值比，字符串用 localeCompare 的 numeric 模式</b> —— 所以 <code>'10' &gt; '9'</code>。</li>
+<li><b>空值单元格显示 —</b>（破折号）并加 <code>.tbl-null</code> 类。</li>
+</ul>
+
+<h3>样式 class</h3>
+<pre><code>.tbl            表格本体
+.tbl th / td    表头 / 单元格
+.tbl th.sortable      可排序列
+.tbl th.sorted        当前排序列（升）
+.tbl th.sorted-desc   当前排序列（降）
+.tbl tbody tr.clickable  可点击行
+.tbl td.num / .center 右对齐（数字）/ 居中
+.tbl .tbl-empty   空数据提示行
+.tbl .tbl-null    空值单元格</code></pre>
+
+<p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
+
+</div>
+
+<script src="/pub/js/_copy.js"></script>
+<script src="/pub/js/table/table.js"></script>
+<script>
+/* ── 演示数据 ───────────────────────────────────────── */
+const DATA = [
+  { name: 'beta.txt',  size: 2048,  kind: 'text',  ok: true },
+  { name: 'alpha.txt', size: 1024,  kind: 'text',  ok: true },
+  { name: 'gamma.bin', size: 1048576, kind: 'binary', ok: false },
+  { name: 'delta.txt', size: null, kind: 'text',  ok: true },
+  { name: 'eps.txt',  size: 512,   kind: 'text',  ok: true },
+  { name: 'zeta.txt',  size: '4096', kind: 'text', ok: null },
+];
+
+const fmtBytes = (n) => {
+  if (n === null || n === undefined) return null;
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = Number(n);
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + ' ' + u[i];
+};
+
+const basicCols = [
+  { key: 'name', label: '名称' },
+  { key: 'size', label: '大小', align: 'right', render: fmtBytes },
+  { key: 'kind', label: '类型' },
+  { key: 'ok', label: '状态', render: (v) => v === null ? null : (v ? '正常' : '异常') },
+];
+
+/* ── 基本表格 ───────────────────────────────────────── */
+let basic = null;
+
+document.getElementById('t-basic').addEventListener('click', () => {
+  const host = document.getElementById('host-basic');
+  const out = document.getElementById('out-basic');
+  basic = new Table({
+    caption: '文件列表（点表头排序）',
+    sortable: true,
+    columns: basicCols,
+    rows: DATA,
+  });
+  host.replaceChildren(basic.element);
+  out.textContent = '渲染了 ' + DATA.length + ' 行。点表头试试排序。';
+});
+
+document.getElementById('t-reset').addEventListener('click', () => {
+  const out = document.getElementById('out-basic');
+  if (!basic) { out.textContent = '先点「渲染表格」'; return; }
+  basic.sortBy(null);
+  out.textContent = '已重置排序（sortBy(null)）';
+});
+
+/* ── 空数据 ─────────────────────────────────────────── */
+document.getElementById('t-empty').addEventListener('click', () => {
+  const host = document.getElementById('host-empty');
+  const t = new Table({
+    caption: '空表格',
+    columns: basicCols,
+    rows: [],
+    emptyText: '这里还没有数据',
+  });
+  host.replaceChildren(t.element);
+});
+
+/* ── 格式化 + 点行 ──────────────────────────────────── */
+document.getElementById('t-fmt').addEventListener('click', () => {
+  const host = document.getElementById('host-fmt');
+  const out = document.getElementById('out-fmt');
+  const t = new Table({
+    caption: '格式化 + 点行',
+    sortable: true,
+    columns: [
+      { key: 'name', label: '名称', width: '160px' },
+      { key: 'size', label: '大小', align: 'right', render: fmtBytes },
+      {
+        key: 'ok',
+        label: '状态',
+        renderNode: (v) => {
+          const s = document.createElement('span');
+          s.textContent = v === null ? '未知' : (v ? '正常' : '异常');
+          s.style.color = v === null ? 'var(--muted)' : (v ? 'var(--lime)' : 'var(--red)');
+          return s;
+        },
+      },
+    ],
+    rows: DATA,
+    onRowClick: (row, index) => {
+      out.textContent = '点了第 ' + index + ' 行: ' + JSON.stringify(row);
+    },
+  });
+  host.replaceChildren(t.element);
+  out.textContent = '点任意一行试试。';
+});
+
+/* ── 换数据 / 换列 ──────────────────────────────────── */
+let mut = null;
+
+document.getElementById('t-setrows').addEventListener('click', () => {
+  const host = document.getElementById('host-mut');
+  if (!mut) {
+    mut = new Table({ sortable: true, columns: basicCols, rows: DATA });
+    host.replaceChildren(mut.element);
+    return;
+  }
+  mut.setRows(DATA.slice(0, 3));
+});
+
+document.getElementById('t-setcols').addEventListener('click', () => {
+  const host = document.getElementById('host-mut');
+  if (!mut) {
+    mut = new Table({ sortable: true, columns: basicCols, rows: DATA });
+    host.replaceChildren(mut.element);
+    return;
+  }
+  mut.setColumns([
+    { key: 'kind', label: '类型（换过的列）' },
+    { key: 'name', label: '名称' },
+  ]);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dialog · 弹窗组件</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:880px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+pre{background:var(--bg-2);border:1px solid var(--rule);padding:12px 14px;overflow:auto;font-size:12.5px;line-height:1.55}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--bg-2);font-weight:600}
+ul{padding-left:20px}
+li{margin:3px 0}
+a{color:var(--cyan)}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:10px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
+.demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+button.danger{background:var(--red);color:#fff;border-color:var(--red)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:2.6em;white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>dialog</h1>
+  <span class="meta">通用弹窗组件 · 零依赖 · 自己注入样式 · 颜色走 CSS 变量跟随宿主主题</span>
+</header>
+
+<h2>快速使用</h2>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">引入</span>
+    <span>引入即用，全局变量 <code>Dialog</code></span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>&lt;script src="/pub/js/dialog/dialog.js"&gt;&lt;/script&gt;</code></pre>
+</div>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">用法</span>
+    <span>确认框 / 提示框</span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>// 确认框 → Promise&lt;boolean&gt;
+if (await Dialog.confirm('确定？')) {
+  // ...
+}
+
+// 提示框（只有一个按钮）→ Promise&lt;void&gt;
+await Dialog.alert('已保存。');</code></pre>
+</div>
+
+<h2>演示</h2>
+
+<div class="demo">
+  <h3>确认框</h3>
+  <p><code>Dialog.confirm(message, options?)</code> → Promise&lt;boolean&gt;</p>
+  <div class="btns">
+    <button id="d-confirm" class="primary">confirm</button>
+    <button id="d-confirm-title">confirm + 标题</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>危险操作</h3>
+  <p><code>danger: true</code> —— 主按钮变红，<b>默认焦点在「取消」上</b>（打开时回车不会误触发）</p>
+  <div class="btns">
+    <button id="d-danger">confirm (danger)</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>提示框</h3>
+  <p><code>Dialog.alert(message, options?)</code> → Promise&lt;void&gt;，只有一个按钮</p>
+  <div class="btns">
+    <button id="d-alert">alert</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>自定义内容</h3>
+  <p><code>content</code> 传 DOM 节点，放任意内容</p>
+  <div class="btns">
+    <button id="d-custom">自定义 content</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>自定义按钮文案 / okValue</h3>
+  <p>确定时 resolve 的是 <code>okValue</code>（默认 <code>'ok'</code>）</p>
+  <div class="btns">
+    <button id="d-okvalue">okValue = 'yes'</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>onOk 钩子否决</h3>
+  <p><code>onOk</code> 返回 <code>false</code> 则不关闭 —— 弹窗保持打开</p>
+  <div class="btns">
+    <button id="d-veto">onOk 返回 false</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>叠层</h3>
+  <p>可以开多个 —— 只有最上面那个响应 Esc 和点遮罩</p>
+  <div class="btns">
+    <button id="d-stack">叠两层</button>
+  </div>
+</div>
+
+<div id="out">（点上面的按钮，结果显示在这里）</div>
+
+<h2>使用说明</h2>
+
+<h3>引入</h3>
+<pre><code>&lt;script src="/pub/js/dialog/dialog.js"&gt;&lt;/script&gt;</code></pre>
+<p>ES module 写法：</p>
+<pre><code>import { Dialog } from '/pub/js/dialog/dialog.js';</code></pre>
+
+<h3>快捷方法</h3>
+<pre><code>const yes = await Dialog.confirm('清空文档？', { danger: true });
+await Dialog.alert('已保存。');</code></pre>
+
+<h3>完整用法</h3>
+<pre><code>const dlg = new Dialog({
+  title: '修改名字',
+  message: '这个名字会显示给同房间的人。',
+  okText: '确定',
+  cancelText: '取消',
+  danger: false,
+});
+const result = await dlg.open();   // 确定 → 'ok'，取消 → null</code></pre>
+
+<h3>选项</h3>
+<table>
+<tr><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
+<tr><td>title</td><td>string</td><td>''</td><td>标题（textContent，不解析 HTML）</td></tr>
+<tr><td>message</td><td>string</td><td>''</td><td>正文（textContent）</td></tr>
+<tr><td>content</td><td>Node | string</td><td>null</td><td>自定义正文，优先于 message；字符串按 HTML 解析</td></tr>
+<tr><td>okText</td><td>string</td><td>'确定'</td><td>主按钮文字</td></tr>
+<tr><td>cancelText</td><td>string</td><td>'取消'</td><td>取消按钮文字</td></tr>
+<tr><td>danger</td><td>boolean</td><td>false</td><td>主按钮变红，默认焦点在「取消」</td></tr>
+<tr><td>hideCancel</td><td>boolean</td><td>false</td><td>隐藏取消按钮</td></tr>
+<tr><td>okValue</td><td>any</td><td>'ok'</td><td>确定时 resolve 的值</td></tr>
+<tr><td>maskClass</td><td>string</td><td>'dlg-mask'</td><td>遮罩层 class</td></tr>
+<tr><td>onOk</td><td>Function</td><td>null</td><td>确定前的钩子，返回 false 则不关闭</td></tr>
+<tr><td>onCancel</td><td>Function</td><td>null</td><td>取消时的钩子</td></tr>
+</table>
+
+<h3>行为</h3>
+<table>
+<tr><th>操作</th><th>结果</th></tr>
+<tr><td>点「确定」</td><td>resolve(okValue)</td></tr>
+<tr><td>点「取消」/ Esc / 点遮罩空白</td><td>resolve(null)</td></tr>
+<tr><td>回车</td><td>等同确定（焦点在 button/textarea 上时除外，避免触发两次）</td></tr>
+<tr><td>Tab / Shift+Tab</td><td>焦点锁在弹窗内循环</td></tr>
+</table>
+<ul>
+<li><b>危险操作默认焦点在「取消」上</b> —— 打开时回车不会误触发危险动作。</li>
+<li>关闭后焦点回到打开前的位置。</li>
+<li>可以叠层 —— 只有最上面那个响应 Esc 和遮罩点击。</li>
+<li>样式自己注入 <code>&lt;style id="dlg-component-style"&gt;</code>，宿主页面只需定义
+<code>--bg-2</code> <code>--ink</code> <code>--rule</code> <code>--lime</code> 等变量即可跟随主题。</li>
+</ul>
+
+<h3>样式 class</h3>
+<pre><code>.dlg-mask      遮罩层
+.dlg           弹窗本体
+.dlg-title     标题
+.dlg-msg       正文
+.dlg-actions   按钮行
+.dlg-btn       按钮
+.dlg-btn.primary  主按钮
+.dlg-btn.danger   危险按钮
+.dlg-narrow    窄版（280px）</code></pre>
+
+<p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
+
+</div>
+
+<script src="/pub/js/_copy.js"></script>
+<script src="/pub/js/dialog/dialog.js"></script>
+<script>
+const out = document.getElementById('out');
+const show = (msg) => { out.textContent = msg; };
+
+document.getElementById('d-confirm').addEventListener('click', async () => {
+  const yes = await Dialog.confirm('确定要继续吗？');
+  show('confirm → ' + yes);
+});
+
+document.getElementById('d-confirm-title').addEventListener('click', async () => {
+  const yes = await Dialog.confirm('这条消息带标题。', { title: '请确认' });
+  show('confirm + title → ' + yes);
+});
+
+document.getElementById('d-danger').addEventListener('click', async () => {
+  const yes = await Dialog.confirm('清空文档？此操作不可撤销。', { danger: true });
+  show('danger confirm → ' + yes);
+});
+
+document.getElementById('d-alert').addEventListener('click', async () => {
+  await Dialog.alert('这是一条提示。');
+  show('alert → closed');
+});
+
+document.getElementById('d-custom').addEventListener('click', async () => {
+  const el = document.createElement('div');
+  el.innerHTML = '<b>自定义 content</b><br>这里可以放任意 DOM。';
+  const dlg = new Dialog({ title: '自定义', content: el, okText: '知道了' });
+  const r = await dlg.open();
+  show('custom → ' + r);
+});
+
+document.getElementById('d-okvalue').addEventListener('click', async () => {
+  const dlg = new Dialog({ title: '自定义返回值', message: '确定时 resolve 的是 okValue。', okValue: 'yes' });
+  const r = await dlg.open();
+  show('okValue → ' + JSON.stringify(r));
+});
+
+document.getElementById('d-veto').addEventListener('click', async () => {
+  const dlg = new Dialog({
+    title: '会被否决',
+    message: 'onOk 返回 false，所以点确定不会关闭。',
+    onOk: () => false,
+  });
+  dlg.open();
+  show('onOk 返回 false → 弹窗保持打开，再点一次「取消」或按 Esc 关掉');
+});
+
+document.getElementById('d-stack').addEventListener('click', async () => {
+  const bottom = new Dialog({ title: '底层', message: '我先开的。' });
+  bottom.open();
+  const top = new Dialog({ title: '顶层', message: '我是后开的 —— Esc 只关我。' });
+  top.open();
+  show('叠了两层，按 Esc 只关上面那层');
+});
+</script>
+</body>
+</html>

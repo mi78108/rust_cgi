@@ -1,0 +1,100 @@
+{
+  "name": "plugin",
+  "version": "0.1.0",
+  "description": "插件加载器 —— 按名称加载 cgi/dist/js/<name>/ 下的插件，元信息来自同目录的 description.json",
+  "entry": "plugin.js",
+  "global": "Plugin",
+  "type": "script",
+  "dependencies": [],
+  "url": "plugin.js",
+  "readme": "README.md",
+  "tags": ["loader", "plugin", "registry"],
+  "api": {
+    "statics": [
+      {
+        "name": "Plugin.load",
+        "signature": "Plugin.load(name, options?)",
+        "returns": "Promise<*>",
+        "async": true,
+        "desc": "按名称加载插件，返回该插件导出的 API。同名并发只加载一次；失败不缓存，可重试",
+        "options": {
+          "base": { "type": "string", "default": "Plugin.base", "desc": "插件根目录，覆盖 Plugin.base" }
+        }
+      },
+      {
+        "name": "Plugin.describe",
+        "signature": "Plugin.describe(name, options?)",
+        "returns": "Promise<Object>",
+        "async": true,
+        "desc": "只读 description.json 元信息，不加载实现"
+      },
+      {
+        "name": "Plugin.get",
+        "signature": "Plugin.get(name)",
+        "returns": "*|undefined",
+        "desc": "取已加载的插件（同步）。返回已 resolve 的值，不是 Promise；没加载过返回 undefined"
+      },
+      {
+        "name": "Plugin.has",
+        "signature": "Plugin.has(name)",
+        "returns": "boolean",
+        "desc": "插件是否已加载"
+      },
+      {
+        "name": "Plugin.clear",
+        "signature": "Plugin.clear(name?)",
+        "returns": "void",
+        "desc": "清缓存。不给 name 则全清"
+      }
+    ],
+    "properties": [
+      {
+        "name": "Plugin.base",
+        "type": "string",
+        "default": "/pub/js/",
+        "desc": "插件根目录。页面在别处时可以改"
+      }
+    ]
+  },
+  "loading": {
+    "steps": [
+      "fetch <base>/<name>/description.json —— 元信息（entry/global/type）",
+      "type === 'module' → 动态 import()；否则注入 <script> 标签",
+      "type 不是 module 时从 global 指定的全局变量上取导出的 API"
+    ],
+    "name_validation": "插件名必须匹配 /^[A-Za-z0-9_-]{1,64}$/ —— 它会拼进 URL 和文件路径，放开就能目录穿越",
+    "dedup": "同名并发 load 共享同一个 Promise，只真正加载一次",
+    "retry": "加载失败会清掉缓存，下次 load 可以重试",
+    "reuse": "type 不是 module 且页面上已有 global 时直接复用，不重复执行脚本",
+    "url_resolution": "优先用 description.json 的 url；没有则用 <base>/<name>/<entry>"
+  },
+  "contract": {
+    "description_json_fields": {
+      "name": "插件名，也是目录名",
+      "entry": "实现文件名，相对插件目录，如 dialog.js",
+      "global": "导出到 window 上的全局变量名，如 Dialog（type=module 时不用）",
+      "type": "script（默认）或 module",
+      "url": "实现文件的路径。相对路径（dialog.js）跟随 base 解析；绝对 URL（/pub/js/x/x.js 或 https://…）直接使用并覆盖 base"
+    }
+  },
+  "examples": [
+    {
+      "title": "加载插件",
+      "code": "const Dialog = await Plugin.load('dialog');\nDialog.confirm('确定？');"
+    },
+    {
+      "title": "只读元信息",
+      "code": "const desc = await Plugin.describe('dialog');\n// → { name:'dialog', entry:'dialog.js', global:'Dialog', ... }"
+    },
+    {
+      "title": "换根目录",
+      "code": "Plugin.base = '/pub/js/';\nconst D = await Plugin.load('dialog', { base: '/pub/js/' });"
+    }
+  ],
+  "notes": [
+    "插件名严格白名单校验 —— 它会拼进 URL 和文件路径",
+    "加载失败不写缓存，可以重试",
+    "页面已用 <script> 引过插件时不会重复执行（按 global 判断）",
+    "Plugin.get 是同步的：返回已 resolve 的值（另存了一份），不是 Promise"
+  ]
+}

@@ -1,10 +1,187 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>Js</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>js · 工具库</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:900px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:26px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+code{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+
+/* ── 工具卡片 ── */
+.tool{
+  border:1px solid var(--rule);background:var(--bg-2);
+  padding:14px 16px;margin:12px 0;
+}
+.tool-head{
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  margin-bottom:6px;
+}
+/* ★ 工具名 = 链接，跳到该工具自己目录下的详细页 */
+.tool-head h3{margin:0;font-size:15px}
+.tool-head h3 a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+.tool-head h3 a:hover{border-bottom-color:var(--lime);color:var(--cyan)}
+.tool .path{font-size:12px;color:var(--muted);font-family:"JetBrains Mono",Menlo,monospace}
+.tool p{margin:6px 0 10px;font-size:13px;color:var(--muted)}
+.tool .demo{display:flex;flex-wrap:wrap;gap:8px}
+.more{display:inline-block;margin-top:10px;font-size:12.5px;color:var(--cyan)}
+
+
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:2.6em;white-space:pre-wrap;
+}
+ul{padding-left:20px}
+li{margin:3px 0}
+</style>
 </head>
 <body>
+<div class="wrap">
 
+<header>
+  <h1>js</h1>
+  <span class="meta">纯前端工具库 · 每个工具一个目录，含实现 + README.md + description.json</span>
+</header>
+
+<h2>工具列表</h2>
+
+<!-- ★ 点工具名 → 该工具自己目录下的详细页（/pub/js/<name>/） -->
+<div class="tool">
+  <div class="tool-head">
+    <h3><a href="/pub/js/dialog/">dialog</a></h3>
+    <span class="path">/pub/js/dialog/</span>
+  </div>
+  <p>通用弹窗组件。零依赖，自己注入样式，颜色走 CSS 变量跟随宿主主题。
+     危险操作默认焦点在「取消」上。</p>
+  <div class="demo">
+    <button data-demo="confirm" class="primary">confirm</button>
+    <button data-demo="danger">confirm (danger)</button>
+    <button data-demo="alert">alert</button>
+    <button data-demo="custom">自定义 content</button>
+  </div>
+  <a class="more" href="/pub/js/dialog/">详细说明与 API →</a>
+</div>
+
+<div class="tool">
+  <div class="tool-head">
+    <h3><a href="/pub/js/table/">table</a></h3>
+    <span class="path">/pub/js/table/</span>
+  </div>
+  <p>表格渲染组件。把对象数组渲染成 <code>&lt;table&gt;</code>，
+     支持列格式化、点表头排序、空状态。</p>
+  <div class="demo">
+    <button data-demo="table-render" class="primary">渲染表格</button>
+  </div>
+  <a class="more" href="/pub/js/table/">详细说明与 API →</a>
+</div>
+
+<div class="tool">
+  <div class="tool-head">
+    <h3><a href="/pub/js/plugin/">plugin</a></h3>
+    <span class="path">/pub/js/plugin/</span>
+  </div>
+  <p>插件加载器。按名称加载 <code>js/&lt;name&gt;/</code> 下的插件，
+     元信息来自同目录的 <code>description.json</code>，返回该插件导出的 API。</p>
+  <div class="demo">
+    <button data-demo="plugin-load" class="primary">load('dialog')</button>
+  </div>
+  <a class="more" href="/pub/js/plugin/">详细说明与 API →</a>
+</div>
+
+<div id="out">（点上面的按钮，结果显示在这里）</div>
+
+<h2>约定</h2>
+<ul>
+<li>新增工具：在 <code>js/</code> 下建同名目录 → 写 <code>&lt;name&gt;.js</code> →
+在同目录生成 <code>README.md</code>（给人看）、<code>description.json</code>（给机器看），
+以及 <code>index.html</code>（该工具的详细说明 + demo 页）。</li>
+<li>工具的详细页放自己的目录里 —— 本页只做列表和简单演示，
+点工具名跳过去。</li>
+<li><code>description.json</code> 描述 name / version / entry / api / behavior / css 等字段。</li>
+</ul>
+
+</div>
+
+<script src="/pub/js/dialog/dialog.js"></script>
+<script src="/pub/js/plugin/plugin.js"></script>
+<script src="/pub/js/table/table.js"></script>
+<script>
+const out = document.getElementById('out');
+const show = (msg) => { out.textContent = msg; };
+
+/* ★ 演示按钮用 data-demo 标记 —— 加新工具只要往 .demo 里塞按钮，
+   这里加一个分支，不用改 HTML 结构 */
+const DEMOS = {
+  confirm: async () => {
+    const yes = await Dialog.confirm('确定要继续吗？');
+    show('confirm → ' + yes);
+  },
+  danger: async () => {
+    const yes = await Dialog.confirm('清空文档？此操作不可撤销。', { danger: true });
+    show('danger confirm → ' + yes);
+  },
+  alert: async () => {
+    await Dialog.alert('这是一条提示。');
+    show('alert → closed');
+  },
+  custom: async () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<b>自定义 content</b><br>这里可以放任意 DOM。';
+    const dlg = new Dialog({ title: '自定义', content: el, okText: '知道了' });
+    const r = await dlg.open();
+    show('custom → ' + r);
+  },
+  'table-render': async () => {
+    const el = Table.render(
+      [{ name: 'a.txt', size: 1024 }, { name: 'b.txt', size: 2048 }],
+      [{ key: 'name', label: '名称' }, { key: 'size', label: '大小', align: 'right' }],
+      { sortable: true }
+    );
+    const dlg = new Dialog({ title: 'table 组件', content: el, okText: '关闭' });
+    await dlg.open();
+    show('table → 渲染了 2 行');
+  },
+  'plugin-load': async () => {
+    /* ★ 本页已经用 <script> 引过 dialog.js，所以这里是「复用」路径 ——
+       不会重复执行脚本，直接拿到已有的 window.Dialog */
+    const D = await Plugin.load('dialog');
+    const same = (D === window.Dialog);
+    const yes = await D.confirm('这是通过 Plugin.load("dialog") 拿到的 API。');
+    show('load("dialog") → ' + (typeof D) +
+         '，与 window.Dialog 同一个对象: ' + same +
+         '，confirm → ' + yes);
+  },
+};
+
+document.querySelectorAll('button[data-demo]').forEach((btn) => {
+  btn.addEventListener('click', () => DEMOS[btn.dataset.demo]());
+});
+
+</script>
 </body>
 </html>

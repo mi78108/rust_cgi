@@ -1,0 +1,114 @@
+{
+  "name": "table",
+  "version": "0.1.0",
+  "description": "表格渲染组件 —— 把对象数组渲染成 <table>，支持列格式化、排序、空状态",
+  "entry": "table.js",
+  "global": "Table",
+  "type": "script",
+  "dependencies": [],
+  "url": "table.js",
+  "readme": "README.md",
+  "tags": ["ui", "table", "grid", "render", "sort"],
+  "api": {
+    "constructor": {
+      "signature": "new Table(options)",
+      "returns": "Table",
+      "options": {
+        "columns": { "type": "Array", "default": "[]", "desc": "列定义 [{key,label,align,render,renderNode,sortValue,sortable,className,width}]" },
+        "rows": { "type": "Array", "default": "[]", "desc": "行数据（对象数组）" },
+        "caption": { "type": "string", "default": "", "desc": "表标题（<caption>）" },
+        "emptyText": { "type": "string", "default": "没有数据", "desc": "空数据时的提示文字" },
+        "sortable": { "type": "boolean", "default": false, "desc": "表头是否可点击排序" },
+        "sortKey": { "type": "string", "default": null, "desc": "初始排序列的 key" },
+        "sortDir": { "type": "string", "default": "asc", "desc": "初始排序方向 asc/desc" },
+        "onRowClick": { "type": "Function", "default": null, "desc": "点行时的回调 (row, index)" },
+        "className": { "type": "string", "default": "", "desc": "表格额外的 class" }
+      }
+    },
+    "column_fields": {
+      "key": "对应行对象的字段名，必需",
+      "label": "表头文字，缺省用 key",
+      "align": "对齐：left / right / center（right 会加 .num 类）",
+      "render": "格式化函数 (value, row, index) → string|number|null",
+      "renderNode": "返回 DOM 节点的函数 (value, row, index) → Node，优先于 render",
+      "sortValue": "排序用的取值函数 (row) → 值，缺省用 row[key]",
+      "sortable": "false = 这一列不可排序（需先开 opts.sortable）",
+      "className": "该列单元格额外的 class",
+      "width": "列宽，如 '120px'"
+    },
+    "methods": [
+      { "name": "render", "signature": "t.render()", "returns": "Table", "desc": "重新渲染（排序变化后自动调用）" },
+      { "name": "setRows", "signature": "t.setRows(rows)", "returns": "Table", "desc": "换数据并重绘" },
+      { "name": "setColumns", "signature": "t.setColumns(columns)", "returns": "Table", "desc": "换列并重绘（表头重建）" },
+      { "name": "sortBy", "signature": "t.sortBy(key, dir?)", "returns": "Table", "desc": "按指定列排序并重绘" },
+      { "name": "getSortKey", "signature": "t.getSortKey()", "returns": "string|null", "desc": "当前排序列的 key" },
+      { "name": "getSortDir", "signature": "t.getSortDir()", "returns": "string", "desc": "当前排序方向 asc/desc" },
+      { "name": "destroy", "signature": "t.destroy()", "returns": "Table", "desc": "从 DOM 摘掉表格" }
+    ],
+    "statics": [
+      { "name": "Table.render", "signature": "Table.render(rows, columns, options?)", "returns": "HTMLTableElement", "desc": "快捷方式 —— 直接拿到表格元素" }
+    ],
+    "properties": [
+      { "name": "t.element", "type": "HTMLTableElement", "desc": "表格元素，插入到页面用这个" },
+      { "name": "t.rows", "type": "Array", "desc": "当前数据" },
+      { "name": "t.columns", "type": "Array", "desc": "当前列定义" }
+    ]
+  },
+  "behavior": {
+    "sort_click": "点表头：同一列再点一次反向，换列从升序开始",
+    "null_placement": "空值（null/undefined）永远排最后 —— 升序降序都一样",
+    "empty": "无数据时渲染一行 colspan=列数 的提示行",
+    "null_cell": "空值单元格显示 —（破折号）并加 .tbl-null 类",
+    "sort_compare": "数字按数值比；字符串用 localeCompare 的 numeric 模式（'10' > '9'）",
+    "xss": "默认用 textContent 填单元格 —— 数据不当 HTML 解析"
+  },
+  "css": {
+    "injected": true,
+    "style_id": "tbl-component-style",
+    "classes": [
+      "tbl",
+      "tbl caption",
+      "tbl th",
+      "tbl td",
+      "tbl th.sortable",
+      "tbl th.sorted",
+      "tbl th.sorted-desc",
+      "tbl th .tbl-sort",
+      "tbl tbody tr.clickable",
+      "tbl td.num",
+      "tbl td.center",
+      "tbl .tbl-empty",
+      "tbl .tbl-null"
+    ],
+    "variables": {
+      "--bg": "#f4f1de",
+      "--bg-2": "#ecead7",
+      "--bg-3": "#e3e0c9",
+      "--ink": "#0f0f12",
+      "--muted": "#5a5a64",
+      "--rule": "#1a1a1f",
+      "--lime": "#c4f542"
+    }
+  },
+  "examples": [
+    {
+      "title": "最简",
+      "code": "const t = new Table({\n  columns: [{ key: 'name', label: '名称' }],\n  rows: [{ name: 'a' }, { name: 'b' }],\n});\ncontainer.replaceChildren(t.element);"
+    },
+    {
+      "title": "带排序和格式化",
+      "code": "const t = new Table({\n  sortable: true,\n  columns: [\n    { key: 'size', label: '大小', align: 'right', render: (v) => fmtBytes(v) },\n  ],\n  rows: data,\n});"
+    },
+    {
+      "title": "快捷方式",
+      "code": "container.replaceChildren(Table.render(rows, columns, { sortable: true }));"
+    }
+  ],
+  "notes": [
+    "默认用 textContent 填单元格，不会把数据当 HTML 解析",
+    "要 HTML 得显式写 html: true（自己确保数据可信）",
+    "要 DOM 节点用 renderNode",
+    "空值永远排最后，不随排序方向变",
+    "样式自己注入，宿主页面只需定义 CSS 变量就能跟随主题"
+  ]
+}

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plugin · 插件加载器</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:880px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+h3{font-size:14px;margin:18px 0 8px}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+pre{background:var(--bg-2);border:1px solid var(--rule);padding:12px 14px;overflow:auto;font-size:12.5px;line-height:1.55}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--bg-2);font-weight:600}
+ul,ol{padding-left:20px}
+li{margin:3px 0}
+a{color:var(--cyan)}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:12px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
+.demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:3em;white-space:pre-wrap;word-break:break-all;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>plugin</h1>
+  <span class="meta">插件加载器 · 按名称加载 js/&lt;name&gt;/ 下的插件 · 元信息来自 description.json</span>
+</header>
+
+<h2>快速使用</h2>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">引入</span>
+    <span>引入即用，全局变量 <code>Plugin</code></span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>&lt;script src="/pub/js/plugin/plugin.js"&gt;&lt;/script&gt;</code></pre>
+</div>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">用法</span>
+    <span>按名称加载插件</span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+<pre><code>const Dialog = await Plugin.load('dialog');
+await Dialog.confirm('确定？');</code></pre>
+</div>
+
+<h2>演示</h2>
+
+<div class="demo">
+  <h3>加载插件并用它</h3>
+  <p><code>await Plugin.load('dialog')</code> —— 加载后返回该插件导出的 API。
+     下面会真的加载 dialog 组件并弹一个窗。</p>
+  <div class="btns">
+    <button id="p-load" class="primary">load('dialog') 并弹窗</button>
+    <button id="p-describe">describe('dialog') 读元信息</button>
+    <button id="p-has">has('dialog')</button>
+    <button id="p-get">get('dialog')</button>
+    <button id="p-bad">load('no-such-plugin') 看报错</button>
+    <button id="p-illegal">load('../../etc') 看报错</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>并发去重</h3>
+  <p>同时 load 同一个插件 —— 只真正加载一次（缓存的是 Promise）</p>
+  <div class="btns">
+    <button id="p-dedup">并发 load('dialog') × 3</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>换根目录（base）</h3>
+  <p><code>Plugin.base</code> 和 <code>load(name, { base })</code> 决定
+     <code>description.json</code> 和<b>实现文件</b>从哪儿取。
+     下面把 base 指到一个不存在的目录，看错误信息里的路径。</p>
+  <div class="btns">
+    <button id="p-base">load('dialog', { base: '/no/such/dir/' }) 看报错</button>
+    <button id="p-base2">Plugin.base 改成 '/no/such/dir/' 再 load</button>
+  </div>
+</div>
+
+<div id="out">（点上面的按钮，结果显示在这里）</div>
+
+<h2>使用说明</h2>
+
+<h3>加载</h3>
+<pre><code>const Dialog = await Plugin.load('dialog');
+Dialog.confirm('确定？');</code></pre>
+
+<h3>加载流程</h3>
+<ol>
+<li><code>fetch &lt;base&gt;/&lt;name&gt;/description.json</code> —— 元信息（entry/global/type）</li>
+<li>按 <code>type</code> 加载实现文件：
+  <ul>
+    <li><code>type === 'module'</code> → 动态 <code>import()</code></li>
+    <li>否则 → 注入 <code>&lt;script&gt;</code> 标签</li>
+  </ul>
+</li>
+<li><code>type</code> 不是 module 时，从 <code>global</code> 指定的全局变量上取导出的 API</li>
+</ol>
+
+<h3>API</h3>
+<table>
+<tr><th>方法</th><th>签名</th><th>说明</th></tr>
+<tr><td>load</td><td><code>Plugin.load(name, options?)</code> → Promise</td><td>加载插件，返回导出的 API</td></tr>
+<tr><td>describe</td><td><code>Plugin.describe(name, options?)</code> → Promise&lt;Object&gt;</td><td>只读 description.json，不加载实现</td></tr>
+<tr><td>get</td><td><code>Plugin.get(name)</code></td><td>取已加载的插件（同步），没有返回 undefined</td></tr>
+<tr><td>has</td><td><code>Plugin.has(name)</code> → boolean</td><td>是否已加载</td></tr>
+<tr><td>clear</td><td><code>Plugin.clear(name?)</code></td><td>清缓存，不给 name 则全清</td></tr>
+<tr><td>base</td><td><code>Plugin.base</code> → string</td><td>插件根目录，默认 <code>'/pub/js/'</code></td></tr>
+</table>
+<p>另有属性 <code>Plugin.base</code>（默认 <code>'/pub/js/'</code>）——
+插件根目录，页面在别处时可以改；也可以在 <code>load()</code> 时用
+<code>{ base: '...' }</code> 单次覆盖。</p>
+<p>★ <code>base</code> 决定<b>两样东西</b>：<code>description.json</code> 从哪儿取，
+以及<b>实现文件</b>从哪儿取。</p>
+
+<h3>description.json 契约</h3>
+<table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>name</td><td>插件名，也是目录名</td></tr>
+<tr><td>entry</td><td>实现文件名，相对插件目录，如 <code>dialog.js</code></td></tr>
+<tr><td>global</td><td>导出到 <code>window</code> 上的全局变量名，如 <code>Dialog</code>（type=module 时不用）</td></tr>
+<tr><td>type</td><td><code>script</code>（默认）或 <code>module</code></td></tr>
+<tr><td>url</td><td>实现文件路径（可选）。<b>相对路径跟随 base，绝对路径覆盖 base</b></td></tr>
+</table>
+<p>★ <code>url</code> 写<b>相对路径</b>（如 <code>dialog.js</code>）。写死绝对路径会让
+<code>base</code> 失效 —— <code>description.json</code> 从新 base 取到了，
+实现文件却还从老路径加载。</p>
+
+<h3>行为要点</h3>
+<ul>
+<li><b>插件名严格白名单</b> —— <code>/^[A-Za-z0-9_-]{1,64}$/</code>。
+它会拼进 URL 和文件路径，放开的话 <code>load('../../etc/passwd')</code> 能拿到目录外的文件。</li>
+<li><b>并发去重</b> —— 同名插件同时 load 只真正加载一次（缓存的是 Promise）。</li>
+<li><b>失败不写缓存</b> —— 加载失败会清掉缓存条目，下次 load 可以重试。</li>
+<li><b>不重复执行</b> —— <code>type</code> 不是 module 且页面上已有该 <code>global</code> 时直接复用。</li>
+<li><b>名字对不上会警告</b> —— <code>description.json</code> 的 <code>name</code> 和请求的名字不一致时打一条 <code>console.warn</code>。</li>
+</ul>
+
+<p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
+
+</div>
+
+<script src="/pub/js/_copy.js"></script>
+<script src="/pub/js/plugin/plugin.js"></script>
+<script>
+const out = document.getElementById('out');
+const show = (msg) => { out.textContent = msg; };
+
+/* 把结果统一打出来 —— 成功打值，失败打错误消息 */
+const run = async (fn) => {
+  try {
+    show(String(await fn()));
+  } catch (e) {
+    show('ERROR: ' + e.message);
+  }
+};
+
+document.getElementById('p-load').addEventListener('click', () => run(async () => {
+  const Dialog = await Plugin.load('dialog');
+  const yes = await Dialog.confirm('这是通过 Plugin.load() 加载的 dialog 组件。');
+  return 'loaded → confirm 结果: ' + yes;
+}));
+
+document.getElementById('p-describe').addEventListener('click', () => run(async () => {
+  const d = await Plugin.describe('dialog');
+  return JSON.stringify({ name: d.name, entry: d.entry, global: d.global, type: d.type, version: d.version });
+}));
+
+document.getElementById('p-has').addEventListener('click', () => run(async () => {
+  return 'has("dialog") = ' + Plugin.has('dialog');
+}));
+
+document.getElementById('p-get').addEventListener('click', () => run(async () => {
+  const v = Plugin.get('dialog');
+  return v === undefined
+    ? 'get("dialog") = undefined（还没加载成功）'
+    : 'get("dialog") = ' + (typeof v) + ' ' + (v && v.name ? '(function ' + v.name + ')' : '');
+}));
+
+document.getElementById('p-bad').addEventListener('click', () => run(async () => {
+  /* ★ 用合法的 ASCII 名字 —— 走「插件不存在」那条路（description.json 404），
+     而不是被名字白名单先拦下 */
+  await Plugin.load('no-such-plugin');
+  return '（不该走到这）';
+}));
+
+document.getElementById('p-illegal').addEventListener('click', () => run(async () => {
+  await Plugin.load('../../etc');
+  return '（不该走到这）';
+}));
+
+document.getElementById('p-dedup').addEventListener('click', () => run(async () => {
+  const t0 = performance.now();
+  const [a, b, c] = await Promise.all([
+    Plugin.load('dialog'), Plugin.load('dialog'), Plugin.load('dialog'),
+  ]);
+  const dt = Math.round(performance.now() - t0);
+  const same = (a === b) && (b === c);
+  return '三个 load 返回同一个对象: ' + same + '，耗时 ' + dt + 'ms';
+}));
+
+/* ★ base 演示 —— 故意指到不存在的目录，让报错里露出实际请求的路径 */
+document.getElementById('p-base').addEventListener('click', () => run(async () => {
+  try {
+    await Plugin.load('dialog', { base: '/no/such/dir/' });
+    return '（不该走到这）';
+  } catch (e) {
+    return 'ERR: ' + e.message + '\n（base 决定 description.json 从哪儿取）';
+  }
+}));
+
+document.getElementById('p-base2').addEventListener('click', () => run(async () => {
+  const old = Plugin.base;
+  Plugin.base = '/no/such/dir/';
+  /* ★ load() 同步读了 Plugin.base（await 之前），所以可以立刻还原 ——
+     不用等这个请求结束，免得把页面留在坏 base 上。 */
+  const p = Plugin.load('dialog').then(() => null, (e) => e);
+  Plugin.base = old;
+  const e = await p;
+  return 'ERR: ' + (e ? e.message : '（不该走到这）') +
+         '\nPlugin.base 已还原为 ' + Plugin.base;
+}));
+</script>
+</body>
+</html>
