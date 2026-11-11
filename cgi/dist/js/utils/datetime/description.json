@@ -201,6 +201,7 @@
   "notes": [
     "可以用 Plugin.load('utils.datetime') 加载（点号分段）",
     "也可以直接 <script src=\"/pub/js/utils/datetime/datetime.js\">",
-    "加载后同时挂在 window.Datetime 和 window.Utils.datetime 上"
+    "加载后同时挂在 window.Datetime 和 window.Utils.datetime 上",
+    "详细文档见 utils/datetime/README.md，演示页见 utils/datetime/index.html"
   ]
 }

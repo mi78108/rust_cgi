@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>datetime · 日期时间工具</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:900px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:26px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+h3{font-size:14px;margin:18px 0 6px}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+pre{background:var(--bg-2);border:1px solid var(--rule);padding:10px 12px;overflow:auto}
+pre code{background:none;padding:0;font-size:12px;line-height:1.55}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--bg-2);font-weight:600}
+ul,ol{padding-left:20px}
+li{margin:3px 0}
+a{color:var(--cyan)}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:12px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
+.demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:2.6em;white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>datetime</h1>
+  <span class="meta">
+    <code>utils</code> 的子模块 · 零依赖 · 27 个方法 ·
+    入参吃 Date / 时间戳 / 日期字符串，认不出来返回 null
+  </span>
+</header>
+
+<h2>快速使用</h2>
+
+<pre><code>&lt;script src="/pub/js/utils/datetime/datetime.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+Utils.datetime.formatDate(new Date());   // '2026-11-11'
+&lt;/script&gt;</code></pre>
+
+<pre><code>// 用插件加载器
+const dt = await Plugin.load('utils.datetime');
+dt.formatDate(new Date());</code></pre>
+
+<h2>演示</h2>
+
+<div class="demo">
+  <h3>格式化</h3>
+  <p><code>format(v, pattern?)</code> — 占位符 <code>YYYY YY MM DD HH mm ss SSS</code></p>
+  <div class="btns">
+    <button id="d-format" class="primary">format</button>
+    <button id="d-date">formatDate</button>
+    <button id="d-time">formatTime</button>
+    <button id="d-dt">formatDateTime</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>相对时间</h3>
+  <p><code>formatRelative(v, now?)</code> — 「刚刚 / 3 分钟前 / 2 小时后」</p>
+  <div class="btns">
+    <button id="d-rel" class="primary">formatRelative</button>
+    <button id="d-rel-past">过去 3 天</button>
+    <button id="d-rel-future">未来 2 小时</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>取值</h3>
+  <p><code>year / month / day / hour / minute / second / weekday / dayOfYear</code></p>
+  <div class="btns">
+    <button id="d-get" class="primary">取值</button>
+    <button id="d-dim">daysInMonth / isLeapYear</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>差值与运算</h3>
+  <p><code>diffDays / diffMs / add / addDays / startOfDay</code></p>
+  <div class="btns">
+    <button id="d-diff" class="primary">diffDays</button>
+    <button id="d-add">addDays</button>
+    <button id="d-sod">startOfDay / endOfDay</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>解析与时间戳</h3>
+  <p><code>toDate / toTimestamp / fromTimestamp</code></p>
+  <div class="btns">
+    <button id="d-parse" class="primary">toDate</button>
+    <button id="d-ts">toTimestamp / fromTimestamp</button>
+  </div>
+</div>
+
+<div id="out">（点上面的按钮，结果显示在这里）</div>
+
+<h2>API</h2>
+
+<table>
+  <tr><th>方法</th><th>返回</th><th>说明</th></tr>
+  <tr><td><code>toDate(v)</code></td><td>Date|null</td><td>各种入参统一成 Date。认不出来返回 null</td></tr>
+  <tr><td><code>year(v)</code></td><td>number|null</td><td>年</td></tr>
+  <tr><td><code>month(v)</code></td><td>number|null</td><td>月，1~12</td></tr>
+  <tr><td><code>day(v)</code></td><td>number|null</td><td>日</td></tr>
+  <tr><td><code>hour(v)</code></td><td>number|null</td><td>时，0~23</td></tr>
+  <tr><td><code>minute(v)</code></td><td>number|null</td><td>分</td></tr>
+  <tr><td><code>second(v)</code></td><td>number|null</td><td>秒</td></tr>
+  <tr><td><code>weekday(v)</code></td><td>number|null</td><td>星期几，0=周日</td></tr>
+  <tr><td><code>dayOfYear(v)</code></td><td>number|null</td><td>一年里的第几天，1~366</td></tr>
+  <tr><td><code>daysInMonth(y, m)</code></td><td>number|null</td><td>某年某月的天数，m 是 1~12</td></tr>
+  <tr><td><code>isLeapYear(y)</code></td><td>boolean</td><td>闰年判定（整百年不算、整千年算）</td></tr>
+  <tr><td><code>format(v, pattern?)</code></td><td>string</td><td>按模板格式化。占位符 YYYY YY MM DD HH mm ss SSS</td></tr>
+  <tr><td><code>formatDate(v)</code></td><td>string</td><td>只到天，'2026-11-11'</td></tr>
+  <tr><td><code>formatTime(v)</code></td><td>string</td><td>只到分，'14:30'</td></tr>
+  <tr><td><code>formatDateTime(v)</code></td><td>string</td><td>完整时间，'2026-11-11 14:30:00'</td></tr>
+  <tr><td><code>formatRelative(v, now?)</code></td><td>string</td><td>相对时间，'刚刚' / '3 分钟前'</td></tr>
+  <tr><td><code>diffDays(a, b)</code></td><td>number|null</td><td>相差几天，按自然日算（b - a）</td></tr>
+  <tr><td><code>diffMs(a, b)</code></td><td>number|null</td><td>相差多少毫秒（b - a）</td></tr>
+  <tr><td><code>add(v, delta?)</code></td><td>Date|null</td><td>加减时间，delta 支持 years months days hours minutes seconds ms</td></tr>
+  <tr><td><code>addDays(v, n)</code></td><td>Date|null</td><td>加减天数的快捷方式，n 可为负</td></tr>
+  <tr><td><code>startOfDay(v)</code></td><td>Date|null</td><td>一天的开始，00:00:00.000</td></tr>
+  <tr><td><code>endOfDay(v)</code></td><td>Date|null</td><td>一天的结束，23:59:59.999</td></tr>
+  <tr><td><code>startOfWeek(v, firstDay?)</code></td><td>Date|null</td><td>一周的开始，默认周一；firstDay 传 0 则从周日开始</td></tr>
+  <tr><td><code>startOfMonth(v)</code></td><td>Date|null</td><td>一月的开始</td></tr>
+  <tr><td><code>endOfMonth(v)</code></td><td>Date|null</td><td>一月的结束，最后一秒</td></tr>
+  <tr><td><code>toTimestamp(v)</code></td><td>number|null</td><td>Unix 时间戳（秒）</td></tr>
+  <tr><td><code>fromTimestamp(ts)</code></td><td>Date|null</td><td>Unix 时间戳（秒）→ Date</td></tr>
+</table>
+
+<h2>行为</h2>
+<ul>
+<li>入参不合法 → 返回 <code>null</code>（格式化类返回 <code>''</code>），不抛异常。</li>
+<li>日期不存在（2 月 31 日）→ <code>toDate</code> 返回 <code>null</code>。</li>
+<li>ISO 8601 带 <code>Z</code> / 时区偏移 → 走原生解析（按 UTC 算）。</li>
+<li><code>diffDays</code> 按<b>自然日</b>算 —— 「今天 9:00 → 明天 8:00」是 1 天。</li>
+<li><code>add</code> 加月 / 年用 <code>setMonth</code> / <code>setFullYear</code> —— 不会被夏令时吃掉一天。</li>
+<li><code>month()</code> 是 <b>1~12</b>；<code>weekday()</code> 是 <b>0~6</b>（0=周日）。</li>
+</ul>
+
+<p><a href="/pub/js/utils/">← 回到 utils 总览</a></p>
+<p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
+
+</div>
+
+<script src="/pub/js/utils/datetime/datetime.js"></script>
+<script>
+const out = document.getElementById('out');
+const show = (msg) => { out.textContent = msg; };
+
+const DT = window.Utils.datetime;
+
+document.getElementById('d-format').addEventListener('click', () => {
+  const d = new Date();
+  show('format(默认)      → ' + DT.format(d) +
+       '\nformat(YYYY/MM/DD) → ' + DT.format(d, 'YYYY/MM/DD') +
+       '\nformat(只有时:分)   → ' + DT.format(d, 'HH:mm') +
+       '\nformat(带毫秒)      → ' + DT.format(d, 'YYYY-MM-DD HH:mm:ss.SSS'));
+});
+
+document.getElementById('d-date').addEventListener('click', () => {
+  show('formatDate(new Date()) → ' + DT.formatDate(new Date()) +
+       '\nformatDate("2026-11-11 08:30:00") → ' + DT.formatDate('2026-11-11 08:30:00'));
+});
+
+document.getElementById('d-time').addEventListener('click', () => {
+  show('formatTime(new Date()) → ' + DT.formatTime(new Date()));
+});
+
+document.getElementById('d-dt').addEventListener('click', () => {
+  show('formatDateTime(new Date()) → ' + DT.formatDateTime(new Date()));
+});
+
+document.getElementById('d-rel').addEventListener('click', () => {
+  const now = new Date();
+  show('formatRelative(now)        → ' + DT.formatRelative(now) +
+       '\nformatRelative(now - 30s)   → ' + DT.formatRelative(now.getTime() - 30 * 1000) +
+       '\nformatRelative(now - 3min)  → ' + DT.formatRelative(now.getTime() - 3 * 60 * 1000) +
+       '\nformatRelative(now - 5h)    → ' + DT.formatRelative(now.getTime() - 5 * 3600 * 1000) +
+       '\nformatRelative(now - 3d)    → ' + DT.formatRelative(now.getTime() - 3 * 86400000));
+});
+
+document.getElementById('d-rel-past').addEventListener('click', () => {
+  show('formatRelative(3 天前) → ' + DT.formatRelative(Date.now() - 3 * 86400000));
+});
+
+document.getElementById('d-rel-future').addEventListener('click', () => {
+  show('formatRelative(2 小时后) → ' + DT.formatRelative(Date.now() + 2 * 3600 * 1000));
+});
+
+document.getElementById('d-get').addEventListener('click', () => {
+  const d = new Date('2026-11-11 14:30:25');
+  show('year      → ' + DT.year(d) +
+       '\nmonth     → ' + DT.month(d) + '  (1~12)' +
+       '\nday       → ' + DT.day(d) +
+       '\nhour      → ' + DT.hour(d) +
+       '\nminute    → ' + DT.minute(d) +
+       '\nsecond    → ' + DT.second(d) +
+       '\nweekday   → ' + DT.weekday(d) + '  (0=周日)' +
+       '\ndayOfYear → ' + DT.dayOfYear(d));
+});
+
+document.getElementById('d-dim').addEventListener('click', () => {
+  show('daysInMonth(2024, 2) → ' + DT.daysInMonth(2024, 2) + '  (闰年)' +
+       '\ndaysInMonth(2026, 2) → ' + DT.daysInMonth(2026, 2) +
+       '\nisLeapYear(2024)      → ' + DT.isLeapYear(2024) +
+       '\nisLeapYear(2026)      → ' + DT.isLeapYear(2026) +
+       '\nisLeapYear(1900)      → ' + DT.isLeapYear(1900) + '  (整百年不算)' +
+       '\nisLeapYear(2000)      → ' + DT.isLeapYear(2000) + '  (整千年算)');
+});
+
+document.getElementById('d-diff').addEventListener('click', () => {
+  const t9 = new Date(); t9.setHours(9, 0, 0, 0);
+  const t8 = new Date(); t8.setDate(t8.getDate() + 1); t8.setHours(8, 0, 0, 0);
+  show('diffDays("2026-11-01", "2026-11-11") → ' + DT.diffDays('2026-11-01', '2026-11-11') +
+       '\ndiffDays(今天 9:00, 明天 8:00) → ' + DT.diffDays(t9, t8) +
+         '  (按自然日，不按 24 小时整除)' +
+       '\ndiffMs(a, a) → ' + DT.diffMs('2026-11-11', '2026-11-11'));
+});
+
+document.getElementById('d-add').addEventListener('click', () => {
+  show('addDays("2026-11-11", 3) → ' + DT.formatDateTime(DT.addDays('2026-11-11', 3)) +
+       '\naddDays("2026-11-11", -10) → ' + DT.formatDateTime(DT.addDays('2026-11-11', -10)) +
+       '\nadd("2026-11-11", {months: 1, days: 2}) → ' +
+         DT.formatDateTime(DT.add('2026-11-11', { months: 1, days: 2 })));
+});
+
+document.getElementById('d-sod').addEventListener('click', () => {
+  show('startOfDay("2026-11-11 14:30:25") → ' + DT.formatDateTime(DT.startOfDay('2026-11-11 14:30:25')) +
+       '\nendOfDay("2026-11-11 14:30:25")   → ' + DT.formatDateTime(DT.endOfDay('2026-11-11 14:30:25')) +
+       '\nstartOfWeek("2026-11-11")         → ' + DT.formatDate(DT.startOfWeek('2026-11-11')) +
+       '\nstartOfMonth("2026-11-11")        → ' + DT.formatDate(DT.startOfMonth('2026-11-11')) +
+       '\nendOfMonth("2026-11-11")          → ' + DT.formatDateTime(DT.endOfMonth('2026-11-11')));
+});
+
+document.getElementById('d-parse').addEventListener('click', () => {
+  show('toDate("2026-11-11")            → ' + DT.toDate('2026-11-11') +
+       '\ntoDate("2026-11-11 14:30:25")  → ' + DT.toDate('2026-11-11 14:30:25') +
+       '\ntoDate("2026/11/11")            → ' + DT.toDate('2026/11/11') +
+       '\ntoDate("2026-11-11T08:30:00Z")  → ' + DT.toDate('2026-11-11T08:30:00Z') +
+       '\ntoDate("2026-02-31")            → ' + DT.toDate('2026-02-31') + '  (不存在的日期 → null)' +
+       '\ntoDate("乱写")                   → ' + DT.toDate('乱写'));
+});
+
+document.getElementById('d-ts').addEventListener('click', () => {
+  const ts = DT.toTimestamp('2026-11-11 00:00:00');
+  show('toTimestamp("2026-11-11 00:00:00") → ' + ts +
+       '\nfromTimestamp(ts) → ' + DT.formatDateTime(DT.fromTimestamp(ts)));
+});
+</script>
+</body>
+</html>

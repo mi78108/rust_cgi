@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>utils · 工具库</title>
+<title>utils · 工具集</title>
 
 <!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
 <style>
@@ -24,23 +24,22 @@ h1{font-size:22px;margin:0 0 4px}
 .meta{color:var(--muted);font-size:13px}
 h2{font-size:16px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
 h3{font-size:14px;margin:18px 0 6px}
-code{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
-  background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
 pre{background:var(--bg-2);border:1px solid var(--rule);padding:10px 12px;overflow:auto}
 pre code{background:none;padding:0;font-size:12px;line-height:1.55}
 
-/* 快速使用块 */
-.quick{border:1px solid var(--rule);background:var(--bg-2);padding:12px 14px;margin:12px 0}
-.quick-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-.quick-head .qt{font-size:12px;color:var(--muted);border:1px solid var(--rule);
-  padding:1px 7px;background:var(--bg-3)}
-.quick-head button{margin-left:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--bg-2);font-weight:600}
+td.pass{color:var(--lime);font-weight:600}
+td.fail{color:var(--red);font-weight:600}
+td.pending{color:var(--muted);font-style:italic}
 
-/* 演示块 */
-.demo{border:1px solid var(--rule);background:var(--bg-2);padding:12px 14px;margin:12px 0}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:12px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
 .demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
 .btns{display:flex;flex-wrap:wrap;gap:8px}
-
 button{
   background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
   padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
@@ -48,15 +47,14 @@ button{
 button:hover{border-color:var(--muted)}
 button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
 
-table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
-th,td{border:1px solid var(--rule);padding:5px 9px;text-align:left;vertical-align:top}
-th{background:var(--bg-3);font-weight:600}
-
-#out{margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
   padding:10px 12px;font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
-  font-size:12px;min-height:2.6em;white-space:pre-wrap}
+  font-size:12px;min-height:2.6em;white-space:pre-wrap;
+}
 ul{padding-left:20px}
 li{margin:3px 0}
+a{color:var(--cyan)}
 </style>
 </head>
 <body>
@@ -64,258 +62,116 @@ li{margin:3px 0}
 
 <header>
   <h1>utils</h1>
-  <span class="meta">通用工具集 —— 零依赖纯前端，按子模块组织。当前含 <code>datetime</code> 子模块。</span>
+  <span class="meta">
+    通用工具集 —— <code>utils.js</code> 只是容器，功能都在独立子模块里。<br>
+    各子模块的具体 API 看<b>各自的页面</b>，本页只做总览。
+  </span>
 </header>
 
 <h2>快速使用</h2>
 
-<div class="quick">
-  <div class="quick-head">
-    <span class="qt">引入</span>
-    <span>引入即用，全局变量 <code>Utils</code></span>
-    <button class="copy qs" data-copy>复制</button>
-  </div>
-<pre><code>&lt;script src="/pub/js/utils/datetime/datetime.js"&gt;&lt;/script&gt;
-&lt;script src="/pub/js/utils/utils.js"&gt;&lt;/script&gt;</code></pre>
-</div>
+<pre><code>&lt;script src="/pub/js/plugin/plugin.js"&gt;&lt;/script&gt;
+&lt;script type="module"&gt;
+// 一次加载全部子模块 —— deps 会先加载
+const U = await Plugin.load('utils');
+U.datetime.formatDate(new Date());   // '2026-11-11'
+&lt;/script&gt;</code></pre>
 
-<div class="quick">
-  <div class="quick-head">
-    <span class="qt">用法</span>
-    <span>子模块挂在 <code>Utils.&lt;name&gt;</code> 上</span>
-    <button class="copy qs" data-copy>复制</button>
-  </div>
-<pre><code>// 格式化
-Utils.datetime.formatDate(new Date());        // '2026-11-11'
-Utils.datetime.formatDateTime(new Date());    // '2026-11-11 14:30:00'
-Utils.datetime.formatRelative(new Date(Date.now() - 3 * 60000));  // '3 分钟前'
+<pre><code>// 只加载某一个子模块
+const dt = await Plugin.load('utils.datetime');
+dt.formatDate(new Date());
 
-// 取值 / 差值
-Utils.datetime.year('2026-11-11');            // 2026
-Utils.datetime.diffDays('2026-11-01', '2026-11-11');  // 10</code></pre>
-</div>
-
-<div class="quick">
-  <div class="quick-head">
-    <span class="qt">插件</span>
-    <span>用 plugin.js 按需拉子模块</span>
-    <button class="copy qs" data-copy>复制</button>
-  </div>
-<pre><code>// utils.js 不自动加载子模块 —— 用 loadSub 显式拉
-const dt = await Utils.loadSub('datetime');
-dt.formatDate(new Date());</code></pre>
-</div>
+// 不用插件加载器也行 —— 子模块自己会建 window.Utils 容器
+&lt;script src="/pub/js/utils/datetime/datetime.js"&gt;&lt;/script&gt;
+Utils.datetime.formatDate(new Date());</code></pre>
 
 <h2>子模块</h2>
 
 <table>
-  <tr><th>名称</th><th>说明</th><th>入口</th></tr>
+  <tr><th>插件名</th><th>说明</th><th>文档</th></tr>
   <tr>
-    <td><code>datetime</code></td>
+    <td><code>utils.datetime</code></td>
     <td>日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳</td>
-    <td><code>datetime/datetime.js</code></td>
+    <td><a href="/pub/js/utils/datetime/">datetime →</a></td>
   </tr>
 </table>
+
+<p>
+新增子模块：在 <code>utils/</code> 下建 <code>&lt;name&gt;/</code> 目录（独立插件目录，
+自带 <code>description.json</code>），然后把它的插件名加进本目录
+<code>description.json</code> 的 <code>dependencies</code> 数组。
+</p>
 
 <h2>演示</h2>
 
 <div class="demo">
-  <h3>格式化</h3>
-  <p><code>format(v, pattern?)</code> — 占位符 <code>YYYY YY MM DD HH mm ss SSS</code></p>
+  <h3>deps 自动加载</h3>
+  <p>
+    <code>Plugin.load('utils')</code> 会先加载 <code>dependencies</code> 里列的子模块，
+    再加载容器 —— 所以 load 完 <code>window.Utils</code> 上已经挂着全部子模块。
+  </p>
   <div class="btns">
-    <button id="u-format" class="primary">format</button>
-    <button id="u-date">formatDate</button>
-    <button id="u-time">formatTime</button>
-    <button id="u-dt">formatDateTime</button>
-  </div>
-</div>
-
-<div class="demo">
-  <h3>相对时间</h3>
-  <p><code>formatRelative(v, now?)</code> — 「刚刚 / 3 分钟前 / 2 小时后」</p>
-  <div class="btns">
-    <button id="u-rel-now" class="primary">formatRelative</button>
-    <button id="u-rel-past">过去 3 天</button>
-    <button id="u-rel-future">未来 2 小时</button>
-  </div>
-</div>
-
-<div class="demo">
-  <h3>取值</h3>
-  <p><code>year / month / day / hour / minute / second / weekday / dayOfYear</code></p>
-  <div class="btns">
-    <button id="u-get" class="primary">取值</button>
-    <button id="u-dim">daysInMonth / isLeapYear</button>
-  </div>
-</div>
-
-<div class="demo">
-  <h3>差值与运算</h3>
-  <p><code>diffDays / diffMs / add / addDays / startOfDay</code></p>
-  <div class="btns">
-    <button id="u-diff" class="primary">diffDays</button>
-    <button id="u-add">addDays</button>
-    <button id="u-sod">startOfDay / endOfDay</button>
-  </div>
-</div>
-
-<div class="demo">
-  <h3>解析与时间戳</h3>
-  <p><code>toDate / toTimestamp / fromTimestamp</code></p>
-  <div class="btns">
-    <button id="u-parse" class="primary">toDate</button>
-    <button id="u-ts">toTimestamp / fromTimestamp</button>
-  </div>
-</div>
-
-<div class="demo">
-  <h3>子模块注册表</h3>
-  <p><code>Utils.submodules()</code> / <code>Utils.loadSub(name)</code></p>
-  <div class="btns">
-    <button id="u-subs" class="primary">submodules()</button>
-    <button id="u-load">loadSub('datetime')</button>
+    <button id="u-load-all" class="primary">Plugin.load('utils')</button>
+    <button id="u-load-one">Plugin.load('utils.datetime')</button>
+    <button id="u-sub">查看已加载的子模块</button>
   </div>
 </div>
 
 <div id="out">（点上面的按钮，结果显示在这里）</div>
 
-<h2>约定</h2>
+<h2>行为</h2>
 <ul>
-<li>新增子模块：在 <code>utils/</code> 下建 <code>&lt;name&gt;.js</code>，
-在里面挂 <code>window.Utils.&lt;name&gt;</code>，
-然后在 <code>description.json</code> 的 <code>submodules</code> 里登记。</li>
-<li>子模块各自一个文件、互不依赖，谁先加载都行。</li>
-<li>所有方法入参都吃 <code>Date</code> / 时间戳 / 日期字符串，
-认不出来返回 <code>null</code>（格式化返回空串）。</li>
-<li>路径里的 <code>/pub/</code> 是静态服务器入口（<code>cgi/pub</code>，
-<code>PUB_ROOT</code> 默认 <code>dist</code>）。</li>
+<li><b>deps 先加载</b> —— 容器最后加载，所以子模块挂上来的东西不会被覆盖。</li>
+<li><b>deps 用点号分段</b> —— <code>utils.datetime</code> → <code>utils/datetime/</code>。</li>
+<li><b>循环依赖会报错</b> —— A→B→A 直接抛「循环依赖」，不会死锁。</li>
+<li><b>子模块可以单独用</b> —— <code>Plugin.load('utils.datetime')</code> 不用先加载 utils。</li>
 </ul>
 
 <p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
 
 </div>
 
-<script src="/pub/js/_copy.js"></script>
-<script src="/pub/js/utils/datetime/datetime.js"></script>
-<script src="/pub/js/utils/utils.js"></script>
+<script src="/pub/js/plugin/plugin.js"></script>
 <script>
 const out = document.getElementById('out');
 const show = (msg) => { out.textContent = msg; };
 
-const DT = Utils.datetime;
+/* 子模块清单 —— 跟 utils/description.json 的 dependencies 对齐 */
+const DEPS = ['utils.datetime'];
 
-document.getElementById('u-format').addEventListener('click', () => {
-  const d = new Date();
-  show('format(默认)      → ' + DT.format(d) +
-       '\nformat(YYYY/MM/DD) → ' + DT.format(d, 'YYYY/MM/DD') +
-       '\nformat(只有时:分)   → ' + DT.format(d, 'HH:mm') +
-       '\nformat(带毫秒)      → ' + DT.format(d, 'YYYY-MM-DD HH:mm:ss.SSS'));
-});
-
-document.getElementById('u-date').addEventListener('click', () => {
-  show('formatDate(new Date()) → ' + DT.formatDate(new Date()) +
-       '\nformatDate("2026-11-11 08:30:00") → ' + DT.formatDate('2026-11-11 08:30:00'));
-});
-
-document.getElementById('u-time').addEventListener('click', () => {
-  show('formatTime(new Date()) → ' + DT.formatTime(new Date()));
-});
-
-document.getElementById('u-dt').addEventListener('click', () => {
-  show('formatDateTime(new Date()) → ' + DT.formatDateTime(new Date()));
-});
-
-document.getElementById('u-rel-now').addEventListener('click', () => {
-  const now = new Date();
-  show('formatRelative(now)        → ' + DT.formatRelative(now) +
-       '\nformatRelative(now - 30s)   → ' + DT.formatRelative(now.getTime() - 30 * 1000) +
-       '\nformatRelative(now - 3min)  → ' + DT.formatRelative(now.getTime() - 3 * 60 * 1000) +
-       '\nformatRelative(now - 5h)    → ' + DT.formatRelative(now.getTime() - 5 * 3600 * 1000) +
-       '\nformatRelative(now - 3d)    → ' + DT.formatRelative(now.getTime() - 3 * 86400000));
-});
-
-document.getElementById('u-rel-past').addEventListener('click', () => {
-  show('formatRelative(3 天前) → ' + DT.formatRelative(Date.now() - 3 * 86400000));
-});
-
-document.getElementById('u-rel-future').addEventListener('click', () => {
-  show('formatRelative(2 小时后) → ' + DT.formatRelative(Date.now() + 2 * 3600 * 1000));
-});
-
-document.getElementById('u-get').addEventListener('click', () => {
-  const d = new Date('2026-11-11 14:30:25');
-  show('year      → ' + DT.year(d) +
-       '\nmonth     → ' + DT.month(d) + '  (1~12)' +
-       '\nday       → ' + DT.day(d) +
-       '\nhour      → ' + DT.hour(d) +
-       '\nminute    → ' + DT.minute(d) +
-       '\nsecond    → ' + DT.second(d) +
-       '\nweekday   → ' + DT.weekday(d) + '  (0=周日)' +
-       '\ndayOfYear → ' + DT.dayOfYear(d));
-});
-
-document.getElementById('u-dim').addEventListener('click', () => {
-  show('daysInMonth(2024, 2) → ' + DT.daysInMonth(2024, 2) + '  (闰年)' +
-       '\ndaysInMonth(2026, 2) → ' + DT.daysInMonth(2026, 2) +
-       '\nisLeapYear(2024)      → ' + DT.isLeapYear(2024) +
-       '\nisLeapYear(2026)      → ' + DT.isLeapYear(2026) +
-       '\nisLeapYear(1900)      → ' + DT.isLeapYear(1900) + '  (整百年不算)' +
-       '\nisLeapYear(2000)      → ' + DT.isLeapYear(2000) + '  (整千年算)');
-});
-
-document.getElementById('u-diff').addEventListener('click', () => {
-  show('diffDays("2026-11-01", "2026-11-11") → ' + DT.diffDays('2026-11-01', '2026-11-11') +
-       '\ndiffDays(今天 9:00, 明天 8:00) → ' +
-         DT.diffDays(new Date(new Date().setHours(9, 0, 0, 0)),
-                     new Date(new Date().setDate(new Date().getDate() + 1)).setHours(8, 0, 0, 0)) +
-         '  (按自然日，不按 24 小时整除)' +
-       '\ndiffMs(a, a) → ' + DT.diffMs('2026-11-11', '2026-11-11'));
-});
-
-document.getElementById('u-add').addEventListener('click', () => {
-  show('addDays("2026-11-11", 3) → ' + DT.formatDateTime(DT.addDays('2026-11-11', 3)) +
-       '\naddDays("2026-11-11", -10) → ' + DT.formatDateTime(DT.addDays('2026-11-11', -10)) +
-       '\nadd("2026-11-11", {months: 1, days: 2}) → ' +
-         DT.formatDateTime(DT.add('2026-11-11', { months: 1, days: 2 })));
-});
-
-document.getElementById('u-sod').addEventListener('click', () => {
-  show('startOfDay("2026-11-11 14:30:25") → ' + DT.formatDateTime(DT.startOfDay('2026-11-11 14:30:25')) +
-       '\nendOfDay("2026-11-11 14:30:25")   → ' + DT.formatDateTime(DT.endOfDay('2026-11-11 14:30:25')) +
-       '\nstartOfWeek("2026-11-11")         → ' + DT.formatDate(DT.startOfWeek('2026-11-11')) +
-       '\nstartOfMonth("2026-11-11")        → ' + DT.formatDate(DT.startOfMonth('2026-11-11')) +
-       '\nendOfMonth("2026-11-11")          → ' + DT.formatDateTime(DT.endOfMonth('2026-11-11')));
-});
-
-document.getElementById('u-parse').addEventListener('click', () => {
-  show('toDate("2026-11-11")            → ' + DT.toDate('2026-11-11') +
-       '\ntoDate("2026-11-11 14:30:25")  → ' + DT.toDate('2026-11-11 14:30:25') +
-       '\ntoDate("2026/11/11")            → ' + DT.toDate('2026/11/11') +
-       '\ntoDate("2026-11-11T08:30:00Z")  → ' + DT.toDate('2026-11-11T08:30:00Z') +
-       '\ntoDate("2026-02-31")            → ' + DT.toDate('2026-02-31') + '  (不存在的日期 → null)' +
-       '\ntoDate("乱写")                   → ' + DT.toDate('乱写'));
-});
-
-document.getElementById('u-ts').addEventListener('click', () => {
-  const ts = DT.toTimestamp('2026-11-11 00:00:00');
-  show('toTimestamp("2026-11-11 00:00:00") → ' + ts +
-       '\nfromTimestamp(ts) → ' + DT.formatDateTime(DT.fromTimestamp(ts)));
-});
-
-document.getElementById('u-subs').addEventListener('click', () => {
-  show('Utils.submodules() → ' + JSON.stringify(Utils.submodules()) +
-       '\nUtils.version      → ' + Utils.version);
-});
-
-document.getElementById('u-load').addEventListener('click', async () => {
+document.getElementById('u-load-all').addEventListener('click', async () => {
   try {
-    const dt = await Utils.loadSub('datetime');
-    show('loadSub("datetime") → ' + typeof dt +
-         '\nformatDate(new Date()) → ' + dt.formatDate(new Date()) +
-         '\n（已经加载过 → 直接返回，不重复注入）');
+    const U = await Plugin.load('utils');
+    const loaded = DEPS.map(n => n.replace('utils.', ''));
+    const all = loaded.every(n => U[n] && Object.keys(U[n]).length > 0);
+    show('Plugin.load("utils") OK\n' +
+         '  version = ' + U.version + '\n' +
+         '  deps = ' + JSON.stringify(DEPS) + '\n' +
+         '  全部子模块已挂上 = ' + all + '\n' +
+         '  Utils.datetime.formatDate(now) = ' + U.datetime.formatDate(new Date()));
   } catch (e) {
-    show('loadSub 失败: ' + e.message);
+    show('失败: ' + e.message);
   }
+});
+
+document.getElementById('u-load-one').addEventListener('click', async () => {
+  try {
+    const dt = await Plugin.load('utils.datetime');
+    show('Plugin.load("utils.datetime") OK\n' +
+         '  方法数 = ' + Object.keys(dt).length + '\n' +
+         '  formatDate(now) = ' + dt.formatDate(new Date()) + '\n' +
+         '  （不用先加载 utils）');
+  } catch (e) {
+    show('失败: ' + e.message);
+  }
+});
+
+document.getElementById('u-sub').addEventListener('click', () => {
+  const U = window.Utils || {};
+  const names = Object.keys(U).filter(k => k !== 'version');
+  show('window.Utils 上的子模块:\n' +
+       '  ' + (names.length ? names.join('\n  ') : '（还没加载）') +
+       '\nversion = ' + (U.version || '—'));
 });
 </script>
 </body>
