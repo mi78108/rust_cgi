@@ -8,23 +8,77 @@
   "dependencies": [],
   "url": "dialog.js",
   "readme": "README.md",
-  "tags": ["ui", "modal", "dialog", "popup"],
+  "tags": [
+    "ui",
+    "modal",
+    "dialog",
+    "popup"
+  ],
   "api": {
     "constructor": {
       "signature": "new Dialog(options)",
       "returns": "Dialog",
       "options": {
-        "title": { "type": "string", "default": "", "desc": "标题（textContent，不解析 HTML）" },
-        "message": { "type": "string", "default": "", "desc": "正文（textContent）" },
-        "content": { "type": "Node|string", "default": null, "desc": "自定义正文，优先于 message；字符串按 HTML 解析，只放可信内容" },
-        "okText": { "type": "string", "default": "确定", "desc": "主按钮文字" },
-        "cancelText": { "type": "string", "default": "取消", "desc": "取消按钮文字" },
-        "danger": { "type": "boolean", "default": false, "desc": "危险操作：主按钮变红，默认焦点在「取消」上" },
-        "hideCancel": { "type": "boolean", "default": false, "desc": "隐藏取消按钮" },
-        "okValue": { "type": "any", "default": "ok", "desc": "确定时 resolve 的值" },
-        "maskClass": { "type": "string", "default": "dlg-mask", "desc": "遮罩层 class" },
-        "onOk": { "type": "Function", "default": null, "desc": "确定前的钩子，返回 false 则不关闭" },
-        "onCancel": { "type": "Function", "default": null, "desc": "取消时的钩子" }
+        "title": {
+          "type": "string",
+          "default": "",
+          "desc": "标题（textContent，不解析 HTML）"
+        },
+        "message": {
+          "type": "string",
+          "default": "",
+          "desc": "正文（textContent）"
+        },
+        "content": {
+          "type": "Node|string",
+          "default": null,
+          "desc": "自定义正文，优先于 message；字符串按 HTML 解析，只放可信内容"
+        },
+        "okText": {
+          "type": "string",
+          "default": "确定",
+          "desc": "主按钮文字"
+        },
+        "cancelText": {
+          "type": "string",
+          "default": "取消",
+          "desc": "取消按钮文字"
+        },
+        "danger": {
+          "type": "boolean",
+          "default": false,
+          "desc": "危险操作：主按钮变红，默认焦点在「取消」上"
+        },
+        "hideCancel": {
+          "type": "boolean",
+          "default": false,
+          "desc": "隐藏取消按钮"
+        },
+        "okValue": {
+          "type": "any",
+          "default": "ok",
+          "desc": "确定时 resolve 的值"
+        },
+        "input": {
+          "type": "boolean|Object",
+          "default": "false",
+          "desc": "输入框。true 或 {type,value,placeholder,multiline}；有输入框时确定时 resolve 的是输入框的值（不是 okValue）"
+        },
+        "maskClass": {
+          "type": "string",
+          "default": "dlg-mask",
+          "desc": "遮罩层 class"
+        },
+        "onOk": {
+          "type": "Function",
+          "default": null,
+          "desc": "确定前的钩子，返回 false 则不关闭"
+        },
+        "onCancel": {
+          "type": "Function",
+          "default": null,
+          "desc": "取消时的钩子"
+        }
       }
     },
     "methods": [
@@ -39,6 +93,12 @@
         "signature": "dlg.close(value)",
         "returns": "void",
         "desc": "关闭弹窗，value resolve 给 open() 的 Promise"
+      },
+      {
+        "name": "showError",
+        "signature": "dlg.showError(message)",
+        "returns": "void",
+        "desc": "显示校验错误提示（validate 钩子用）。传 null/空串清除"
       }
     ],
     "statics": [
@@ -53,6 +113,98 @@
         "signature": "Dialog.alert(message, options?)",
         "returns": "Promise<void>",
         "desc": "提示框快捷方式（只有一个按钮）"
+      },
+      {
+        "name": "Dialog.prompt",
+        "signature": "Dialog.prompt(message, options?)",
+        "returns": "Promise<string|null>",
+        "desc": "输入框快捷方式 —— 确定时 resolve 输入的内容，取消时 resolve null",
+        "options": {
+          "value": {
+            "type": "string",
+            "default": "",
+            "desc": "输入框初始值（提交前就在里面）"
+          },
+          "placeholder": {
+            "type": "string",
+            "default": "",
+            "desc": "占位提示"
+          },
+          "inputType": {
+            "type": "string",
+            "default": "text",
+            "desc": "input 的 type（text / password / email …）"
+          },
+          "multiline": {
+            "type": "boolean",
+            "default": "false",
+            "desc": "多行（textarea）—— Ctrl/Cmd+Enter 提交"
+          },
+          "validate": {
+            "type": "Function",
+            "default": "null",
+            "desc": "校验函数 (value, dialog) => string|undefined —— 返回错误文案则不关闭并显示提示"
+          }
+        }
+      },
+      {
+        "name": "Dialog.tips",
+        "signature": "Dialog.tips(message, options?)",
+        "returns": "{ close: Function }",
+        "desc": "轻提示（toast）—— 底部居中，默认 5 秒后自动消失。返回的句柄可手动 close()",
+        "options": {
+          "timeout": {
+            "type": "number",
+            "default": "5000",
+            "desc": "自动消失的毫秒数。0 = 不自动消失（常驻）；负数/非法值按 0 处理"
+          },
+          "type": {
+            "type": "string",
+            "default": "info",
+            "desc": "info / success / error —— 决定边框色（默认 / 绿 / 红）。其它值按 info 处理"
+          }
+        }
+      },
+      {
+        "name": "Dialog.loading",
+        "signature": "Dialog.loading(message?, options?)",
+        "returns": "{ close: Function }",
+        "desc": "加载遮罩 —— 居中转圈 + 文字，盖住下面的交互。返回的句柄可 close()",
+        "options": {
+          "mask": {
+            "type": "boolean",
+            "default": "true",
+            "desc": "是否挡住下面的交互（挡住点击）。false = 只显示转圈，不挡"
+          }
+        }
+      },
+      {
+        "name": "Dialog.progress",
+        "signature": "Dialog.progress(message?, options?)",
+        "returns": "{ set: Function, close: Function }",
+        "desc": "进度框 —— 显示进度并返回句柄更新。四种样式：bar / circle / dots / steps",
+        "options": {
+          "type": {
+            "type": "string",
+            "default": "bar",
+            "desc": "bar（横向条）/ circle（环形，中间显示百分比）/ dots（三点跳动，不确定进度）/ steps（分段）"
+          },
+          "steps": {
+            "type": "number",
+            "default": "5",
+            "desc": "steps 样式的段数（1~20）"
+          },
+          "value": {
+            "type": "number",
+            "default": "0",
+            "desc": "初始进度（0~100）"
+          },
+          "mask": {
+            "type": "boolean",
+            "default": "true",
+            "desc": "是否挡住下面的交互（挡住点击）"
+          }
+        }
       }
     ]
   },
@@ -78,7 +230,26 @@
       "dlg-btn",
       "dlg-btn.primary",
       "dlg-btn.danger",
-      "dlg-narrow"
+      "dlg-narrow",
+      "dlg-input",
+      "dlg-err",
+      "dlg-tips",
+      "dlg-tip",
+      "dlg-tip.success",
+      "dlg-tip.error",
+      "dlg-loading",
+      "dlg-spinner",
+      "dlg-overlay-mask",
+      "dlg-progress",
+      "dlg-progress-msg",
+      "dlg-progress-pct",
+      "dlg-progress-bar",
+      "dlg-progress-bar-fill",
+      "dlg-progress-circle",
+      "dlg-progress-dots",
+      "dlg-progress-dot",
+      "dlg-progress-steps",
+      "dlg-progress-step"
     ],
     "variables": {
       "--bg-2": "#1e2027",
@@ -88,7 +259,10 @@
       "--rule": "#33363f",
       "--lime": "#c4f542",
       "--red": "#ff4d4d"
-    }
+    },
+    "notes": [
+      "dlg-input —— 输入框（prompt 用），聚焦时边框变 --lime"
+    ]
   },
   "examples": [
     {
@@ -102,9 +276,32 @@
     {
       "title": "完整用法",
       "code": "const dlg = new Dialog({ title: '修改名字', message: '这个名字会显示给同房间的人。' });\nconst result = await dlg.open();  // 'ok' 或 null"
+    },
+    {
+      "title": "输入框",
+      "code": "const name = await Dialog.prompt('请输入名字');\nif (name === null) return;   // 用户取消了\n// 带校验：\nconst pw = await Dialog.prompt('密码', {\n  inputType: 'password',\n  validate: (v) => v.length < 6 ? '至少 6 位' : undefined,\n});"
+    },
+    {
+      "title": "轻提示",
+      "code": "Dialog.tips('已保存');                          // 5 秒后自动消失\nDialog.tips('出错了', { type: 'error' });\nDialog.tips('加载中…', { timeout: 0 });       // 常驻，返回句柄可 close()"
+    },
+    {
+      "title": "加载遮罩",
+      "code": "const l = Dialog.loading('加载中…');\ntry {\n  await doWork();\n} finally {\n  l.close();\n}"
+    },
+    {
+      "title": "进度框",
+      "code": "const p = Dialog.progress('上传中…', { type: 'bar' });\np.set(45);                 // 45%\np.set(45, '已传 4.5MB');   // 顺带换文案\np.close();\n\n// 四种样式：bar / circle / dots / steps\nDialog.progress('不知道要多久', { type: 'dots' });   // 不确定进度"
     }
   ],
   "notes": [
+    "Dialog.progress 四种样式：bar（条）/ circle（环）/ dots（三点，不确定进度）/ steps（分段）",
+    "progress 跟 loading 共用一个遮罩槽 —— 后开的会换掉先开的（不叠加）",
+    "Dialog.loading 同时只允许一个 —— 再调一次会换掉上一个（不叠加）；close() 幂等",
+    "加载遮罩期间 Esc / 点遮罩都不会关掉它 —— 只能用 close() 关",
+    "Dialog.tips 默认 5 秒后自动消失（timeout: 5000）—— timeout: 0 表示不自动消失",
+    "多条 tips 竖着叠（新的在下面），每条各自计时；点提示本身也能提前关掉",
+    "Dialog.prompt 返回 Promise<string|null> —— null 表示用户取消（Esc / 点遮罩 / 取消按钮）",
     "危险操作默认焦点在「取消」上 —— 打开时回车不会误触发危险动作",
     "回车在 <button> 上时不重复触发（否则会触发两次）",
     "样式自己注入，宿主页面只需定义 CSS 变量就能跟随主题",

@@ -22,7 +22,7 @@ import { Dialog } from '/pub/js/dialog/dialog.js';
 
 ## 快捷方法
 
-最常用的是两个静态方法，都返回 Promise。
+三个返回 Promise 的静态方法 + 轻提示 + 加载遮罩 + 进度框。
 
 ```js
 // 确认框 → Promise<boolean>
@@ -31,7 +31,125 @@ if (yes) { /* ... */ }
 
 // 提示框（只有一个按钮）→ Promise<void>
 await Dialog.alert('已保存。');
+
+// 输入框 → Promise<string|null>   ★ null = 用户取消
+const name = await Dialog.prompt('请输入名字');
+if (name === null) return;   // 用户取消了（Esc / 点遮罩 / 取消按钮）
 ```
+
+### 输入框
+
+`Dialog.prompt` 带一个输入框，确定时 resolve **输入的内容**，取消时 resolve `null`。
+
+```js
+// 初始值 + 占位提示
+const name = await Dialog.prompt('请输入名字', {
+  value: '张三',          // 提交前就在输入框里
+  placeholder: '你的名字',
+});
+
+// 密码
+const pw = await Dialog.prompt('请输入密码', { inputType: 'password' });
+
+// 校验：返回错误文案就不关闭，显示提示
+const pw2 = await Dialog.prompt('密码（至少 6 位）', {
+  inputType: 'password',
+  validate: (v) => v.length < 6 ? '至少 6 位' : undefined,
+});
+
+// 多行：普通回车换行，Ctrl/Cmd+Enter 提交
+const text = await Dialog.prompt('备注', { multiline: true });
+```
+
+| 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `value` | string | `''` | 输入框初始值 |
+| `placeholder` | string | `''` | 占位提示 |
+| `inputType` | string | `'text'` | input 的 `type`（text / password / email …） |
+| `multiline` | boolean | `false` | 多行（textarea）—— Ctrl/Cmd+Enter 提交 |
+| `validate` | Function | `null` | `(value, dialog) => string \| undefined` —— 返回错误文案则**不关闭**并显示提示，焦点回到输入框 |
+
+★ 有初始值时它会被**全选** —— 直接打字就能覆盖。
+★ 输入框存在时**焦点落在输入框上**（不用先按 Tab）。
+
+### 轻提示（tips）
+
+`Dialog.tips` 在**底部居中**弹一条轻提示，**默认 5 秒后自动消失**。
+
+```js
+Dialog.tips('已保存');                              // 5 秒后自动消失
+Dialog.tips('出错了', { type: 'error' });           // 红边框
+Dialog.tips('加载中…', { timeout: 0 });             // 不自动消失（常驻）
+
+const t = Dialog.tips('常驻', { timeout: 0 });
+t.close();                                          // 手动关掉
+```
+
+| 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `timeout` | number | `5000` | 自动消失的毫秒数。**`0` = 不自动消失**；负数 / 非法值按 `0` 处理 |
+| `type` | string | `'info'` | `info` / `success` / `error` —— 决定边框色（默认 / 绿 / 红）。其它值按 `info` 处理 |
+
+返回值是 `{ close() }` —— 手动关掉。
+
+★ **多条提示竖着叠**（新的在下面），每条各自计时。
+★ **点提示本身也能提前关掉。**
+
+### 加载遮罩（loading）
+
+`Dialog.loading` 在**居中**显示一个转圈 + 文字，**挡住下面的交互**（防止重复点击）。
+
+```js
+const l = Dialog.loading('加载中…');
+try {
+  await doWork();
+} finally {
+  l.close();          // 用完一定要关
+}
+```
+
+| 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `mask` | boolean | `true` | 是否挡住下面的交互。`false` = 只显示转圈，不挡点击 |
+
+返回值是 `{ close() }`。
+
+★ **同一时刻只有一个 loading** —— 再调一次会**换掉**上一个（不叠加）。
+★ **`close()` 幂等** —— 调多次只关一次，`finally` 里放心调。
+★ **加载期间 Esc / 点遮罩都不会关掉它** —— 只能用 `close()` 关。
+
+### 进度框（progress）
+
+`Dialog.progress` 显示一个进度指示器，返回句柄可以随时更新进度。
+
+```js
+const p = Dialog.progress('上传中…', { type: 'bar' });
+p.set(45);                 // 45%
+p.set(45, '已传 4.5MB');    // 顺带换文案
+p.close();
+```
+
+| 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | string | `'bar'` | 四种样式，见下 |
+| `steps` | number | `5` | `steps` 样式的段数（1~20） |
+| `value` | number | `0` | 初始进度（0~100） |
+| `mask` | boolean | `true` | 是否挡住下面的交互 |
+
+**四种样式：**
+
+| `type` | 长相 | 用途 |
+|---|---|---|
+| `bar` | 横向进度条 | 知道百分比时用（默认） |
+| `circle` | 环形，中间显示百分比 | 知道百分比时用，比条更醒目 |
+| `dots` | 三点跳动 | **不知道总量**时用（不确定进度，没有百分比） |
+| `steps` | 分段步骤条 | 多阶段任务，段数由 `steps` 定 |
+
+返回值是 `{ set(value, text?), close() }`。
+
+★ `set()` 的值自动夹在 **0~100**，非法值（NaN / 字符串）**忽略**。
+★ **progress 跟 loading 共用一个遮罩槽** —— 后开的会换掉先开的（不叠加）。
+★ 进度期间 **Esc / 点遮罩都不会关掉它** —— 只能用 `close()` 关。
 
 ## 完整用法
 
@@ -62,6 +180,7 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 | `danger` | boolean | `false` | 危险操作：主按钮变红，**默认焦点在「取消」上** |
 | `hideCancel` | boolean | `false` | 隐藏取消按钮（只剩一个按钮时用） |
 | `okValue` | any | `'ok'` | 确定时 resolve 的值 |
+| `input` | boolean \| Object | `false` | 输入框。`true` 或 `{type,value,placeholder,multiline}`。有输入框时确定时 resolve 的是**输入框的值**（不是 `okValue`） |
 | `maskClass` | string | `'dlg-mask'` | 遮罩层的 class |
 | `onOk` | Function | `null` | 确定前的钩子，**返回 `false` 则不关闭** |
 | `onCancel` | Function | `null` | 取消时的钩子 |
@@ -74,8 +193,12 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 | 点「取消」 | resolve(`null`) |
 | Esc | resolve(`null`) |
 | 点遮罩空白处 | resolve(`null`) |
-| 回车 | 等同「确定」 |
+| 回车 | 等同「确定」（焦点在输入框里时 = 提交输入框） |
 | Tab / Shift+Tab | 焦点锁在弹窗内循环 |
+
+★ **输入框里回车 = 提交**；多行（textarea）里普通回车是换行，**Ctrl/Cmd+Enter** 才提交。
+★ **焦点在输入框上**（有输入框时）—— 打开就能直接打字。
+★ **有初始值时全选** —— 直接打字就能覆盖。
 
 ★ **危险操作的默认焦点在「取消」上** —— 打开时回车不会误触发危险动作。
 （这是 monaco 工具踩过的坑：clear 弹窗打开时若焦点在「确定」上，回车会直接清空。）
@@ -96,6 +219,19 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 .dlg           弹窗本体
 .dlg-title     标题
 .dlg-msg       正文
+.dlg-input      输入框（prompt 用）
+.dlg-err        校验错误提示
+.dlg-tips      轻提示容器（底部居中，多条竖着叠）
+.dlg-tip       单条轻提示
+.dlg-overlay-mask  遮罩层（全屏，盖住交互）—— loading / progress 共用
+.dlg-loading   加载框（转圈 + 文字）
+.dlg-spinner   转圈
+.dlg-progress  进度框
+.dlg-progress-bar / -bar-fill   横向进度条 / 填充
+.dlg-progress-circle            环形（SVG）
+.dlg-progress-dots / -dot       三点跳动 / 单个点
+.dlg-progress-steps / -step     分段步骤条 / 单段
+.dlg-progress-msg / -pct        标题 / 百分比
 .dlg-actions   按钮行（右对齐）
 .dlg-btn       按钮
 .dlg-btn.primary  主按钮（强调色）
@@ -120,8 +256,8 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 
 ## 已知边界
 
-- 没有动画（保持简单，避免 transition 引起的时序问题）
-- 没有输入框组件 —— 需要输入框时用 `content` 传自定义 DOM
+- 弹窗本身没有动画（保持简单，避免 transition 引起的时序问题）—— **只有轻提示有淡入淡出**
+- 输入框只有单行/多行两种形态 —— 复杂的表单用 `content` 传自定义 DOM
 - 不做焦点以外的 trap（背景内容仍可被程序滚动）
 
 ## 参见

@@ -82,7 +82,24 @@ if (await Dialog.confirm('确定？')) {
 }
 
 // 提示框（只有一个按钮）→ Promise&lt;void&gt;
-await Dialog.alert('已保存。');</code></pre>
+await Dialog.alert('已保存。');
+
+// 输入框 → Promise&lt;string|null&gt;   ★ null = 用户取消
+const name = await Dialog.prompt('请输入名字');
+if (name === null) return;
+
+// 轻提示（底部居中，5 秒后自动消失）
+Dialog.tips('已保存');
+
+// 加载遮罩（居中转圈，挡住下面的交互）
+const l = Dialog.loading('加载中…');
+try { await work(); } finally { l.close(); }
+
+// 进度框（四种样式：bar / circle / dots / steps）
+const p = Dialog.progress('上传中…', { type: 'bar' });
+p.set(45);          // 45%
+p.set(45, '已传 4.5MB');
+p.close();</code></pre>
 </div>
 
 <h2>演示</h2>
@@ -109,6 +126,53 @@ await Dialog.alert('已保存。');</code></pre>
   <p><code>Dialog.alert(message, options?)</code> → Promise&lt;void&gt;，只有一个按钮</p>
   <div class="btns">
     <button id="d-alert">alert</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>输入框</h3>
+  <p><code>Dialog.prompt(message, options?)</code> → Promise&lt;string|null&gt;，<b>null = 用户取消</b><br>
+     打开时焦点在输入框上 · 回车提交 · 有初始值时全选</p>
+  <div class="btns">
+    <button id="d-prompt" class="primary">prompt</button>
+    <button id="d-prompt-value">prompt + 初始值</button>
+    <button id="d-prompt-pw">prompt 密码 + 校验</button>
+    <button id="d-prompt-multi">prompt 多行</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>轻提示</h3>
+  <p><code>Dialog.tips(message, options?)</code> —— 底部居中，<b>默认 5 秒后自动消失</b><br>
+     多条竖着叠 · 点一下也能提前关掉</p>
+  <div class="btns">
+    <button id="d-tips" class="primary">tips（默认 5s）</button>
+    <button id="d-tips-fast">tips（1.5s）</button>
+    <button id="d-tips-sticky">tips（常驻）</button>
+    <button id="d-tips-types">tips 三种 type</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>加载遮罩</h3>
+  <p><code>Dialog.loading(message, options?)</code> —— 居中转圈，<b>挡住下面的交互</b><br>
+     返回 <code>{ close() }</code>，用完手动关；<code>close()</code> 幂等，调多次只关一次</p>
+  <div class="btns">
+    <button id="d-loading" class="primary">loading（3 秒后自动关）</button>
+    <button id="d-loading-manual">loading（手动关）</button>
+    <button id="d-loading-nomask">loading（不挡交互）</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>进度框</h3>
+  <p><code>Dialog.progress(message, options?)</code> —— 返回 <code>{ set(), close() }</code>，<code>set(百分比)</code> 更新<br>
+     四种样式：<code>bar</code>（条）/ <code>circle</code>（环）/ <code>dots</code>（三点，不确定进度）/ <code>steps</code>（分段）</p>
+  <div class="btns">
+    <button id="d-progress" class="primary">progress bar</button>
+    <button id="d-progress-circle">progress circle</button>
+    <button id="d-progress-dots">progress dots</button>
+    <button id="d-progress-steps">progress steps</button>
   </div>
 </div>
 
@@ -238,6 +302,114 @@ document.getElementById('d-danger').addEventListener('click', async () => {
 document.getElementById('d-alert').addEventListener('click', async () => {
   await Dialog.alert('这是一条提示。');
   show('alert → closed');
+});
+
+document.getElementById('d-prompt').addEventListener('click', async () => {
+  const v = await Dialog.prompt('请输入名字');
+  show('prompt → ' + JSON.stringify(v) + (v === null ? '（用户取消了）' : ''));
+});
+
+document.getElementById('d-prompt-value').addEventListener('click', async () => {
+  const v = await Dialog.prompt('请输入名字', { value: '预设值', placeholder: '你的名字' });
+  show('prompt + 初始值 → ' + JSON.stringify(v));
+});
+
+document.getElementById('d-prompt-pw').addEventListener('click', async () => {
+  const v = await Dialog.prompt('密码（少于 6 位会报错）', {
+    inputType: 'password',
+    validate: (s) => s.length < 6 ? '太短了，至少 6 位' : undefined,
+  });
+  show('prompt 密码 → ' + JSON.stringify(v));
+});
+
+document.getElementById('d-prompt-multi').addEventListener('click', async () => {
+  const v = await Dialog.prompt('多行输入（Ctrl/Cmd+Enter 提交）', { multiline: true });
+  show('prompt 多行 → ' + JSON.stringify(v));
+});
+
+document.getElementById('d-tips').addEventListener('click', async () => {
+  Dialog.tips('已保存（5 秒后自动消失）');
+  show('tips → 5 秒后自动消失，点提示也能提前关掉');
+});
+
+document.getElementById('d-tips-fast').addEventListener('click', async () => {
+  Dialog.tips('1.5 秒就消失', { timeout: 1500 });
+  show('tips timeout: 1500');
+});
+
+document.getElementById('d-tips-sticky').addEventListener('click', async () => {
+  const t = Dialog.tips('常驻（点我关掉）', { timeout: 0 });
+  show('tips timeout: 0 —— 不自动消失，返回的句柄可以手动 close()');
+});
+
+document.getElementById('d-tips-types').addEventListener('click', async () => {
+  Dialog.tips('普通信息');
+  Dialog.tips('操作成功', { type: 'success' });
+  Dialog.tips('出错了', { type: 'error' });
+  show('tips 三种 type —— 边框分别是默认 / 绿 / 红');
+});
+
+document.getElementById('d-loading').addEventListener('click', async () => {
+  const l = Dialog.loading('加载中…');
+  show('loading → 3 秒后自动关闭（下面的按钮点不动）');
+  setTimeout(() => l.close(), 3000);
+});
+
+document.getElementById('d-loading-manual').addEventListener('click', async () => {
+  const l = Dialog.loading('加载中…（点下面那个按钮关掉我）');
+  window.__loadingHandle = l;
+  show('loading → 点这个按钮关掉：');
+  const b = document.createElement('button');
+  b.textContent = '关闭 loading';
+  b.className = 'primary';
+  b.style.marginLeft = '8px';
+  b.addEventListener('click', () => { l.close(); b.remove(); show('loading 已关闭'); });
+  out.appendChild(b);
+});
+
+document.getElementById('d-loading-nomask').addEventListener('click', async () => {
+  const l = Dialog.loading('不挡交互（下面照常能点）', { mask: false });
+  show('loading mask:false → 只有转圈，不挡点击');
+  setTimeout(() => l.close(), 3000);
+});
+
+document.getElementById('d-progress').addEventListener('click', async () => {
+  const p = Dialog.progress('上传中…', { type: 'bar' });
+  let v = 0;
+  const timer = setInterval(() => {
+    v += 10;
+    p.set(v, v >= 100 ? '上传完成' : '上传中…');
+    if (v >= 100) { clearInterval(timer); setTimeout(() => p.close(), 600); }
+  }, 200);
+  show('progress bar → 2 秒内从 0% 走到 100%');
+});
+
+document.getElementById('d-progress-circle').addEventListener('click', async () => {
+  const p = Dialog.progress('处理中…', { type: 'circle' });
+  let v = 0;
+  const timer = setInterval(() => {
+    v += 8;
+    p.set(v);
+    if (v >= 100) { clearInterval(timer); setTimeout(() => p.close(), 600); }
+  }, 200);
+  show('progress circle → 环形，中心显示百分比');
+});
+
+document.getElementById('d-progress-dots').addEventListener('click', async () => {
+  const p = Dialog.progress('不知道要多久…', { type: 'dots' });
+  show('progress dots → 三点跳动（不确定进度，没有百分比）');
+  setTimeout(() => p.close(), 2500);
+});
+
+document.getElementById('d-progress-steps').addEventListener('click', async () => {
+  const p = Dialog.progress('分 6 步…', { type: 'steps', steps: 6 });
+  let v = 0;
+  const timer = setInterval(() => {
+    v += 17;
+    p.set(v);
+    if (v >= 100) { clearInterval(timer); setTimeout(() => p.close(), 600); }
+  }, 200);
+  show('progress steps → 6 段，按百分比逐段点亮');
 });
 
 document.getElementById('d-custom').addEventListener('click', async () => {
