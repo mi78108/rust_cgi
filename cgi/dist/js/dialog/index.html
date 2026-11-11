@@ -73,7 +73,7 @@ button.danger{background:var(--red);color:#fff;border-color:var(--red)}
 <div class="quick">
   <div class="quick-head">
     <span class="qt">用法</span>
-    <span>确认框 / 提示框</span>
+    <span>确认框 / 提示框 / 输入框 / 轻提示 / 加载遮罩 / 进度框</span>
     <button class="copy qs" data-copy>复制</button>
   </div>
 <pre><code>// 确认框 → Promise&lt;boolean&gt;
@@ -218,8 +218,41 @@ p.close();</code></pre>
 <pre><code>import { Dialog } from '/pub/js/dialog/dialog.js';</code></pre>
 
 <h3>快捷方法</h3>
-<pre><code>const yes = await Dialog.confirm('清空文档？', { danger: true });
-await Dialog.alert('已保存。');</code></pre>
+<table>
+<tr><th>方法</th><th>返回</th><th>说明</th></tr>
+<tr><td><code>Dialog.confirm(msg, opts?)</code></td><td>Promise&lt;boolean&gt;</td><td>确认框</td></tr>
+<tr><td><code>Dialog.alert(msg, opts?)</code></td><td>Promise&lt;void&gt;</td><td>提示框（只有一个按钮）</td></tr>
+<tr><td><code>Dialog.prompt(msg, opts?)</code></td><td>Promise&lt;string\|null&gt;</td><td>输入框。<b>null = 用户取消</b></td></tr>
+<tr><td><code>Dialog.tips(msg, opts?)</code></td><td>{ close() }</td><td>轻提示，<b>默认 5 秒后自动消失</b></td></tr>
+<tr><td><code>Dialog.loading(msg, opts?)</code></td><td>{ close() }</td><td>加载遮罩，挡住下面的交互</td></tr>
+<tr><td><code>Dialog.progress(msg, opts?)</code></td><td>{ set(), close() }</td><td>进度框，四种样式</td></tr>
+</table>
+<p>前三个返回 Promise（要等用户操作完），后三个返回句柄（立刻返回，自己关）。</p>
+<pre><code>// 确认框 / 提示框
+const yes = await Dialog.confirm('清空文档？', { danger: true });
+await Dialog.alert('已保存。');
+
+// 输入框 —— null 表示用户取消了
+const name = await Dialog.prompt('请输入名字');
+if (name === null) return;
+
+// 轻提示 —— 5 秒后自动消失
+Dialog.tips('已保存');
+Dialog.tips('出错了', { type: 'error' });
+
+// 加载遮罩 —— 用完必须关
+const l = Dialog.loading('加载中…');
+try {
+  await doWork();
+} finally {
+  l.close();
+}
+
+// 进度框 —— set() 更新百分比
+const p = Dialog.progress('上传中…', { type: 'bar' });
+p.set(45);                 // 45%
+p.set(45, '已传 4.5MB');    // 顺带换文案
+p.close();</code></pre>
 
 <h3>完整用法</h3>
 <pre><code>const dlg = new Dialog({
@@ -229,9 +262,20 @@ await Dialog.alert('已保存。');</code></pre>
   cancelText: '取消',
   danger: false,
 });
-const result = await dlg.open();   // 确定 → 'ok'，取消 → null</code></pre>
+const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 
-<h3>选项</h3>
+// 带输入框（自己 new 时用 input 选项）——
+// 确定时 resolve 的是**输入框的值**，不是 okValue
+const dlg2 = new Dialog({
+  title: '修改名字',
+  message: '这个名字会显示给同房间的人。',
+  input: { value: '张三', placeholder: '你的名字' },
+});
+const name = await dlg2.open();   // 确定 → '张三'，取消 → null</code></pre>
+
+<h3>构造选项</h3>
+<p><code>new Dialog(options)</code> 的选项 —— 也适用于 <code>confirm</code> /
+<code>alert</code> / <code>prompt</code>（后两者还有各自的额外选项，见下）。</p>
 <table>
 <tr><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
 <tr><td>title</td><td>string</td><td>''</td><td>标题（textContent，不解析 HTML）</td></tr>
@@ -242,23 +286,56 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null</code></
 <tr><td>danger</td><td>boolean</td><td>false</td><td>主按钮变红，默认焦点在「取消」</td></tr>
 <tr><td>hideCancel</td><td>boolean</td><td>false</td><td>隐藏取消按钮</td></tr>
 <tr><td>okValue</td><td>any</td><td>'ok'</td><td>确定时 resolve 的值</td></tr>
+<tr><td>input</td><td>boolean | Object</td><td>false</td><td>输入框。<code>true</code> 或
+<code>{type,value,placeholder,multiline}</code>。<b>有输入框时确定时 resolve 的是
+输入框的值</b>（不是 okValue）</td></tr>
 <tr><td>maskClass</td><td>string</td><td>'dlg-mask'</td><td>遮罩层 class</td></tr>
 <tr><td>onOk</td><td>Function</td><td>null</td><td>确定前的钩子，返回 false 则不关闭</td></tr>
 <tr><td>onCancel</td><td>Function</td><td>null</td><td>取消时的钩子</td></tr>
 </table>
 
+<h3>各方法的额外选项</h3>
+<table>
+<tr><th>方法</th><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
+<tr><td rowspan="5"><code>prompt</code></td>
+    <td>value</td><td>string</td><td>''</td><td>输入框初始值（提交前就在里面）</td></tr>
+<tr><td>placeholder</td><td>string</td><td>''</td><td>占位提示</td></tr>
+<tr><td>inputType</td><td>string</td><td>'text'</td><td>input 的 type（text / password / email …）</td></tr>
+<tr><td>multiline</td><td>boolean</td><td>false</td><td>多行（textarea）—— Ctrl/Cmd+Enter 提交</td></tr>
+<tr><td>validate</td><td>Function</td><td>null</td><td>(value, dlg) =&gt; string | undefined
+—— 返回错误文案则<b>不关闭</b>并显示提示</td></tr>
+<tr><td rowspan="2"><code>tips</code></td>
+    <td>timeout</td><td>number</td><td>5000</td><td>自动消失的毫秒数。<b>0 = 不自动消失</b>；
+    负数 / 非法值按 0 处理</td></tr>
+<tr><td>type</td><td>string</td><td>'info'</td><td>info / success / error —— 决定边框色</td></tr>
+<tr><td><code>loading</code></td>
+    <td>mask</td><td>boolean</td><td>true</td><td>是否挡住下面的交互。false = 只显示转圈</td></tr>
+<tr><td rowspan="4"><code>progress</code></td>
+    <td>type</td><td>string</td><td>'bar'</td><td>bar（横向条）/ circle（环形，中心显示百分比）/
+    dots（三点跳动，<b>不确定进度</b>）/ steps（分段）</td></tr>
+<tr><td>steps</td><td>number</td><td>5</td><td>steps 样式的段数（1~20）</td></tr>
+<tr><td>value</td><td>number</td><td>0</td><td>初始进度（0~100）</td></tr>
+<tr><td>mask</td><td>boolean</td><td>true</td><td>是否挡住下面的交互</td></tr>
+</table>
+
 <h3>行为</h3>
 <table>
 <tr><th>操作</th><th>结果</th></tr>
-<tr><td>点「确定」</td><td>resolve(okValue)</td></tr>
+<tr><td>点「确定」</td><td>resolve(okValue)（有输入框时 = 输入框的值）</td></tr>
 <tr><td>点「取消」/ Esc / 点遮罩空白</td><td>resolve(null)</td></tr>
-<tr><td>回车</td><td>等同确定（焦点在 button/textarea 上时除外，避免触发两次）</td></tr>
+<tr><td>回车</td><td>等同确定（焦点在 button 上时除外，避免触发两次）</td></tr>
+<tr><td>回车（焦点在输入框里）</td><td>单行 = 提交输入框；多行 = 换行（<b>Ctrl/Cmd+Enter</b> 才提交）</td></tr>
 <tr><td>Tab / Shift+Tab</td><td>焦点锁在弹窗内循环</td></tr>
+<tr><td>点 tips 提示本身</td><td>提前关掉那条提示</td></tr>
+<tr><td>Esc / 点遮罩（loading / progress 期间）</td><td><b>关不掉</b> —— 只能用 close()</td></tr>
 </table>
 <ul>
 <li><b>危险操作默认焦点在「取消」上</b> —— 打开时回车不会误触发危险动作。</li>
+<li><b>有输入框时焦点落在输入框上</b> —— 不用先按 Tab；有初始值时<b>全选</b>，直接打字就覆盖。</li>
 <li>关闭后焦点回到打开前的位置。</li>
 <li>可以叠层 —— 只有最上面那个响应 Esc 和遮罩点击。</li>
+<li><b>loading / progress 同时只允许一个</b> —— 后开的换掉先开的（不叠加）。</li>
+<li><b>close() 幂等</b> —— 调多次只关一次，<code>finally</code> 里放心调。</li>
 <li>样式自己注入 <code>&lt;style id="dlg-component-style"&gt;</code>，宿主页面只需定义
 <code>--bg-2</code> <code>--ink</code> <code>--rule</code> <code>--lime</code> 等变量即可跟随主题。</li>
 </ul>
@@ -268,11 +345,29 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null</code></
 .dlg           弹窗本体
 .dlg-title     标题
 .dlg-msg       正文
+.dlg-input     输入框（prompt 用）
+.dlg-err       校验错误提示
 .dlg-actions   按钮行
 .dlg-btn       按钮
 .dlg-btn.primary  主按钮
 .dlg-btn.danger   危险按钮
-.dlg-narrow    窄版（280px）</code></pre>
+.dlg-narrow    窄版（280px）
+
+/* 轻提示（tips）*/
+.dlg-tips      提示容器（底部居中，多条竖着叠）
+.dlg-tip       单条提示
+.dlg-tip.success / .dlg-tip.error  绿 / 红边框
+
+/* 遮罩（loading / progress 共用）*/
+.dlg-overlay-mask  遮罩层
+.dlg-loading   加载框（转圈 + 文字）
+.dlg-spinner   转圈
+.dlg-progress  进度框
+.dlg-progress-bar / -bar-fill    横向条 / 填充
+.dlg-progress-circle             环形（SVG）
+.dlg-progress-dots / -dot        三点跳动 / 单个点
+.dlg-progress-steps / -step      分段步骤条 / 单段
+.dlg-progress-msg / -pct         标题 / 百分比</code></pre>
 
 <p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
 
