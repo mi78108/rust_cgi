@@ -122,6 +122,7 @@ li{margin:3px 0}
      <code>Plugin.load('utils')</code> 会先加载全部 deps。</p>
   <div class="demo">
     <button data-demo="utils-datetime" class="primary">datetime</button>
+    <button data-demo="utils-copy">copy</button>
   </div>
   <a class="more" href="/pub/js/utils/">详细说明与 API →</a>
 </div>
@@ -210,6 +211,16 @@ const DEMOS = {
          '\nformatDateTime(now) -> ' + dt.formatDateTime(now) +
          '\nformatRelative(now - 3min) -> ' + dt.formatRelative(now.getTime() - 3 * 60000) +
          '\ndiffDays(11-01, 11-11) -> ' + dt.diffDays('2026-11-01', '2026-11-11'));
+  },
+  'utils-copy': async () => {
+    /* copy 也是 utils 的子模块 —— deps 里列了，load('utils') 会带上。 */
+    const U = await Plugin.load('utils');
+    const cp = U.copy;
+    const r = await cp.copyText('hello from utils.copy');
+    show('load("utils") -> Utils.copy 存在: ' + (!!cp) +
+         '\n方法: ' + Object.keys(cp).join(', ') +
+         '\ncopyText(...) -> ' + JSON.stringify(r) +
+         '\nwindow.Copy 是同一个对象: ' + (window.Copy === cp));
   },
 };
 

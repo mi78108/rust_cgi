@@ -1,0 +1,87 @@
+{
+  "name": "copy",
+  "version": "0.1.0",
+  "description": "复制到剪贴板 —— 给「快速使用」代码块加复制按钮。零依赖纯前端",
+  "entry": "copy.js",
+  "global": "Copy",
+  "type": "script",
+  "dependencies": [],
+  "url": "copy.js",
+  "readme": "README.md",
+  "tags": [
+    "utils",
+    "copy",
+    "clipboard"
+  ],
+  "api": {
+    "statics": [
+      {
+        "name": "Copy.bind",
+        "signature": "Copy.bind(root?)",
+        "returns": "number",
+        "desc": "给 root（默认整个文档）下所有 button[data-copy] 绑定复制行为，返回绑定的按钮数。★ 幂等 —— 同一个按钮不会绑两次"
+      },
+      {
+        "name": "Copy.copyText",
+        "signature": "Copy.copyText(text)",
+        "returns": "Promise<{ok: boolean, reason?: string}>",
+        "desc": "复制文本到剪贴板。★ 永远返回 Promise —— 安全上下文走 clipboard API，非安全上下文走 execCommand 兜底，两条路统一成 Promise"
+      },
+      {
+        "name": "Copy.selectCode",
+        "signature": "Copy.selectCode(codeElement)",
+        "returns": "boolean",
+        "desc": "把代码块的内容选中 —— 剪贴板不可用时用户按 Ctrl+C 就能复制"
+      }
+    ]
+  },
+  "behavior": {
+    "auto_bind": "脚本加载后自动给页面上所有 button[data-copy] 绑上复制行为 —— 复制的是同卡片 .quick pre code 的文本（渲染后的代码，不含 HTML 转义）",
+    "secure_context": "navigator.clipboard 需要 https 或 localhost —— 通过 IP 访问时不可用，自动退回 execCommand('copy')",
+    "fallback": "剪贴板不可用时把代码选中，按钮文案变成「已选中，按 Ctrl+C」，具体原因挂在按钮 title 上",
+    "always_promise": "copyText() 永远返回 Promise —— 安全上下文走 clipboard API（本来就是 Promise），非安全上下文走兜底（同步返回）",
+    "idempotent": "bind() 幂等 —— 同一个按钮不会绑两次；close() 类的重复调用同理安全",
+    "reset": "按钮文案 2.6 秒后自动恢复"
+  },
+  "css": {
+    "injected": true,
+    "style_id": "js-copy-style",
+    "classes": [
+      "quick",
+      "quick-head",
+      "quick-head .qt",
+      "quick-head .qs",
+      "quick pre",
+      "quick pre code",
+      "quick button.copy",
+      "quick button.copy.ok",
+      "quick button.copy.err"
+    ],
+    "notes": [
+      "quick —— 「快速使用」代码块卡片",
+      "quick-head —— 卡片头部（标题 + 右侧复制按钮）",
+      "quick button.copy —— 复制按钮；.ok = 成功（绿）/ .err = 失败（红）"
+    ]
+  },
+  "examples": [
+    {
+      "title": "自动绑定",
+      "code": "<!-- 页面里放一个 .quick 卡片 + button[data-copy] 就行 ——\n<script src=\"/pub/js/utils/copy/copy.js\"></script>\n<div class=\"quick\">\n  <div class=\"quick-head\">\n    <span class=\"qt\">快速使用</span>\n    <button class=\"copy qs\" data-copy>复制</button>\n  </div>\n  <pre><code>&lt;script src=\"...\"&gt;&lt;/script&gt;</code></pre>\n</div>"
+    },
+    {
+      "title": "手动复制一段文本",
+      "code": "const r = await Utils.copy.copyText('要复制的文本');\n// r = { ok: true }  或  { ok: false, reason: '...' }"
+    },
+    {
+      "title": "手动绑定",
+      "code": "Utils.copy.bind();            // 整个文档\nUtils.copy.bind(someRoot);    // 只绑某个容器"
+    }
+  ],
+  "notes": [
+    "★ 本模块只挂 window.Utils.copy，不自己建 window.Utils 容器 —— 容器由 utils.js 建立，两个文件谁先加载都行",
+    "★ 加载后同时挂在 window.Copy 和 window.Utils.copy 上",
+    "★ 样式自己注入（跟 dialog.js / table.js 一样），页面不用额外写 CSS",
+    "★ 复制的是渲染后的代码文本，不含 HTML 转义",
+    "★ 剪贴板不可用时（http + IP 访问最常见）自动退回 execCommand，并选中代码让用户按 Ctrl+C"
+  ]
+}

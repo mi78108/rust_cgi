@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>copy · 复制到剪贴板</title>
+
+<!-- ★ 绝对路径 —— 页面经 pub 软连接提供，相对路径会少一级 -->
+<style>
+:root{
+  --bg:#f4f1de;--bg-2:#ecead7;--bg-3:#e3e0c9;
+  --ink:#0f0f12;--muted:#5a5a64;--rule:#1a1a1f;
+  --lime:#c4f542;--red:#ff4d4d;--cyan:#22c7d6;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:28px 20px 60px;
+}
+.wrap{max-width:900px;margin:0 auto}
+header{border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:26px}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--muted);font-size:13px}
+h2{font-size:16px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+h3{font-size:14px;margin:18px 0 6px}
+code,pre{font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace}
+code{background:var(--bg-3);padding:1px 5px;font-size:12.5px}
+pre{background:var(--bg-2);border:1px solid var(--rule);padding:10px 12px;overflow:auto}
+pre code{background:none;padding:0;font-size:12px;line-height:1.55}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--rule);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--bg-2);font-weight:600}
+ul,ol{padding-left:20px}
+li{margin:3px 0}
+a{color:var(--cyan)}
+.demo{border:1px solid var(--rule);background:var(--bg-2);padding:14px 16px;margin:12px 0}
+.demo h3{margin:0 0 4px;font-size:14px}
+.demo p{margin:4px 0 10px;font-size:13px;color:var(--muted)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{
+  background:var(--bg-3);color:var(--ink);border:1px solid var(--rule);
+  padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;
+}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}
+#out{
+  margin-top:12px;background:var(--bg);border:1px solid var(--rule);
+  padding:10px 12px;font-family:"JetBrains Mono","IBM Plex Mono",Menlo,ui-monospace,monospace;
+  font-size:12px;min-height:2.6em;white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>copy</h1>
+  <span class="meta">
+    <code>utils</code> 的子模块 · 零依赖 · 3 个方法 ·
+    给「快速使用」代码块加复制按钮
+  </span>
+</header>
+
+<h2>快速使用</h2>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">引入</span>
+    <span>引入即用，全局变量 <code>Copy</code> / <code>Utils.copy</code></span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+  <pre><code>&lt;script src="/pub/js/utils/copy/copy.js"&gt;&lt;/script&gt;</code></pre>
+</div>
+
+<div class="quick">
+  <div class="quick-head">
+    <span class="qt">页面里怎么放</span>
+    <span>卡片 + <code>button[data-copy]</code>，脚本自动绑</span>
+    <button class="copy qs" data-copy>复制</button>
+  </div>
+  <pre><code>&lt;div class="quick"&gt;
+  &lt;div class="quick-head"&gt;
+    &lt;span class="qt"&gt;快速使用&lt;/span&gt;
+    &lt;button class="copy qs" data-copy&gt;复制&lt;/button&gt;
+  &lt;/div&gt;
+  &lt;pre&gt;&lt;code&gt;...代码...&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;</code></pre>
+</div>
+
+<p><small>★ 上面两个卡片上的「复制」按钮就是本模块的效果 ——
+点一下试试（浏览器可能弹权限提示）。</small></p>
+
+<h2>演示</h2>
+
+<div class="demo">
+  <h3>copyText —— 复制一段文本</h3>
+  <p><code>Copy.copyText(text)</code> → <code>Promise&lt;{ok, reason?}&gt;</code>。<br>
+     ★ 永远返回 Promise —— 非安全上下文走 <code>execCommand</code> 兜底（同步返回），
+     两条路统一成 Promise。</p>
+  <div class="btns">
+    <button id="d-copy" class="primary">copyText('你好')</button>
+    <button id="d-copy-long">copyText(一段长文本)</button>
+    <button id="d-copy-empty">copyText('')</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>bind —— 手动绑定</h3>
+  <p><code>Copy.bind(root?)</code> → 绑定的按钮数。<br>
+     一般不用手动调 —— 脚本加载后自动绑整个文档。★ <b>幂等</b>，同一个按钮不会绑两次。</p>
+  <div class="btns">
+    <button id="d-bind">bind() 再绑一次</button>
+    <button id="d-bind-root">bind(某个容器)</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>selectCode —— 选中代码块</h3>
+  <p><code>Copy.selectCode(codeEl)</code> → boolean。<br>
+     剪贴板不可用时的兜底 —— 把代码选中，用户按 Ctrl+C 就能复制。</p>
+  <div class="btns">
+    <button id="d-select" class="primary">选中上面的代码块</button>
+  </div>
+</div>
+
+<div id="out">（点上面的按钮，结果显示在这里）</div>
+
+<h2>API</h2>
+
+<table>
+  <tr><th>方法</th><th>返回</th><th>说明</th></tr>
+  <tr><td><code>bind(root?)</code></td><td>number</td><td>给 <code>root</code>（默认整个文档）下所有
+      <code>button[data-copy]</code> 绑复制行为，返回绑定的按钮数。<b>幂等</b></td></tr>
+  <tr><td><code>copyText(text)</code></td><td>Promise&lt;{ok, reason?}&gt;</td><td>复制文本到剪贴板。
+      失败时 <code>ok=false</code>，<code>reason</code> 是具体原因</td></tr>
+  <tr><td><code>selectCode(codeEl)</code></td><td>boolean</td><td>把代码块内容选中 ——
+      剪贴板不可用时用户按 Ctrl+C 就能复制</td></tr>
+</table>
+
+<h2>行为</h2>
+<ul>
+<li>脚本加载后<b>自动</b>给页面上所有 <code>button[data-copy]</code> 绑行为。</li>
+<li>复制的是<b>渲染后的代码文本</b>（<code>code.textContent</code>），不含 HTML 转义 ——
+    <code>&lt;script&gt;</code> 写成这样也没关系。</li>
+<li><code>https</code> 或 <code>localhost</code> → 走 <code>navigator.clipboard</code>。</li>
+<li><code>http</code> + IP 访问 → clipboard API 不可用，<b>自动退回</b>
+    <code>execCommand('copy')</code>。</li>
+<li>两条路都失败 → 把代码<b>选中</b>，按钮文案变「已选中，按 Ctrl+C」，
+    具体原因挂在按钮 <code>title</code> 上。</li>
+<li>按钮文案 2.6 秒后自动恢复。</li>
+</ul>
+
+<h2>样式 class</h2>
+<pre><code>.quick                    「快速使用」代码块卡片
+.quick-head               卡片头部（标题 + 右侧复制按钮）
+.quick-head .qt           头部标题
+.quick-head .qs           头部右侧（复制按钮靠它推到右边）
+.quick pre / pre code     代码块
+.quick button.copy        复制按钮
+.quick button.copy.ok     复制成功（绿）
+.quick button.copy.err    复制失败（红）</code></pre>
+<p><small>样式由模块自己注入 <code>&lt;style id="js-copy-style"&gt;</code>，
+页面不用额外写 CSS。</small></p>
+
+<p><a href="/pub/js/utils/">← 回到 utils 总览</a></p>
+<p><a href="/pub/js/index.html">← 回到 js 工具目录</a></p>
+
+</div>
+
+<script src="/pub/js/utils/copy/copy.js"></script>
+<script>
+const out = document.getElementById('out');
+const show = (msg) => { out.textContent = msg; };
+
+const CP = window.Utils.copy;
+
+document.getElementById('d-copy').addEventListener('click', async () => {
+  const r = await CP.copyText('你好');
+  show('copyText("你好") → ' + JSON.stringify(r));
+});
+
+document.getElementById('d-copy-long').addEventListener('click', async () => {
+  const text = Array.from({length: 8}, (_, i) => '第 ' + (i + 1) + ' 行').join('\n');
+  const r = await CP.copyText(text);
+  show('copyText(8 行文本) → ' + JSON.stringify(r) +
+       '\n\n★ 成功时剪贴板里就是这段文本');
+});
+
+document.getElementById('d-copy-empty').addEventListener('click', async () => {
+  const r = await CP.copyText('');
+  show('copyText("") → ' + JSON.stringify(r) +
+       '\n\n★ 空串也走同一条路，返回结构一样');
+});
+
+document.getElementById('d-bind').addEventListener('click', () => {
+  const n = CP.bind();
+  show('bind() → 绑定了 ' + n + ' 个按钮' +
+       '\n\n★ 幂等 —— 再调一次不会重复绑');
+});
+
+document.getElementById('d-bind-root').addEventListener('click', () => {
+  const root = document.querySelector('.demo');
+  const n = CP.bind(root);
+  show('bind(第一个 .demo) → 绑定了 ' + n + ' 个按钮' +
+       '\n\n★ 只在这个容器里找 button[data-copy]');
+});
+
+document.getElementById('d-select').addEventListener('click', () => {
+  const code = document.querySelector('.quick pre code');
+  const ok = CP.selectCode(code);
+  show('selectCode(code) → ' + ok +
+       '\n\n★ 代码已被选中 —— 按 Ctrl+C 就能复制');
+});
+</script>
+</body>
+</html>

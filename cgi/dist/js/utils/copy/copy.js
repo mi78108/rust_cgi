@@ -1,15 +1,14 @@
 /**
- * _copy.js — 「快速使用」代码块的复制按钮（共用工具）
+ * copy.js — 复制到剪贴板（utils 子模块）
  *
- * 不是插件 —— 是给各工具详情页用的共享小工具。
- * 放在 js/ 根下（不建目录），下划线前缀表示「共享」而不是工具。
+ * 零依赖，纯前端。给「快速使用」代码块加一个复制按钮。
  *
  * 用法：
- *   <script src="/pub/js/_copy.js"></script>
+ *   <script src="/pub/js/utils/copy/copy.js"></script>
  *   <div class="quick">
  *     <div class="quick-head">
  *       <span class="qt">快速使用</span>
- *       <span>引入即用，全局变量 <code>Dialog</code></span>
+ *       <span>引入即用</span>
  *       <button class="copy qs" data-copy>复制</button>
  *     </div>
  *     <pre><code>&lt;script src="..."&gt;&lt;/script&gt;</code></pre>
@@ -18,10 +17,16 @@
  * 脚本加载后会自动给页面上所有 `button[data-copy]` 绑上复制行为 ——
  * 复制的是同卡片 `.quick pre code` 的文本（渲染后的代码，不含 HTML 转义）。
  *
+ * ★ 本文件只挂 `window.Utils.copy`，不自己建 `window.Utils` 容器 ——
+ *   容器由 utils.js 建立。这样两个文件谁先加载都行。
+ *
  * ★ 样式自己注入（跟 dialog.js / table.js 一样），页面不用额外写 CSS。
  */
 (function () {
   'use strict';
+
+  /* 容器 —— utils.js 可能还没加载，这里先兜住 */
+  var U = window.Utils = window.Utils || {};
 
   var STYLE_ID = 'js-copy-style';
 
@@ -185,9 +190,21 @@
     return buttons.length;
   }
 
-  /* 暴露到全局 —— 页面需要时可以直接调 Copy.bind() */
+  var copy = {
+    bind: bind,
+    copyText: copyText,
+    selectCode: selectCode,
+  };
+
+  U.copy = copy;
+
+  /* 暴露到全局 —— 跟 dialog.js / table.js / plugin.js 一致 */
   if (typeof window !== 'undefined') {
-    window.Copy = { bind: bind, copyText: copyText, selectCode: selectCode };
+    window.Copy = copy;
+  }
+  /* CommonJS 环境也挂一下 */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = copy;
   }
 
   /* 自动绑定 —— 脚本在 body 末尾就立即生效，在 head 里就等 DOM 就绪 */

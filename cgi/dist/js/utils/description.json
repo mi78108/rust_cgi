@@ -6,7 +6,8 @@
   "global": "Utils",
   "type": "script",
   "dependencies": [
-    "utils.datetime"
+    "utils.datetime",
+    "utils.copy"
   ],
   "url": "utils.js",
   "readme": "README.md",
@@ -14,7 +15,9 @@
     "utils",
     "namespace",
     "bundle",
-    "datetime"
+    "datetime",
+    "copy",
+    "clipboard"
   ],
   "structure": {
     "container": "utils.js 只建 window.Utils 容器 + 打版本号，不实现具体功能",
@@ -22,7 +25,8 @@
     "deps_manifest": "description.json 的 dependencies —— Plugin.load('utils') 会先加载这些",
     "load_order": "deps 先加载 → 再加载 utils.js → 所以 window.Utils 上已挂着全部子模块",
     "single_submodule": "只想加载一个子模块：Plugin.load('utils.<name>')",
-    "no_plugin_loader": "不用插件加载器也行：<script src=\"/pub/js/utils/<name>/<name>.js\"> —— 子模块自己会建容器"
+    "no_plugin_loader": "不用插件加载器也行：<script src=\"/pub/js/utils/<name>/<name>.js\"> —— 子模块自己会建容器",
+    "copy_note": "copy 子模块挂 window.Utils.copy（全局 window.Copy）—— ★ 它会**自动绑定**页面上所有 button[data-copy]，所以不用手动调 bind()"
   },
   "api": {
     "statics": [
@@ -41,6 +45,14 @@
         "global": "Datetime",
         "desc": "日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳",
         "docs": "utils/datetime/README.md"
+      },
+      "copy": {
+        "plugin_name": "utils.copy",
+        "dir": "utils/copy/",
+        "entry": "copy/copy.js",
+        "global": "Copy",
+        "desc": "复制到剪贴板 —— 给「快速使用」代码块加复制按钮",
+        "docs": "utils/copy/README.md"
       }
     }
   },
@@ -56,12 +68,17 @@
     {
       "title": "不依赖插件加载器",
       "code": "<script src=\"/pub/js/utils/datetime/datetime.js\"></script>\nUtils.datetime.formatDate(new Date());"
+    },
+    {
+      "title": "复制按钮",
+      "code": "<script src=\"/pub/js/utils/copy/copy.js\"></script>\n<div class=\"quick\">\n  <div class=\"quick-head\">\n    <span class=\"qt\">快速使用</span>\n    <button class=\"copy qs\" data-copy>复制</button>\n  </div>\n  <pre><code>...代码...</code></pre>\n</div>\n<!-- 脚本加载后自动绑，不用手动调 bind() -->"
     }
   ],
   "notes": [
     "utils.js 本身不实现功能 —— 只是 window.Utils 容器",
     "子模块清单在 dependencies 字段，Plugin.load('utils') 自动先加载它们",
     "子模块的具体 API 看各自的 utils/<name>/README.md",
-    "dependencies 支持点号分段（utils.datetime）"
+    "dependencies 支持点号分段（utils.datetime）",
+    "copy 子模块加载后会自动给页面上所有 button[data-copy] 绑上复制行为"
   ]
 }

@@ -94,6 +94,11 @@ Utils.datetime.formatDate(new Date());</code></pre>
     <td>日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳</td>
     <td><a href="/pub/js/utils/datetime/">datetime →</a></td>
   </tr>
+  <tr>
+    <td><code>utils.copy</code></td>
+    <td>复制到剪贴板 —— 给「快速使用」代码块加复制按钮</td>
+    <td><a href="/pub/js/utils/copy/">copy →</a></td>
+  </tr>
 </table>
 
 <p>
@@ -113,6 +118,7 @@ Utils.datetime.formatDate(new Date());</code></pre>
   <div class="btns">
     <button id="u-load-all" class="primary">Plugin.load('utils')</button>
     <button id="u-load-one">Plugin.load('utils.datetime')</button>
+    <button id="u-load-copy">Plugin.load('utils.copy')</button>
     <button id="u-sub">查看已加载的子模块</button>
   </div>
 </div>
@@ -137,7 +143,7 @@ const out = document.getElementById('out');
 const show = (msg) => { out.textContent = msg; };
 
 /* 子模块清单 —— 跟 utils/description.json 的 dependencies 对齐 */
-const DEPS = ['utils.datetime'];
+const DEPS = ['utils.datetime', 'utils.copy'];
 
 document.getElementById('u-load-all').addEventListener('click', async () => {
   try {
@@ -160,6 +166,18 @@ document.getElementById('u-load-one').addEventListener('click', async () => {
     show('Plugin.load("utils.datetime") OK\n' +
          '  方法数 = ' + Object.keys(dt).length + '\n' +
          '  formatDate(now) = ' + dt.formatDate(new Date()) + '\n' +
+         '  （不用先加载 utils）');
+  } catch (e) {
+    show('失败: ' + e.message);
+  }
+});
+
+document.getElementById('u-load-copy').addEventListener('click', async () => {
+  try {
+    const cp = await Plugin.load('utils.copy');
+    show('Plugin.load("utils.copy") OK\n' +
+         '  方法 = ' + Object.keys(cp).join(', ') + '\n' +
+         '  自动绑定的按钮数 = ' + cp.bind() + '\n' +
          '  （不用先加载 utils）');
   } catch (e) {
     show('失败: ' + e.message);

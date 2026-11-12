@@ -11,8 +11,13 @@ utils/
 ├── description.json      # deps 清单（dependencies 字段）
 ├── index.html            # 总览页（不列子模块 API）
 ├── README.md
-└── datetime/             # 子模块 —— 独立插件目录
-    ├── datetime.js
+├── datetime/             # 子模块 —— 独立插件目录
+│   ├── datetime.js
+│   ├── description.json
+│   ├── index.html        # 子模块自己的详细页 + demo
+│   └── README.md
+└── copy/                 # 子模块 —— 独立插件目录
+    ├── copy.js
     ├── description.json
     ├── index.html        # 子模块自己的详细页 + demo
     └── README.md
@@ -38,6 +43,7 @@ utils/
 
 ```js
 const dt = await Plugin.load('utils.datetime');
+const cp = await Plugin.load('utils.copy');
 ```
 
 不用插件加载器也行 —— 子模块自己会建容器：
@@ -62,6 +68,7 @@ const dt = await Plugin.load('utils.datetime');
 | 插件名 | 说明 | 文档 |
 |---|---|---|
 | `utils.datetime` | 日期时间 —— 格式化 / 解析 / 取值 / 差值 / 运算 / 时间戳 | [`datetime/README.md`](datetime/README.md) · [演示页](datetime/index.html) |
+| `utils.copy` | 复制到剪贴板 —— 给「快速使用」代码块加复制按钮 | [`copy/README.md`](copy/README.md) · [演示页](copy/index.html) |
 
 ★ **子模块的具体 API 看各自的页面** —— 本页只做总览。
 
@@ -85,6 +92,7 @@ const dt = await Plugin.load('utils.datetime');
 | deps 用点号分段 | `utils.datetime` → `utils/datetime/` |
 | 循环依赖 | 抛「循环依赖」错误，不会死锁 |
 | 子模块单独加载 | `Plugin.load('utils.datetime')` 不用先加载 utils |
+| `copy` 子模块 | 加载后**自动绑定**页面上所有 `button[data-copy]` —— 不用手动调 `bind()` |
 
 ## 参见
 
