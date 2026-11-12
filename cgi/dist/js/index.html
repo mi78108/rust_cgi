@@ -168,8 +168,11 @@ const DEMOS = {
   custom: async () => {
     const el = document.createElement('div');
     el.innerHTML = '<b>自定义 content</b><br>这里可以放任意 DOM。';
-    const dlg = new Dialog({ title: '自定义', content: el, okText: '知道了' });
-    const r = await dlg.open();
+    const r = await Dialog.create({
+      title: '自定义',
+      content: el,
+      buttons: [{ text: '知道了', value: 'ok', cls: 'primary' }],
+    });
     show('custom → ' + r);
   },
   'table-render': async () => {
@@ -178,8 +181,11 @@ const DEMOS = {
       [{ key: 'name', label: '名称' }, { key: 'size', label: '大小', align: 'right' }],
       { sortable: true }
     );
-    const dlg = new Dialog({ title: 'table 组件', content: el, okText: '关闭' });
-    await dlg.open();
+    await Dialog.create({
+      title: 'table 组件',
+      content: el,
+      buttons: [{ text: '关闭', value: 'ok', cls: 'primary' }],
+    });
     show('table → 渲染了 2 行');
   },
   'plugin-load': async () => {

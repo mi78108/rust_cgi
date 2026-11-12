@@ -196,18 +196,34 @@ p.close();</code></pre>
 </div>
 
 <div class="demo">
-  <h3>自定义按钮文案 / okValue</h3>
-  <p>确定时 resolve 的是 <code>okValue</code>（默认 <code>'ok'</code>）</p>
+  <h3>extra 额外内容</h3>
+  <p><code>extra</code> 插在正文和按钮之间</p>
   <div class="btns">
-    <button id="d-okvalue">okValue = 'yes'</button>
+    <button id="d-extra">带 extra</button>
   </div>
 </div>
 
 <div class="demo">
-  <h3>onOk 钩子否决</h3>
-  <p><code>onOk</code> 返回 <code>false</code> 则不关闭 —— 弹窗保持打开</p>
+  <h3>自定义返回值</h3>
+  <p>resolve 的是<b>按钮的 <code>value</code></b> —— 想返回什么就在 <code>buttons</code> 里写 <code>value</code></p>
   <div class="btns">
-    <button id="d-veto">onOk 返回 false</button>
+    <button id="d-okvalue">create 返回 'yes'</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>onSubmit 钩子否决</h3>
+  <p><code>onSubmit</code> 返回 <code>false</code> 则不关闭 —— 弹窗保持打开</p>
+  <div class="btns">
+    <button id="d-veto">onSubmit 返回 false</button>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>自定义 class</h3>
+  <p><code>maskClass</code> 追加到 <code>&lt;dialog&gt;</code> 上（支持空格分隔多个）</p>
+  <div class="btns">
+    <button id="d-maskclass">maskClass = 'a b'</button>
   </div>
 </div>
 
@@ -225,12 +241,15 @@ p.close();</code></pre>
 
 <h3>引入</h3>
 <pre><code>&lt;script src="/pub/js/dialog/dialog.js"&gt;&lt;/script&gt;</code></pre>
-<p>ES module 写法：</p>
-<pre><code>import { Dialog } from '/pub/js/dialog/dialog.js';</code></pre>
+<p>CommonJS：</p>
+<pre><code>const Dialog = require('/pub/js/dialog/dialog.js');</code></pre>
+<p><small>★ 本模块是 <b>classic script</b>，不是 ES module —— 没有 <code>export</code> 关键字，
+<code>import { Dialog } from '...'</code> 用不了。</small></p>
 
 <h3>快捷方法</h3>
 <table>
 <tr><th>方法</th><th>返回</th><th>说明</th></tr>
+<tr><td><code>Dialog.create(opts)</code></td><td>Promise&lt;string&gt;</td><td><b>核心 API</b> —— 弹一个自定义对话框，resolve 按钮的 value</td></tr>
 <tr><td><code>Dialog.confirm(msg, opts?)</code></td><td>Promise&lt;boolean&gt;</td><td>确认框</td></tr>
 <tr><td><code>Dialog.alert(msg, opts?)</code></td><td>Promise&lt;void&gt;</td><td>提示框（只有一个按钮）</td></tr>
 <tr><td><code>Dialog.prompt(msg, opts?)</code></td><td>Promise&lt;string\|null&gt;</td><td>输入框。<b>null = 用户取消</b></td></tr>
@@ -238,7 +257,7 @@ p.close();</code></pre>
 <tr><td><code>Dialog.loading(msg, opts?)</code></td><td>{ close() }</td><td>加载遮罩，挡住下面的交互</td></tr>
 <tr><td><code>Dialog.progress(msg, opts?)</code></td><td>{ set(), close() }</td><td>进度框，四种样式</td></tr>
 </table>
-<p>前三个返回 Promise（要等用户操作完），后三个返回句柄（立刻返回，自己关）。</p>
+<p>前四个返回 Promise（要等用户操作完），后三个返回句柄（立刻返回，自己关）。</p>
 <pre><code>// 确认框 / 提示框
 const yes = await Dialog.confirm('清空文档？', { danger: true });
 await Dialog.alert('已保存。');
@@ -266,50 +285,68 @@ p.set(45, '已传 4.5MB');    // 顺带换文案
 p.close();</code></pre>
 
 <h3>完整用法</h3>
-<pre><code>const dlg = new Dialog({
-  title: '修改名字',
-  message: '这个名字会显示给同房间的人。',
+<pre><code>// 确认框 → Promise&lt;boolean&gt;
+const yes = await Dialog.confirm('修改名字？', {
+  title: '请确认',
   okText: '确定',
   cancelText: '取消',
-  danger: false,
+  danger: false,      // true → 主按钮变红，且默认焦点在「取消」
 });
-const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 
-// 带输入框（自己 new 时用 input 选项）——
-// 确定时 resolve 的是**输入框的值**，不是 okValue
-const dlg2 = new Dialog({
+// 输入框 → Promise&lt;string|null&gt;   ★ null = 用户取消
+const name = await Dialog.prompt('请输入名字', {
+  value: '张三',       // 提交前就在输入框里
+  placeholder: '你的名字',
+});
+
+// 自定义形态 → Promise&lt;按钮的 value&gt;
+// ★ resolve 的是**按钮的 value**，想返回什么就在 buttons 里写 value
+const v = await Dialog.create({
   title: '修改名字',
-  message: '这个名字会显示给同房间的人。',
-  input: { value: '张三', placeholder: '你的名字' },
+  content: '这个名字会显示给同房间的人。',
+  buttons: [
+    { text: '确定', value: 'ok', cls: 'primary' },
+    { text: '取消', value: 'cancel' },
+  ],
 });
-const name = await dlg2.open();   // 确定 → '张三'，取消 → null</code></pre>
+if (v === 'ok') { ... }   // Esc 关闭 → ''</code></pre>
 
-<h3>构造选项</h3>
-<p><code>new Dialog(options)</code> 的选项 —— 也适用于 <code>confirm</code> /
-<code>alert</code> / <code>prompt</code>（后两者还有各自的额外选项，见下）。</p>
+<h3>Dialog.create 的选项</h3>
+<p><code>Dialog.create(options)</code> 的选项 —— <code>confirm</code> /
+<code>alert</code> / <code>prompt</code> 也接受其中的通用项（各有额外选项，见下）。</p>
 <table>
 <tr><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
 <tr><td>title</td><td>string</td><td>''</td><td>标题（textContent，不解析 HTML）</td></tr>
 <tr><td>message</td><td>string</td><td>''</td><td>正文（textContent）</td></tr>
 <tr><td>content</td><td>Node | string</td><td>null</td><td>自定义正文，优先于 message；字符串按 HTML 解析</td></tr>
-<tr><td>okText</td><td>string</td><td>'确定'</td><td>主按钮文字</td></tr>
-<tr><td>cancelText</td><td>string</td><td>'取消'</td><td>取消按钮文字</td></tr>
-<tr><td>danger</td><td>boolean</td><td>false</td><td>主按钮变红，默认焦点在「取消」</td></tr>
-<tr><td>hideCancel</td><td>boolean</td><td>false</td><td>隐藏取消按钮</td></tr>
-<tr><td>okValue</td><td>any</td><td>'ok'</td><td>确定时 resolve 的值</td></tr>
+<tr><td>extra</td><td>Node</td><td>null</td><td>额外内容，插在正文和按钮之间（勾选框、自定义控件…）</td></tr>
+<tr><td>buttons</td><td>Array</td><td>[]</td><td>按钮数组 <code>[{ text, value, cls, autofocus }]</code>。<b>DOM 顺序决定回车触发谁</b></td></tr>
 <tr><td>input</td><td>boolean | Object</td><td>false</td><td>输入框。<code>true</code> 或
-<code>{type,value,placeholder,multiline}</code>。<b>有输入框时确定时 resolve 的是
-输入框的值</b>（不是 okValue）</td></tr>
-<tr><td>maskClass</td><td>string</td><td>''</td><td>追加到 <code>&lt;dialog&gt;</code> 元素上的 class。遮罩由原生 <code>::backdrop</code> 提供，<b>没有独立的遮罩层</b></td></tr>
-<tr><td>onOk</td><td>Function</td><td>null</td><td>确定前的钩子，返回 false 则不关闭</td></tr>
-<tr><td>onCancel</td><td>Function</td><td>null</td><td>取消时的钩子</td></tr>
+<code>{type,value,placeholder,multiline}</code>。<b>有输入框时 resolve 的仍是按钮的 value</b></td></tr>
+<tr><td>onSubmit</td><td>Function</td><td>null</td><td>提交前的钩子，返回 false 则不关闭</td></tr>
+<tr><td>maskClass</td><td>string</td><td>''</td><td>追加到 <code>&lt;dialog&gt;</code> 元素上的 class。<b>支持空格分隔多个</b>（"a b"）</td></tr>
+<tr><td>narrow</td><td>boolean</td><td>false</td><td>窄版（280px）。默认宽度 320px</td></tr>
+<tr><td>dismissOnMask</td><td>boolean</td><td>true</td><td>点遮罩空白处是否关闭</td></tr>
+<tr><td>submitIndex</td><td>number</td><td>0</td><td>回车提交时用第几个按钮（0 = 第一个）</td></tr>
 </table>
+<p><small>★ <code>confirm</code> / <code>alert</code> / <code>prompt</code> <b>默认窄版（280px）</b>，
+<code>Dialog.create</code> 默认 320px（用 <code>narrow: false</code> 可改回去）。</small></p>
 
 <h3>各方法的额外选项</h3>
 <table>
 <tr><th>方法</th><th>选项</th><th>类型</th><th>默认</th><th>说明</th></tr>
-<tr><td rowspan="5"><code>prompt</code></td>
-    <td>value</td><td>string</td><td>''</td><td>输入框初始值（提交前就在里面）</td></tr>
+<tr><td rowspan="4"><code>confirm</code></td>
+    <td>okText</td><td>string</td><td>'确定'</td><td>主按钮文字</td></tr>
+<tr><td>cancelText</td><td>string</td><td>'取消'</td><td>取消按钮文字</td></tr>
+<tr><td>danger</td><td>boolean</td><td>false</td><td>主按钮变红，<b>默认焦点在「取消」</b></td></tr>
+<tr><td>hideCancel</td><td>boolean</td><td>false</td><td>隐藏取消按钮（只剩一个按钮时用）</td></tr>
+<tr><td><code>alert</code></td>
+    <td>okText</td><td>string</td><td>'确定'</td><td>主按钮文字</td></tr>
+<tr><td rowspan="7"><code>prompt</code></td>
+    <td>okText</td><td>string</td><td>'确定'</td><td>主按钮文字</td></tr>
+<tr><td>cancelText</td><td>string</td><td>'取消'</td><td>取消按钮文字</td></tr>
+<tr><td>danger</td><td>boolean</td><td>false</td><td>同 confirm</td></tr>
+<tr><td>value</td><td>string</td><td>''</td><td>输入框初始值（提交前就在里面）</td></tr>
 <tr><td>placeholder</td><td>string</td><td>''</td><td>占位提示</td></tr>
 <tr><td>inputType</td><td>string</td><td>'text'</td><td>input 的 type（text / password / email …）</td></tr>
 <tr><td>multiline</td><td>boolean</td><td>false</td><td>多行（textarea）—— Ctrl/Cmd+Enter 提交</td></tr>
@@ -328,14 +365,17 @@ const name = await dlg2.open();   // 确定 → '张三'，取消 → null</code
 <tr><td>value</td><td>number</td><td>0</td><td>初始进度（0~100）</td></tr>
 <tr><td>mask</td><td>boolean</td><td>true</td><td>是否挡住下面的交互</td></tr>
 </table>
+<p><small>★ <code>prompt</code> 的 <code>onSubmit</code> 和 <code>validate</code> <b>都会跑</b> ——
+先跑你的 <code>onSubmit</code>，返回 <code>false</code> 就直接否决；否则再跑 <code>validate</code>。</small></p>
 
 <h3>行为</h3>
 <table>
 <tr><th>操作</th><th>结果</th></tr>
-<tr><td>点「确定」</td><td>resolve(okValue)（有输入框时 = 输入框的值）</td></tr>
-<tr><td>点「取消」/ Esc / 点遮罩空白</td><td>resolve(null)</td></tr>
-<tr><td>回车</td><td>等同确定 —— <b>浏览器触发第一个 submit 按钮</b>，所以 DOM 顺序是「确定、取消」；视觉顺序用 CSS <code>order</code> 翻到右边</td></tr>
-<tr><td>回车（焦点在输入框里）</td><td>单行 = 提交输入框；多行 = 换行（<b>Ctrl/Cmd+Enter</b> 才提交）</td></tr>
+<tr><td>点「确定」</td><td>resolve(按钮的 value) —— <code>Dialog.create</code>；<code>confirm</code> 恒为 true，<code>prompt</code> 是输入框的内容</td></tr>
+<tr><td>点「取消」</td><td>resolve(按钮的 value)</td></tr>
+<tr><td>Esc / 点遮罩空白</td><td>resolve('') —— <code>confirm</code> 是 false，<code>prompt</code> 是 null</td></tr>
+<tr><td>回车</td><td>触发 <code>submitIndex</code> 指定的按钮（默认第一个）。<b>焦点在按钮上时交还浏览器</b>，避免触发两次</td></tr>
+<tr><td>回车（焦点在输入框里）</td><td>单行 = 提交；多行 = 换行（<b>Ctrl/Cmd+Enter</b> 才提交）</td></tr>
 <tr><td>Tab / Shift+Tab</td><td>焦点锁在弹窗内循环（浏览器原生）</td></tr>
 <tr><td>关闭后焦点</td><td>自动回到打开前的元素（浏览器原生）</td></tr>
 <tr><td>模态期间底层页面</td><td>inert —— 不可点击、不可聚焦（浏览器原生）</td></tr>
@@ -346,6 +386,9 @@ const name = await dlg2.open();   // 确定 → '张三'，取消 → null</code
 <li><b>危险操作默认焦点在「取消」上</b> —— 打开时回车不会误触发危险动作。</li>
 <li><b>有输入框时焦点落在输入框上</b> —— 不用先按 Tab；有初始值时<b>全选</b>，直接打字就覆盖。</li>
 <li>关闭后焦点回到打开前的位置。</li>
+<li><b>点 dialog 的 padding / 滚动条不会误关</b> —— 用点击坐标是否落在 dialog 矩形外来判断，不是简单看 <code>e.target</code>。</li>
+<li><b>表单设了 novalidate</b> —— <code>input type="email"</code> 这类原生校验<b>不会</b>拦截提交，统一走 <code>onSubmit</code> / <code>validate</code> 钩子。</li>
+<li><b>无障碍</b> —— 标题挂唯一 id 并设 <code>aria-labelledby</code>；进度框 <code>role="progressbar"</code> 带 <code>aria-valuenow</code>；轻提示和加载框 <code>role="status"</code>。</li>
 <li>可以叠层 —— 只有最上面那个响应 Esc 和遮罩点击。<br><small>原生行为是「一次 Esc 把所有叠着的 dialog 全关掉」，这里自己拦了 <code>keydown</code> + <code>preventDefault</code>，只关最上面那个。（用 <code>keydown</code> 而不是 <code>cancel</code> 事件 —— 实测 <code>cancel</code> 不可取消，<code>cancelable=false</code>。）</small></li>
 <li><b>loading / progress 同时只允许一个</b> —— 后开的换掉先开的（不叠加）。</li>
 <li><b>close() 幂等</b> —— 调多次只关一次，<code>finally</code> 里放心调。</li>
@@ -365,7 +408,7 @@ dialog.dlg::backdrop   遮罩（原生提供，不用自己造遮罩 div）
 .dlg-btn       按钮
 .dlg-btn.primary  主按钮
 .dlg-btn.danger   危险按钮
-.dlg-narrow    窄版（280px）
+dialog.dlg.dlg-narrow  窄版（280px）
 
 /* 轻提示（tips）*/
 .dlg-tips      提示容器（底部居中，多条竖着叠）
@@ -536,32 +579,64 @@ document.getElementById('d-progress-steps').addEventListener('click', async () =
 document.getElementById('d-custom').addEventListener('click', async () => {
   const el = document.createElement('div');
   el.innerHTML = '<b>自定义 content</b><br>这里可以放任意 DOM。';
-  const dlg = new Dialog({ title: '自定义', content: el, okText: '知道了' });
-  const r = await dlg.open();
-  show('custom → ' + r);
+  const r = await Dialog.create({
+    title: '自定义',
+    content: el,
+    buttons: [{ text: '知道了', value: 'ok', cls: 'primary' }],
+  });
+  show('custom → ' + JSON.stringify(r));
+});
+
+document.getElementById('d-extra').addEventListener('click', async () => {
+  const label = document.createElement('label');
+  label.textContent = '☐ 勾选框也能放进来';
+  const r = await Dialog.create({
+    message: 'extra 插在正文和按钮之间',
+    extra: label,
+    buttons: [{ text: '好', value: 'ok', cls: 'primary' }],
+  });
+  show('extra → ' + JSON.stringify(r));
 });
 
 document.getElementById('d-okvalue').addEventListener('click', async () => {
-  const dlg = new Dialog({ title: '自定义返回值', message: '确定时 resolve 的是 okValue。', okValue: 'yes' });
-  const r = await dlg.open();
-  show('okValue → ' + JSON.stringify(r));
+  const r = await Dialog.create({
+    title: '自定义返回值',
+    message: 'resolve 的是按钮的 value。',
+    buttons: [
+      { text: '是', value: 'yes', cls: 'primary' },
+      { text: '否', value: 'no' },
+    ],
+  });
+  show('create 的 value → ' + JSON.stringify(r));
 });
 
 document.getElementById('d-veto').addEventListener('click', async () => {
-  const dlg = new Dialog({
+  Dialog.create({
     title: '会被否决',
-    message: 'onOk 返回 false，所以点确定不会关闭。',
-    onOk: () => false,
+    message: 'onSubmit 返回 false，所以点确定不会关闭。',
+    onSubmit: () => false,
+    buttons: [{ text: '确定', value: 'ok', cls: 'primary' }],
   });
-  dlg.open();
-  show('onOk 返回 false → 弹窗保持打开，再点一次「取消」或按 Esc 关掉');
+  show('onSubmit 返回 false → 弹窗保持打开，再点一次「取消」或按 Esc 关掉');
+});
+
+document.getElementById('d-maskclass').addEventListener('click', async () => {
+  const r = await Dialog.create({
+    message: 'maskClass 支持空格分隔多个 class',
+    maskClass: 'a b',
+    buttons: [{ text: '好', value: 'ok', cls: 'primary' }],
+  });
+  show('maskClass → ' + JSON.stringify(r));
 });
 
 document.getElementById('d-stack').addEventListener('click', async () => {
-  const bottom = new Dialog({ title: '底层', message: '我先开的。' });
-  bottom.open();
-  const top = new Dialog({ title: '顶层', message: '我是后开的 —— Esc 只关我。' });
-  top.open();
+  const mk = (title, msg) => Dialog.create({
+    title, message: msg,
+    buttons: [{ text: '好', value: 'ok', cls: 'primary' }],
+  });
+  mk('底层', '我先开的。');
+  await new Promise(r => setTimeout(r, 120));
+  mk('顶层', '我是后开的 —— Esc 只关我。');
   show('叠了两层，按 Esc 只关上面那层');
 });
 </script>

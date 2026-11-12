@@ -13,9 +13,22 @@
 | 背景 inert（底层不可点/不可聚焦） | 浏览器 |
 | top layer（永远最上层） | 浏览器 |
 
-★ **核心只有一个函数** —— `Dialog.create(options)`，返回 `Promise<返回值>`。
-所有弹层形态（确认框 / 提示框 / 输入框 / 轻提示 / 加载 / 进度）都是它的薄封装。
-想加新形态就调它，不用改内部。
+★ **核心只有一个内部函数** —— `openDialog(options)`，造一个 `<dialog>` 塞进内容，
+返回 `{ promise, input, errEl, close }`。
+
+对外暴露的是**一个命名空间 `Dialog`**，上面挂着 7 个静态方法：
+
+| 方法 | 返回 | 说明 |
+|---|---|---|
+| `Dialog.create(options)` | `Promise<string>` | ★ 核心 API —— 弹一个自定义对话框，resolve 按钮的 value |
+| `Dialog.confirm(msg, opts?)` | `Promise<boolean>` | 确认框 |
+| `Dialog.alert(msg, opts?)` | `Promise<void>` | 提示框（只有一个按钮） |
+| `Dialog.prompt(msg, opts?)` | `Promise<string\|null>` | 输入框，`null` = 用户取消 |
+| `Dialog.tips(msg, opts?)` | `{ close() }` | 轻提示（底部居中） |
+| `Dialog.loading(msg?, opts?)` | `{ close() }` | 加载遮罩 |
+| `Dialog.progress(msg?, opts?)` | `{ set(), close() }` | 进度框（四种样式） |
+
+所有形态都是 `Dialog.create` 的薄封装 —— 想加新形态就调它，不用改内部。
 
 ## 引入
 
@@ -25,20 +38,19 @@
 <script src="/pub/js/dialog/dialog.js"></script>
 ```
 
-ES module：
+CommonJS：
 
 ```js
-import { Dialog } from '/pub/js/dialog/dialog.js';
+const Dialog = require('/pub/js/dialog/dialog.js');
 ```
 
 > 路径里的 `/pub/` 是静态服务器入口（`cgi/pub`，`PUB_ROOT` 默认 `dist`）。
 > 直接写 `/dist/js/...` **不通** —— 没有对应的 CGI 脚本，连接会被直接关掉。
+>
+> ★ 本模块是 **classic script**，不是 ES module —— 没有 `export` 关键字。
+> `import { Dialog } from '...'` **用不了**（没有具名导出）。
 
-## 快捷方法
-
-三个返回 Promise 的静态方法 + 轻提示 + 加载遮罩 + 进度框。
-
-### 核心 API
+## 核心 API
 
 `Dialog.create(options)` 是所有形态的底座 —— 返回 `Promise<按钮的 value>`：
 
@@ -57,6 +69,9 @@ if (v === 'ok') { ... }   // Esc 关闭 → ''
 ★ 按钮的 **DOM 顺序决定回车触发谁** —— 浏览器触发的是第一个 submit 按钮。
 所以「确定」要排在前面（视觉顺序用 CSS `order` 翻到右边）。
 
+★ **返回值就是按钮的 `value`** —— 想自定义 resolve 什么，就在 `buttons` 里写 `value`。
+（没有独立的 `okValue` 选项。）
+
 ```js
 // 确认框 → Promise<boolean>
 const yes = await Dialog.confirm('清空文档？', { danger: true });
@@ -70,9 +85,52 @@ const name = await Dialog.prompt('请输入名字');
 if (name === null) return;   // 用户取消了（Esc / 点遮罩 / 取消按钮）
 ```
 
-### 输入框
+## `Dialog.create` 选项
 
-`Dialog.prompt` 带一个输入框，确定时 resolve **输入的内容**，取消时 resolve `null`。
+| 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `title` | string | `''` | 标题（`textContent`，不解析 HTML） |
+| `message` | string | `''` | 正文（`textContent`） |
+| `content` | Node \| string | `null` | 自定义正文，**优先于** `message`。字符串会被当 HTML 解析 —— 只放可信内容 |
+| `extra` | Node | `null` | 额外内容，插在正文和按钮之间（勾选框、自定义控件…） |
+| `buttons` | Array | `[]` | `[{ text, value, cls, autofocus }]` |
+| `input` | boolean \| Object | `false` | 输入框。`true` 或 `{type,value,placeholder,multiline}` |
+| `onSubmit` | Function | `null` | 提交前钩子 —— **返回 `false` 则不关闭** |
+| `maskClass` | string | `''` | 追加到 `<dialog>` 上的 class。**支持空格分隔的多个**（`"a b"`） |
+| `narrow` | boolean | `false` | 窄版（280px）。默认宽度 320px |
+| `dismissOnMask` | boolean | `true` | 点遮罩空白处是否关闭 |
+| `submitIndex` | number | `0` | 回车提交时用第几个按钮（0 = 第一个） |
+
+★ `input` 存在时，`Dialog.create` resolve 的**仍然是按钮的 value**。
+想要「resolve 输入框的内容」，用 `Dialog.prompt`。
+
+## 各方法的额外选项
+
+`confirm` / `alert` / `prompt` 除了上表的通用选项，还有各自的：
+
+| 方法 | 选项 | 类型 | 默认 | 说明 |
+|---|---|---|---|---|
+| `confirm` | `okText` | string | `'确定'` | 主按钮文字 |
+| | `cancelText` | string | `'取消'` | 取消按钮文字 |
+| | `danger` | boolean | `false` | 危险操作：主按钮变红，**默认焦点在「取消」上** |
+| | `hideCancel` | boolean | `false` | 隐藏取消按钮（只剩一个按钮时用） |
+| `alert` | `okText` | string | `'确定'` | 主按钮文字 |
+| `prompt` | `okText` | string | `'确定'` | 主按钮文字 |
+| | `cancelText` | string | `'取消'` | 取消按钮文字 |
+| | `danger` | boolean | `false` | 同 confirm |
+| | `value` | string | `''` | 输入框初始值 |
+| | `placeholder` | string | `''` | 占位提示 |
+| | `inputType` | string | `'text'` | input 的 `type`（text / password / email …） |
+| | `multiline` | boolean | `false` | 多行（textarea）—— Ctrl/Cmd+Enter 提交 |
+| | `validate` | Function | `null` | `(value, dialog) => string \| undefined` —— 返回错误文案则**不关闭**并显示提示，焦点回到输入框 |
+| | `onSubmit` | Function | `null` | 提交前钩子 —— 返回 `false` 则不关闭 |
+
+★ `confirm` / `alert` / `prompt` **默认窄版（280px）**，`Dialog.create` 默认 320px。
+（用 `narrow: false` 可以改回去。）
+★ `prompt` 的 `onSubmit` 和 `validate` **都会跑** —— 先跑你的 `onSubmit`，
+返回 `false` 就直接否决；否则再跑 `validate`。
+
+### 输入框
 
 ```js
 // 初始值 + 占位提示
@@ -94,16 +152,10 @@ const pw2 = await Dialog.prompt('密码（至少 6 位）', {
 const text = await Dialog.prompt('备注', { multiline: true });
 ```
 
-| 选项 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `value` | string | `''` | 输入框初始值 |
-| `placeholder` | string | `''` | 占位提示 |
-| `inputType` | string | `'text'` | input 的 `type`（text / password / email …） |
-| `multiline` | boolean | `false` | 多行（textarea）—— Ctrl/Cmd+Enter 提交 |
-| `validate` | Function | `null` | `(value, dialog) => string \| undefined` —— 返回错误文案则**不关闭**并显示提示，焦点回到输入框 |
-
 ★ 有初始值时它会被**全选** —— 直接打字就能覆盖。
 ★ 输入框存在时**焦点落在输入框上**（不用先按 Tab）。
+★ 表单设了 `novalidate` —— `input type="email"` 这类原生校验**不会**拦截提交，
+统一走 `onSubmit` / `validate` 钩子。
 
 ### 轻提示（tips）
 
@@ -184,69 +236,37 @@ p.close();
 ★ **progress 跟 loading 共用一个遮罩槽** —— 后开的会换掉先开的（不叠加）。
 ★ 进度期间 **Esc / 点遮罩都不会关掉它** —— 只能用 `close()` 关。
 
-## 完整用法
-
-```js
-const dlg = new Dialog({
-  title: '修改名字',
-  message: '这个名字会显示给同房间的人。',
-  okText: '确定',
-  cancelText: '取消',
-  danger: false,      // true → 主按钮变红，且默认焦点在「取消」
-  okValue: 'ok',      // 确定时 resolve 的值
-});
-
-const result = await dlg.open();   // 确定 → 'ok'，取消 → null
-```
-
-`open()` 返回 Promise：点「确定」resolve `okValue`，点「取消」/Esc/遮罩 resolve `null`。
-
-## 选项
-
-| 选项 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `title` | string | `''` | 标题（`textContent`，不解析 HTML） |
-| `message` | string | `''` | 正文（`textContent`） |
-| `content` | Node \| string | `null` | 自定义正文，**优先于** `message`。字符串会被当 HTML 解析 —— 只放可信内容 |
-| `okText` | string | `'确定'` | 主按钮文字 |
-| `cancelText` | string | `'取消'` | 取消按钮文字 |
-| `danger` | boolean | `false` | 危险操作：主按钮变红，**默认焦点在「取消」上** |
-| `hideCancel` | boolean | `false` | 隐藏取消按钮（只剩一个按钮时用） |
-| `okValue` | any | `'ok'` | 确定时 resolve 的值 |
-| `input` | boolean \| Object | `false` | 输入框。`true` 或 `{type,value,placeholder,multiline}`。有输入框时确定时 resolve 的是**输入框的值**（不是 `okValue`） |
-| `maskClass` | string | `''` | 追加到 `<dialog>` 元素上的 class。遮罩由原生 `::backdrop` 提供，**没有独立的遮罩层** |
-| `onOk` | Function | `null` | 确定前的钩子，**返回 `false` 则不关闭** |
-| `onCancel` | Function | `null` | 取消时的钩子 |
-
 ## 行为
 
 | 操作 | 结果 | 谁实现 |
 |---|---|---|
-| 点「确定」 | resolve(`okValue`) | 浏览器（`form method=dialog`） |
-| 点「取消」 | resolve(`null`) | 浏览器 |
-| Esc | resolve(`null`) | 自己拦（只关最上面那个） |
-| 点遮罩空白处 | resolve(`null`) | 自己判（`e.target === dialog`） |
-| 回车 | 等同「确定」（焦点在输入框里时 = 提交输入框） | 浏览器触发第一个 submit 按钮 |
+| 点「确定」 | resolve(按钮的 value) | 浏览器（`form method=dialog`） |
+| 点「取消」 | resolve(按钮的 value) | 浏览器 |
+| Esc | resolve(`''`) | 自己拦（只关最上面那个） |
+| 点遮罩空白处 | resolve(`''`) | 自己判（点击坐标是否落在 dialog 矩形外） |
+| 回车 | 触发 `submitIndex` 指定的按钮（默认第一个） | 自己拦（焦点不在按钮/输入框上时） |
+| 回车（焦点在输入框里） | 单行 = 提交；多行 = 换行（Ctrl/Cmd+Enter 才提交） | 自己拦 |
 | Tab / Shift+Tab | 焦点锁在弹窗内循环 | 浏览器 |
 | 关闭后焦点 | 自动回到打开前的元素 | 浏览器 |
+| 模态期间底层页面 | inert —— 不可点击、不可聚焦 | 浏览器 |
 
-★ **输入框里回车 = 提交**；多行（textarea）里普通回车是换行，**Ctrl/Cmd+Enter** 才提交。
-★ **焦点在输入框上**（有输入框时）—— 打开就能直接打字。
-★ **有初始值时全选** —— 直接打字就能覆盖。
-
-★ **危险操作的默认焦点在「取消」上** —— 打开时回车不会误触发危险动作。
-（这是 monaco 工具踩过的坑：clear 弹窗打开时若焦点在「确定」上，回车会直接清空。）
-
+★ **点 dialog 的 padding / 滚动条不会误关** —— 用点击坐标是否落在
+dialog 矩形外来判断，不是简单看 `e.target`。
 ★ **回车在按钮上时不重复触发** —— 焦点在 `<button>` 上时交还给浏览器处理，
 否则会触发两次（按钮的 click + 键盘处理）。
-
+★ **危险操作的默认焦点在「取消」上** —— 打开时回车不会误触发危险动作。
 ★ **焦点会还给打开前的位置** —— 关闭后回到之前聚焦的元素。
-
 ★ **可以叠层** —— 只有最上面那个弹窗响应 Esc 和遮罩点击。
 
 > 原生行为是「一次 Esc 把所有叠着的 `dialog` 全关掉」，
 > 所以这里自己拦了一层 `keydown` + `preventDefault`，只关最上面那个。
 > （用 `keydown` 而不是 `cancel` 事件 —— 实测 `cancel` 不可取消，`cancelable=false`。）
+
+## 无障碍
+
+- 标题挂唯一 `id`，`<dialog>` 上设 `aria-labelledby` 指向它
+- 进度框是 `role="progressbar"`，带 `aria-valuemin` / `aria-valuemax` / `aria-valuenow`
+- 轻提示容器和加载框是 `role="status"`（屏幕阅读器会播报）
 
 ## 样式
 
@@ -255,27 +275,28 @@ const result = await dlg.open();   // 确定 → 'ok'，取消 → null
 ```
 dialog.dlg     弹窗本体（就是 <dialog> 元素本身）
 dialog.dlg::backdrop   遮罩（原生提供，不用自己造遮罩 div）
+dialog.dlg.dlg-narrow  窄版弹窗（280px，纯确认类用）
 .dlg-form      内部 <form method="dialog">
 .dlg-title     标题
 .dlg-msg       正文
-.dlg-input      输入框（prompt 用）
-.dlg-err        校验错误提示
-.dlg-tips      轻提示容器（底部居中，多条竖着叠）
-.dlg-tip       单条轻提示
-.dlg-overlay-mask  遮罩层（全屏，盖住交互）—— loading / progress 共用
-.dlg-loading   加载框（转圈 + 文字）
-.dlg-spinner   转圈
-.dlg-progress  进度框
-.dlg-progress-bar / -bar-fill   横向进度条 / 填充
-.dlg-progress-circle            环形（SVG）
-.dlg-progress-dots / -dot       三点跳动 / 单个点
-.dlg-progress-steps / -step     分段步骤条 / 单段
-.dlg-progress-msg / -pct        标题 / 百分比
+.dlg-input     输入框（prompt 用）
+.dlg-err       校验错误提示
 .dlg-actions   按钮行（右对齐）
 .dlg-btn       按钮
 .dlg-btn.primary  主按钮（强调色）
 .dlg-btn.danger   危险按钮（红色）
-.dlg-narrow    窄版弹窗（280px，纯确认类用）
+.dlg-tips      轻提示容器（底部居中，多条竖着叠）
+.dlg-tip       单条轻提示
+.dlg-tip.success / .dlg-tip.error  绿 / 红边框
+.dlg-overlay-mask  遮罩层（全屏，盖住交互）—— loading / progress 共用
+.dlg-loading   加载框（转圈 + 文字）
+.dlg-spinner   转圈
+.dlg-progress  进度框
+.dlg-progress-bar / -bar-fill    横向进度条 / 填充
+.dlg-progress-circle             环形（SVG）
+.dlg-progress-dots / -dot        三点跳动 / 单个点
+.dlg-progress-steps / -step      分段步骤条 / 单段
+.dlg-progress-msg / -pct         标题 / 百分比
 ```
 
 颜色全部走 CSS 变量，**带回退值**：
@@ -298,6 +319,7 @@ dialog.dlg::backdrop   遮罩（原生提供，不用自己造遮罩 div）
 - 弹窗本身没有动画（保持简单，避免 transition 引起的时序问题）—— **只有轻提示有淡入淡出**
 - 输入框只有单行/多行两种形态 —— 复杂的表单用 `content` 传自定义 DOM
 - 不做焦点以外的 trap（背景内容仍可被程序滚动）
+- `Dialog.create` 里 `value: ''` 的按钮和 Esc 关闭**都 resolve `''`** —— 分不清就用非空 value
 
 ## 参见
 
